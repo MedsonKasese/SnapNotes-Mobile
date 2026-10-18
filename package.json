@@ -21,7 +21,8 @@
     "ios": "expo start --ios",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "check": "npm run typecheck && npm run lint"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "private": true,
   "engines": {
