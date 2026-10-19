@@ -42,7 +42,7 @@ function noteKey(generation: string, index: number): string {
 type AsyncKeyValueBackend = {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
-  getAllKeys(): Promise<string[]>;
+  getAllKeys(): Promise<readonly string[]>;
   multiRemove(keys: string[]): Promise<void>;
 };
 
@@ -178,7 +178,7 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
       }
       return validateNotes(payload.notes);
     },
-    save(notes: Note[]): Promise<void> {
+    async save(notes: Note[]): Promise<void> {
       const validated = validateNotes(notes);
       const operation = writeQueue.then(async () => {
         const generation = Date.now().toString(36) + '-' +

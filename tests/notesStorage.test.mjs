@@ -151,3 +151,15 @@ test('a failed save does not block a later successful retry', async () => {
   assert.deepEqual(await store.load(), [note('recovered')]);
   assert.equal([...db.data.keys()].filter(key => key.startsWith('@snapnotes-mobile/note/')).length, 1);
 });
+
+test('invalid saves return rejected promises without blocking a valid retry', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  let pending;
+  assert.doesNotThrow(() => { pending = store.save([note('duplicate'), note('duplicate')]); });
+  assert.ok(pending instanceof Promise);
+  await assert.rejects(pending, /duplicate/);
+  assert.equal(db.data.size, 0);
+  await store.save([note('valid')]);
+  assert.deepEqual(await store.load(), [note('valid')]);
+});
