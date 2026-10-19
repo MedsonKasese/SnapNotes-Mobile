@@ -16,6 +16,8 @@ function backend() {
       if (new TextEncoder().encode(value).length > 1024 * 1024) throw Error('oversized entry');
       data.set(key, value);
     },
+    async getAllKeys() { return [...data.keys()]; },
+    async multiRemove(keys) { for (const key of keys) data.delete(key); },
   };
 }
 
@@ -53,10 +55,15 @@ test('interrupted record writes do not switch committed index', async () => {
   const store = createNotesStorage(db);
   await store.save([note('safe')]);
   const originalIndex = db.data.get('@snapnotes-mobile/notes-index');
-  const rejecting = { getItem: db.getItem, async setItem(key, value) {
-    if (key.includes('/note/')) throw Error('disk full');
-    await db.setItem(key, value);
-  } };
+  const rejecting = {
+    getItem: db.getItem,
+    setItem: async (key, value) => {
+      if (key.includes('/note/')) throw Error('disk full');
+      await db.setItem(key, value);
+    },
+    getAllKeys: db.getAllKeys,
+    multiRemove: db.multiRemove,
+  };
   await assert.rejects(createNotesStorage(rejecting).save([note('changed')]), /disk full/);
   assert.equal(db.data.get('@snapnotes-mobile/notes-index'), originalIndex);
   assert.deepEqual(await store.load(), [note('safe')]);
@@ -92,4 +99,55 @@ test('rejects corrupt legacy without changing it', async () => {
   db.data.set(NOTES_STORAGE_KEY, '{broken');
   await assert.rejects(createNotesStorage(db).load(), /malformed JSON/);
   assert.equal(db.data.get(NOTES_STORAGE_KEY), '{broken');
+});
+
+
+test('repeated saves retain only the active generation instead of growing storage forever', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  await store.save([note('one')]);
+  await store.save([note('one', 'edited')]);
+  await store.save([note('one', 'edited again')]);
+  assert.deepEqual(await store.load(), [note('one', 'edited again')]);
+  const noteKeys = [...db.data.keys()].filter(key => key.startsWith('@snapnotes-mobile/note/'));
+  assert.equal(noteKeys.length, 1);
+  assert.equal(db.data.size, 2); // one active note record and the committed index
+});
+
+test('startup cleanup removes orphan generations but preserves the active generation and legacy snapshot', async () => {
+  const db = backend();
+  const legacy = JSON.stringify({ version: 1, notes: [note('legacy')] });
+  db.data.set(NOTES_STORAGE_KEY, legacy);
+  const store = createNotesStorage(db);
+  await store.save([note('active')]);
+  const index = JSON.parse(db.data.get('@snapnotes-mobile/notes-index'));
+  db.data.set('@snapnotes-mobile/note/orphan-generation/0', JSON.stringify(note('orphan')));
+  assert.deepEqual(await store.load(), [note('active')]);
+  assert.equal(db.data.has('@snapnotes-mobile/note/orphan-generation/0'), false);
+  assert.equal(db.data.has('@snapnotes-mobile/note/' + index.generation + '/0'), true);
+  assert.equal(db.data.get(NOTES_STORAGE_KEY), legacy);
+});
+
+test('cleanup failure does not report a committed save as failed', async () => {
+  const db = backend();
+  const store = createNotesStorage({
+    getItem: db.getItem,
+    setItem: db.setItem,
+    getAllKeys: async () => { throw Error('cleanup unavailable'); },
+    multiRemove: db.multiRemove,
+  });
+  await assert.doesNotReject(store.save([note('committed')]));
+  assert.deepEqual(await store.load(), [note('committed')]);
+});
+
+test('a failed save does not block a later successful retry', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  await store.save([note('safe')]);
+  db.setFail('@snapnotes-mobile/notes-index');
+  await assert.rejects(store.save([note('failed')]), /simulated/);
+  db.setFail(null);
+  await store.save([note('recovered')]);
+  assert.deepEqual(await store.load(), [note('recovered')]);
+  assert.equal([...db.data.keys()].filter(key => key.startsWith('@snapnotes-mobile/note/')).length, 1);
 });
