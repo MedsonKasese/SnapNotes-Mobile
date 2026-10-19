@@ -46,7 +46,7 @@ There is no supported web command in this slice. CI runs typechecking, linting, 
 
 ## How local persistence works
 
-The SDK-compatible `@react-native-async-storage/async-storage` backend stores a single JSON document under `@snapnotes-mobile/notes`, with `{ version: 1, notes: [...] }`. The storage boundary validates the complete collection, unique IDs, supported category, timestamps and existing note limits. An absent key is an empty first launch; malformed or unsupported data is an error, not an empty list. No automatic migration or destructive repair is attempted.
+The SDK-compatible `@react-native-async-storage/async-storage` backend stores each note in a bounded record under `@snapnotes-mobile/note/<generation>/<position>`, with an ordered version-2 index at `@snapnotes-mobile/notes-index`. A save writes a complete new generation before atomically switching the index pointer; incomplete writes leave the last committed generation readable. The version-1 `@snapnotes-mobile/notes` snapshot from PR #3 remains readable when no version-2 index exists and is preserved after migration. The storage boundary validates the complete collection, unique IDs, supported category, timestamps and existing note limits. An absent key is an empty first launch; malformed or unsupported data is an error, not an empty list.
 
 The editor loads before accepting changes. Save writes the full validated collection and only then updates the saved list, clears the draft and announces success. A failed write retains the draft for retry and does not claim that it was saved. Writes are serialized by disabling/rejecting actions while a save is pending. Note IDs are checked against the loaded collection, so restarting cannot reset a session counter into an existing note. There are no background, unmount or startup writes, and no network operations.
 
@@ -87,10 +87,16 @@ The SDK 58 dependency tree currently reports **22 npm audit findings (15 high, 7
 
 The behavior reference is the PWA at [commit 74c3044](https://github.com/MedsonKasese/SnapNotes/tree/74c3044820b4cace801a4824e8c0a301e630917b): `js/app.js` (`saveEditorNote`) and `js/notes.js` (inline edit validation/update). Mobile uses separate plain-text fields rather than the PWA rich-text composer. Native interaction checks above require a device/emulator; model tests and JavaScript bundling alone do not verify them.
 
-## PR #4: scalable on-device note storage (under review)
+## PR #4: scalable on-device note storage (merged)
 
 This extends [PR #3](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/3) and follows the PWA's local-first, complete-snapshot-before-acknowledgement behavior in `js/storage.js` and the failure-aware read/write boundary in `js/local-library.js`. It does **not** change the PWA.
 
 New saves store notes in separate bounded AsyncStorage entries and commit a small ordered index only after all note writes succeed. A partial write never replaces the last committed index. The old PR #3 `@snapnotes-mobile/notes` snapshot remains readable until the next successful save and is not deleted. On index corruption, the app shows a load error rather than silently replacing saved notes. No cloud sync or encryption is added.
 
-**Review limitations:** Old generations are intentionally retained as recovery copies. Repeated saves will increase total storage usage until a separate safe garbage-collection policy is designed and tested. This PR must not be considered production-ready for indefinite use without that follow-up. Physical Android restart, low-storage, and migration testing remain necessary. This is not an import from the PWA.
+**Follow-up in PR #5:** after the version-2 index commits, obsolete note generations are removed on a best-effort basis. Startup also removes orphan generations only after successfully validating the active generation. Cleanup errors do not turn an already committed save into a reported failure, and the legacy version-1 snapshot is retained. Physical Android restart, low-storage, and migration testing remain necessary. This is not an import from the PWA.
+
+## PR #5: storage reliability (under review)
+
+This follow-up serializes save commits, retries cleanly after failed writes, removes obsolete generations only after the new index is committed, and performs best-effort orphan cleanup after a successful load. UTF-8 entry-size checks no longer depend on the global `TextEncoder` API. Cleanup failures are deliberately non-fatal because the active index may already have committed successfully.
+
+The regression suite covers repeated-save storage growth, orphan cleanup, legacy snapshot preservation, cleanup failures, and successful retry after a failed save. Run `npm run check` and test save/edit/restart behavior on a physical Android device before merging. CI and model tests are not a substitute for device durability checks.
