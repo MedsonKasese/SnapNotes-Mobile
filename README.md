@@ -86,3 +86,11 @@ The SDK 58 dependency tree currently reports **22 npm audit findings (15 high, 7
 10. With malformed or newer-version data in the development storage key, restart: show a load error, retain the original bytes, and block editing/saving rather than silently resetting. There is intentionally no destructive reset/recovery button in this slice.
 
 The behavior reference is the PWA at [commit 74c3044](https://github.com/MedsonKasese/SnapNotes/tree/74c3044820b4cace801a4824e8c0a301e630917b): `js/app.js` (`saveEditorNote`) and `js/notes.js` (inline edit validation/update). Mobile uses separate plain-text fields rather than the PWA rich-text composer. Native interaction checks above require a device/emulator; model tests and JavaScript bundling alone do not verify them.
+
+## PR #4: scalable on-device note storage (under review)
+
+This extends [PR #3](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/3) and follows the PWA's local-first, complete-snapshot-before-acknowledgement behavior in `js/storage.js` and the failure-aware read/write boundary in `js/local-library.js`. It does **not** change the PWA.
+
+New saves store notes in separate bounded AsyncStorage entries and commit a small ordered index only after all note writes succeed. A partial write never replaces the last committed index. The old PR #3 `@snapnotes-mobile/notes` snapshot remains readable until the next successful save and is not deleted. On index corruption, the app shows a load error rather than silently replacing saved notes. No cloud sync or encryption is added.
+
+**Review limitations:** Old generations are intentionally retained as recovery copies. Repeated saves will increase total storage usage until a separate safe garbage-collection policy is designed and tested. This PR must not be considered production-ready for indefinite use without that follow-up. Physical Android restart, low-storage, and migration testing remain necessary. This is not an import from the PWA.
