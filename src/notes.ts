@@ -79,7 +79,7 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
       }
       return {
         ...initialNotesState(), notes,
-        notice: state.editingId === null ? 'Note created for this session.' : 'Note updated for this session.',
+        notice: state.editingId === null ? 'Note created.' : 'Note updated.',
       };
     }
   }
