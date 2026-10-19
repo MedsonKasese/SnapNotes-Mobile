@@ -46,6 +46,17 @@ type AsyncKeyValueBackend = {
   multiRemove(keys: string[]): Promise<void>;
 };
 
+// Reads also clean up records, so they must share the commit queue. Sharing by
+// backend protects multiple storage/controller instances in the same runtime.
+const operationQueues = new WeakMap<AsyncKeyValueBackend, Promise<void>>();
+
+function enqueue<T>(backend: AsyncKeyValueBackend, operation: () => Promise<T>): Promise<T> {
+  const pending = (operationQueues.get(backend) ?? Promise.resolve()).then(operation);
+  // Neither a failed read nor a failed save may poison later operations.
+  operationQueues.set(backend, pending.then(() => undefined, () => undefined));
+  return pending;
+}
+
 type NoteDraft = Pick<Note, 'title' | 'text'>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,9 +140,6 @@ function validateNotes(value: unknown): Note[] {
 }
 
 export function createNotesStorage(backend: AsyncKeyValueBackend) {
-  // Serialize commits so concurrent callers cannot commit out of order.
-  let writeQueue: Promise<void> = Promise.resolve();
-
   async function cleanupExcept(activeGeneration: string | null): Promise<void> {
     try {
       const activePrefix = activeGeneration === null ? null : NOTE_PREFIX + activeGeneration + '/';
@@ -146,41 +154,48 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
   }
 
   return {
-    async load(): Promise<Note[]> {
-      const rawIndex = await backend.getItem(INDEX_KEY);
-      if (rawIndex !== null) {
-        const index = parseObject(rawIndex);
-        if (index.version !== 2 || typeof index.generation !== 'string' ||
-          !/^[a-z0-9-]+$/.test(index.generation) || !Array.isArray(index.ids) ||
-          index.ids.some(id => typeof id !== 'string')) {
-          throw new Error('Unsupported or corrupt notes index.');
+    load(): Promise<Note[]> {
+      return enqueue(backend, async () => {
+        const rawIndex = await backend.getItem(INDEX_KEY);
+        if (rawIndex !== null) {
+          const index = parseObject(rawIndex);
+          if (index.version !== 2 || typeof index.generation !== 'string' ||
+            !/^[a-z0-9-]+$/.test(index.generation) || !Array.isArray(index.ids) ||
+            index.ids.some(id => typeof id !== 'string')) {
+            throw new Error('Unsupported or corrupt notes index.');
+          }
+          const records: unknown[] = [];
+          for (let i = 0; i < index.ids.length; i++) {
+            const raw = await backend.getItem(noteKey(index.generation, i));
+            if (raw === null) throw new Error('A saved note is missing.');
+            const record = parseObject(raw);
+            if (record.id !== index.ids[i]) throw new Error('Saved note ID mismatch.');
+            records.push(record);
+          }
+          const notes = validateNotes(records);
+          await cleanupExcept(index.generation);
+          return notes;
         }
-        const records: unknown[] = [];
-        for (let i = 0; i < index.ids.length; i++) {
-          const raw = await backend.getItem(noteKey(index.generation, i));
-          if (raw === null) throw new Error('A saved note is missing.');
-          const record = parseObject(raw);
-          if (record.id !== index.ids[i]) throw new Error('Saved note ID mismatch.');
-          records.push(record);
+        // Legacy PR #3 snapshot is retained and never overwritten during migration.
+        const legacy = await backend.getItem(NOTES_STORAGE_KEY);
+        if (legacy === null) {
+          await cleanupExcept(null);
+          return [];
         }
-        const notes = validateNotes(records);
-        await cleanupExcept(index.generation);
+        let payload: unknown;
+        try { payload = JSON.parse(legacy); }
+        catch { throw new Error('Invalid notes payload: malformed JSON.'); }
+        if (!isRecord(payload) || payload.version !== STORAGE_VERSION) {
+          throw new Error('Unsupported or invalid notes payload version; expected 1.');
+        }
+        const notes = validateNotes(payload.notes);
+        await cleanupExcept(null);
         return notes;
-      }
-      // Legacy PR #3 snapshot is retained and never overwritten during migration.
-      const legacy = await backend.getItem(NOTES_STORAGE_KEY);
-      if (legacy === null) return [];
-      let payload: unknown;
-      try { payload = JSON.parse(legacy); }
-      catch { throw new Error('Invalid notes payload: malformed JSON.'); }
-      if (!isRecord(payload) || payload.version !== STORAGE_VERSION) {
-        throw new Error('Unsupported or invalid notes payload version; expected 1.');
-      }
-      return validateNotes(payload.notes);
+      });
     },
     async save(notes: Note[]): Promise<void> {
       const validated = validateNotes(notes);
-      const operation = writeQueue.then(async () => {
+      return enqueue(backend, async () => {
         const generation = Date.now().toString(36) + '-' +
           (++generationCounter).toString(36) + '-' + Math.random().toString(36).slice(2, 12);
         const index = bounded(JSON.stringify({
@@ -197,9 +212,6 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
         // The index is now committed. Only now is it safe to remove older generations.
         await cleanupExcept(generation);
       });
-      // A failed save must not block subsequent retries.
-      writeQueue = operation.catch(() => undefined);
-      return operation;
     },
   };
 }
