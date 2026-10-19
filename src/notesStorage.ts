@@ -8,8 +8,23 @@ const NOTE_PREFIX = '@snapnotes-mobile/note/';
 const MAX_ENTRY_BYTES = 1024 * 1024;
 let generationCounter = 0;
 
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length &&
+      value.charCodeAt(i + 1) >= 0xdc00 && value.charCodeAt(i + 1) <= 0xdfff) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
 function bounded(value: string, label: string): string {
-  if (new TextEncoder().encode(value).length > MAX_ENTRY_BYTES) {
+  if (utf8ByteLength(value) > MAX_ENTRY_BYTES) {
     throw new Error(label + ' exceeds the supported storage entry size.');
   }
   return value;
@@ -27,6 +42,8 @@ function noteKey(generation: string, index: number): string {
 type AsyncKeyValueBackend = {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
+  getAllKeys(): Promise<string[]>;
+  multiRemove(keys: string[]): Promise<void>;
 };
 
 type NoteDraft = Pick<Note, 'title' | 'text'>;
@@ -112,6 +129,22 @@ function validateNotes(value: unknown): Note[] {
 }
 
 export function createNotesStorage(backend: AsyncKeyValueBackend) {
+  // Serialize commits so concurrent callers cannot commit out of order.
+  let writeQueue: Promise<void> = Promise.resolve();
+
+  async function cleanupExcept(activeGeneration: string | null): Promise<void> {
+    try {
+      const activePrefix = activeGeneration === null ? null : NOTE_PREFIX + activeGeneration + '/';
+      const keys = await backend.getAllKeys();
+      const obsolete = keys.filter(key =>
+        key.startsWith(NOTE_PREFIX) && (activePrefix === null || !key.startsWith(activePrefix))
+      );
+      if (obsolete.length > 0) await backend.multiRemove(obsolete);
+    } catch {
+      // Cleanup is best-effort. Never turn a committed save into a reported failure.
+    }
+  }
+
   return {
     async load(): Promise<Note[]> {
       const rawIndex = await backend.getItem(INDEX_KEY);
@@ -130,7 +163,9 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
           if (record.id !== index.ids[i]) throw new Error('Saved note ID mismatch.');
           records.push(record);
         }
-        return validateNotes(records);
+        const notes = validateNotes(records);
+        await cleanupExcept(index.generation);
+        return notes;
       }
       // Legacy PR #3 snapshot is retained and never overwritten during migration.
       const legacy = await backend.getItem(NOTES_STORAGE_KEY);
@@ -143,20 +178,28 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
       }
       return validateNotes(payload.notes);
     },
-    async save(notes: Note[]): Promise<void> {
+    save(notes: Note[]): Promise<void> {
       const validated = validateNotes(notes);
-      const generation = Date.now().toString(36) + '-' +
-        (++generationCounter).toString(36) + '-' + Math.random().toString(36).slice(2, 12);
-      const index = bounded(JSON.stringify({
-        version: 2, generation, ids: validated.map(note => note.id),
-      }), 'Notes index');
-      // Write an immutable generation before switching the single committed pointer.
-      for (let i = 0; i < validated.length; i++) {
-        await backend.setItem(noteKey(generation, i),
-          bounded(JSON.stringify(validated[i]), 'Note'));
-      }
-      await backend.setItem(INDEX_KEY, index);
-      // Old generations are retained for recovery until safe GC is implemented.
+      const operation = writeQueue.then(async () => {
+        const generation = Date.now().toString(36) + '-' +
+          (++generationCounter).toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+        const index = bounded(JSON.stringify({
+          version: 2, generation, ids: validated.map(note => note.id),
+        }), 'Notes index');
+
+        // Write a complete immutable generation before switching the committed pointer.
+        for (let i = 0; i < validated.length; i++) {
+          await backend.setItem(noteKey(generation, i),
+            bounded(JSON.stringify(validated[i]), 'Note'));
+        }
+        await backend.setItem(INDEX_KEY, index);
+
+        // The index is now committed. Only now is it safe to remove older generations.
+        await cleanupExcept(generation);
+      });
+      // A failed save must not block subsequent retries.
+      writeQueue = operation.catch(() => undefined);
+      return operation;
     },
   };
 }
