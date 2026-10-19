@@ -1,27 +1,32 @@
-import { useReducer, useRef } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Alert, FlatList, Keyboard, KeyboardAvoidingView, Platform,
   Pressable, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import {
-  characterCount, hasUnsavedChanges, initialNotesState, MAX_NOTE_CHARACTERS, notesReducer,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS,
 } from '../notes';
 import type { Note } from '../notes';
+import { createNotesController } from '../notesController';
+import { deviceNotesStorage } from '../deviceNotesStorage';
 
-function Action({ label, onPress, secondary = false }: {
-  label: string; onPress: () => void; secondary?: boolean;
+function Action({ label, onPress, secondary = false, disabled = false }: {
+  label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
 }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress}
-      style={({ pressed }) => [styles.button, secondary && styles.secondaryButton, pressed && styles.pressed]}>
+    <Pressable accessibilityRole="button" onPress={onPress} disabled={disabled} accessibilityState={{ disabled }}
+      style={({ pressed }) => [styles.button, secondary && styles.secondaryButton, (pressed || disabled) && styles.pressed]}>
       <Text style={[styles.buttonText, secondary && styles.secondaryText]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function NotesWorkspace() {
-  const [state, dispatch] = useReducer(notesReducer, undefined, initialNotesState);
-  const sequence = useRef(0);
+  const [controller] = useState(() => createNotesController(deviceNotesStorage));
+  const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const dispatch = controller.dispatch;
+  const saving = status === 'saving';
+  useEffect(() => { void controller.load(); }, [controller]);
   const list = useRef<FlatList<Note>>(null);
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
@@ -31,7 +36,7 @@ export function NotesWorkspace() {
       continueAction();
       return;
     }
-    Alert.alert('Discard unsaved changes?', 'Your saved session notes will not be changed.', [
+    Alert.alert('Discard unsaved changes?', 'Your saved notes will not be changed.', [
       { text: 'Keep editing', style: 'cancel' },
       { text: 'Discard changes', style: 'destructive', onPress: continueAction },
     ], { cancelable: true });
@@ -57,9 +62,21 @@ export function NotesWorkspace() {
   }
 
   function saveNote() {
-    // A monotonic session counter avoids same-millisecond collisions, even after clock changes.
-    sequence.current += 1;
-    dispatch({ type: 'save', id: `session-note-${sequence.current}`, now: new Date().toISOString() });
+    void controller.save(new Date().toISOString());
+  }
+
+  if (status === 'loading' || status === 'load-error') {
+    return (
+      <View style={styles.content}>
+        <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
+        {status === 'loading'
+          ? <Text accessibilityLiveRegion="polite" style={styles.hint}>Loading notes from this device…</Text>
+          : <>
+              <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>
+              <Action label="Retry loading notes" onPress={() => { void controller.load(); }} />
+            </>}
+      </View>
+    );
   }
 
   return (
@@ -76,7 +93,7 @@ export function NotesWorkspace() {
             <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
             <Text style={styles.tagline}>Save Your Mind.</Text>
             <View style={styles.warning}>
-              <Text style={styles.warningText}>Session only — notes are kept in memory and disappear when the app restarts or reloads. Nothing syncs to the PWA.</Text>
+              <Text style={styles.warningText}>Saved on this device only — saved notes survive reloads and restarts. Unsaved drafts do not. Storage is not encrypted; clearing app data or uninstalling can remove notes. No cloud backup or PWA sync.</Text>
             </View>
             <View style={styles.editor}>
               <Text accessibilityRole="header" style={styles.heading}>
@@ -84,6 +101,7 @@ export function NotesWorkspace() {
               </Text>
               <Text style={styles.label}>Title (optional)</Text>
               <TextInput
+                editable={!saving}
                 accessibilityLabel="Note title (optional)"
                 value={state.draft.title}
                 onChangeText={value => dispatch({ type: 'change', field: 'title', value })}
@@ -93,6 +111,7 @@ export function NotesWorkspace() {
               />
               <Text style={styles.label}>Note</Text>
               <TextInput
+                editable={!saving}
                 accessibilityLabel="Note body"
                 value={state.draft.text}
                 onChangeText={value => dispatch({ type: 'change', field: 'text', value })}
@@ -106,15 +125,17 @@ export function NotesWorkspace() {
                 {count}/{MAX_NOTE_CHARACTERS} characters
               </Text>
               <Text style={styles.hint}>Title counts include the PWA’s “## ” marker and a line break. Plain text only for now.</Text>
+              {storageError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{storageError}</Text>}
+              {saving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving on this device…</Text>}
               {state.error !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{state.error}</Text>}
               {state.notice !== null && <Text accessibilityLiveRegion="polite" style={styles.notice}>{state.notice}</Text>}
               <View style={styles.actions}>
-                <Action label={state.editingId === null ? 'Save note' : 'Save changes'} onPress={saveNote} />
-                {(state.editingId !== null || dirty) && <Action label="Cancel" onPress={resetEditor} secondary />}
-                {state.editingId !== null && <Action label="New note" onPress={resetEditor} secondary />}
+                <Action disabled={saving} label={saving ? 'Saving…' : state.editingId === null ? 'Save note' : 'Save changes'} onPress={saveNote} />
+                {(state.editingId !== null || dirty) && <Action disabled={saving} label="Cancel" onPress={resetEditor} secondary />}
+                {state.editingId !== null && <Action disabled={saving} label="New note" onPress={resetEditor} secondary />}
               </View>
             </View>
-            <Text accessibilityRole="header" style={styles.heading}>Session notes ({state.notes.length})</Text>
+            <Text accessibilityRole="header" style={styles.heading}>Device notes ({state.notes.length})</Text>
           </View>
         }
         ListEmptyComponent={<Text style={styles.empty}>No notes yet. Write a title or a note above, then tap Save note.</Text>}
@@ -124,7 +145,7 @@ export function NotesWorkspace() {
             {item.text !== '' && <Text style={styles.noteText}>{item.text}</Text>}
             <Text style={styles.hint}>Created {new Date(item.createdAt).toLocaleString()}</Text>
             {item.updatedAt !== item.createdAt && <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>}
-            <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
+            <Pressable disabled={saving} accessibilityState={{ disabled: saving }} accessibilityRole="button" accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
               onPress={() => editNote(item.id)} style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}>
               <Text style={styles.secondaryText}>{state.editingId === item.id ? 'Editing this note' : 'Edit note'}</Text>
             </Pressable>

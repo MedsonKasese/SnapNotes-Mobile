@@ -4,14 +4,14 @@ A private, standalone React Native app built with Expo SDK 58 and TypeScript. Th
 
 ## Current scope
 
-You can create and edit plain-text notes **for the current app session**. Notes live only in memory: **restarting, reloading, or closing the app can lose all notes and drafts**. The screen shows this warning. This is a development slice, not a safe place for important notes or a replacement for the PWA.
+You can create and edit plain-text notes saved **on this device**. After Save succeeds, notes survive app reloads and restarts. Unsaved drafts are not restored. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
 
 - Optional title and body; at least one must contain non-whitespace text. Body-only notes display as “Untitled note” without storing that fallback.
 - The 1,500-character budget follows the PWA inline editor: normalized title + body, including `## ` and a line break when a title is present. The live counter and save validator use the same rule. Title/body are explicit native fields; Markdown heading parsing and rich text are not included.
-- Saving creates a new note at the top of the session list. Editing updates that note without changing its ID, creation time, or default `general` category; update time changes on save.
-- Draft changes do not touch a saved note until Save changes is tapped. Cancel, New note, and switching to another note ask before discarding a changed draft. There is no restart/exit recovery in this slice.
+- Saving creates a new note at the top of the device list. Editing updates that note without changing its ID, creation time, or default `general` category; update time changes on save.
+- Draft changes do not touch a saved note until Save changes is tapped. Cancel, New note, and switching to another note ask before discarding a changed draft. Only explicitly saved notes are recovered after restart; draft changes are not persisted.
 
-There is no disk storage, account/auth, cloud sync, migration, categories UI, deletion, or notifications. The PWA repository and its users/data are untouched.
+There is no account/auth, cloud sync, migration/import from the PWA, categories UI, deletion, or notifications. The PWA repository and its users/data are untouched.
 
 No secrets or production-data connections are needed. Deployment and over-the-air update setup are out of scope.
 
@@ -39,16 +39,34 @@ Available npm scripts:
 - `npm run ios` — start and open iOS
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run lint` — `eslint .`
-- `npm test` — run deterministic in-memory note regression tests (Node type stripping)
+- `npm test` — run note model, storage contract, and persistence lifecycle regression tests (Node type stripping)
 - `npm run check` — run typecheck, lint, and regression tests
 
-There is no supported web command in this slice. CI runs typechecking, linting, model regression tests, Expo dependency validation, and Android/iOS JavaScript export checks. Exports validate bundling; they are not signed native builds or device tests.
+There is no supported web command in this slice. CI runs typechecking, linting, note and persistence regression tests, Expo dependency validation, and Android/iOS JavaScript export checks. Exports validate bundling; they are not signed native builds or device tests.
+
+## How local persistence works
+
+The SDK-compatible `@react-native-async-storage/async-storage` backend stores a single JSON document under `@snapnotes-mobile/notes`, with `{ version: 1, notes: [...] }`. The storage boundary validates the complete collection, unique IDs, supported category, timestamps and existing note limits. An absent key is an empty first launch; malformed or unsupported data is an error, not an empty list. No automatic migration or destructive repair is attempted.
+
+The editor loads before accepting changes. Save writes the full validated collection and only then updates the saved list, clears the draft and announces success. A failed write retains the draft for retry and does not claim that it was saved. Writes are serialized by disabling/rejecting actions while a save is pending. Note IDs are checked against the loaded collection, so restarting cannot reset a session counter into an existing note. There are no background, unmount or startup writes, and no network operations.
+
+Storage and controller tests use an injected asynchronous backend, including fresh controller instances over the same stored bytes to model restarts, delayed hydration/writes, failures, invalid data and duplicate-save protection. These are not physical-device durability tests; abrupt termination before Save succeeds may lose the pending operation. AsyncStorage is not encryption or a backup service. See the [Expo SDK 58 AsyncStorage reference](https://docs.expo.dev/versions/v58.0.0/sdk/async-storage/).
 
 ## PWA as our roadmap
 
 The [existing SnapNotes PWA](https://github.com/MedsonKasese/SnapNotes) is our reference for what to build next and how features should behave. It remains a separate, working product throughout mobile development. Refer to its current code and documentation when choosing each slice; do not assume mobile has feature parity or copy browser-only code directly into React Native.
 
-Build incrementally, one reviewed pull request at a time. This PR adds **session-only note creation and editing**; next is **local persistence**, and later **auth and sync**, checking each slice against the PWA. Search, folders/tags, reminders, private notes, attachments, and Ask My Notes remain future slices—not promises in this starter. Adapt interactions to native Android/iOS patterns while preserving the intended behavior and security boundaries. Do not connect production data or migrate users without a separately reviewed plan.
+Build incrementally, one reviewed pull request at a time. This slice adds **on-device persistence** to the existing create/edit flow; **auth and sync** remain separate future reviews, checking each slice against the PWA. Search, folders/tags, reminders, private notes, attachments, and Ask My Notes remain future slices—not promises in this starter. Adapt interactions to native Android/iOS patterns while preserving the intended behavior and security boundaries. Do not connect production data or migrate users without a separately reviewed plan.
+
+### Borrowed from the PWA, adapted to native
+
+The reference is PWA main at [74c3044](https://github.com/MedsonKasese/SnapNotes/tree/74c3044820b4cace801a4824e8c0a301e630917b), read without changing that repository:
+
+- [`js/storage.js`](https://github.com/MedsonKasese/SnapNotes/blob/74c3044820b4cace801a4824e8c0a301e630917b/js/storage.js): save a complete local library snapshot before any optional cloud work; restore saved notes on startup and prevent late restoration from replacing new edits. Mobile gates the editor until restoration finishes, so it needs no browser load-generation/revision guards.
+- [`js/local-library.js`](https://github.com/MedsonKasese/SnapNotes/blob/74c3044820b4cace801a4824e8c0a301e630917b/js/local-library.js): an injected storage boundary with asynchronous read/write completion. Mobile substitutes Expo-compatible AsyncStorage for browser IndexedDB/localStorage, with one versioned notes document; there is no browser fallback copy or account namespace yet.
+- [`js/app.js`](https://github.com/MedsonKasese/SnapNotes/blob/74c3044820b4cace801a4824e8c0a301e630917b/js/app.js) (`saveEditorNote`): validate the shared character budget, prepend new notes, retain creation/update metadata, and block repeat Save taps until the save finishes. Mobile deliberately keeps the draft when local storage fails rather than reporting success.
+
+This is behavior reuse, not browser-code copying or format compatibility. Existing mobile title/body fields and metadata remain unchanged. PWA draft recovery, rich text, folders, accounts and sync are not included in this saved-note persistence PR. Mobile IDs remain device-local and collision-checked; cross-device ID strategy belongs with a separately reviewed sync design.
 
 ## Known dependency advisories
 
@@ -56,12 +74,15 @@ The SDK 58 dependency tree currently reports **22 npm audit findings (15 high, 7
 
 ## Review this slice on a phone or emulator
 
-1. Start with an empty session list and confirm the session-only warning is visible.
+1. On a fresh install, wait for loading to finish. Confirm the empty device list and the local-only, unencrypted-storage warning.
 2. Save a body-only note; it should appear as “Untitled note”. Save a title-only note too. A whitespace-only note must show an error and leave the list unchanged.
 3. Enter 1,500 body characters with no title and save; 1,501 must be rejected without losing the draft. Add a title and verify the marker/newline budget shown by the counter.
 4. Edit a saved note. Before saving, its list card must still show the original. Save changes: the count stays the same, the ID/creation time remain, and the updated content appears.
 5. Change an edit, then Cancel or choose another note. Keep editing must preserve the draft; Discard changes must leave the saved original intact. New note while editing must start a blank composer after confirmation.
 6. Save multiple notes and edit an older one; other notes must stay unchanged. Check typing focus, keyboard scrolling, large system text, and screen-reader labels on Android and iOS.
-7. Reload/restart: the session list resets by design. Do not use important notes for this test.
+7. After a successful Save, reload the app, then fully close and reopen it. Saved notes, their order, IDs, content and timestamps must remain. Edit a restored note, save, and restart again; the edit must remain without duplication. Create a new note after restart and verify existing notes are not replaced.
+8. Type a new draft or change an existing note without saving, then restart. Only the last successfully saved collection should return; the draft must not.
+9. With a delayed/rejecting storage backend in a development harness, verify that startup hides the editor until loading succeeds. Read errors must show Retry and never write an empty collection. A failed Save must keep the draft and original saved list, show an error, and allow retry. While saving, fields/actions are disabled and rapid Save taps cannot overlap. These paths are covered deterministically by the controller tests; native presentation still needs device review.
+10. With malformed or newer-version data in the development storage key, restart: show a load error, retain the original bytes, and block editing/saving rather than silently resetting. There is intentionally no destructive reset/recovery button in this slice.
 
 The behavior reference is the PWA at [commit 74c3044](https://github.com/MedsonKasese/SnapNotes/tree/74c3044820b4cace801a4824e8c0a301e630917b): `js/app.js` (`saveEditorNote`) and `js/notes.js` (inline edit validation/update). Mobile uses separate plain-text fields rather than the PWA rich-text composer. Native interaction checks above require a device/emulator; model tests and JavaScript bundling alone do not verify them.

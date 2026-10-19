@@ -52,7 +52,7 @@ test('creates a body-only note with deterministic metadata', () => {
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   }]);
-  assert.equal(state.notice, 'Note created for this session.');
+  assert.equal(state.notice, 'Note created.');
   assert.equal(state.editingId, null);
 });
 
@@ -125,7 +125,7 @@ test('edits are invisible until save; save preserves identity metadata and leave
   assert.equal(first.title, 'First');
   assert.equal(first.text, 'Original body');
   assert.equal(state.notes[0], first);
-  assert.equal(updated.notice, 'Note updated for this session.');
+  assert.equal(updated.notice, 'Note updated.');
 });
 
 test('reset cancels an edit, clears the draft, and retains original notes unchanged', () => {
