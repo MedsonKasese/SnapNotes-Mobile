@@ -3,6 +3,26 @@ import { validateDraft as validateNoteDraft, type Note } from './notes.ts';
 export const NOTES_STORAGE_KEY = '@snapnotes-mobile/notes';
 
 const STORAGE_VERSION = 1;
+const INDEX_KEY = '@snapnotes-mobile/notes-index';
+const NOTE_PREFIX = '@snapnotes-mobile/note/';
+const MAX_ENTRY_BYTES = 1024 * 1024;
+let generationCounter = 0;
+
+function bounded(value: string, label: string): string {
+  if (new TextEncoder().encode(value).length > MAX_ENTRY_BYTES) {
+    throw new Error(label + ' exceeds the supported storage entry size.');
+  }
+  return value;
+}
+function parseObject(raw: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) throw new Error('Invalid stored record.');
+  return parsed;
+}
+function noteKey(generation: string, index: number): string {
+  return NOTE_PREFIX + generation + '/' + index;
+}
+
 
 type AsyncKeyValueBackend = {
   getItem(key: string): Promise<string | null>;
@@ -94,25 +114,49 @@ function validateNotes(value: unknown): Note[] {
 export function createNotesStorage(backend: AsyncKeyValueBackend) {
   return {
     async load(): Promise<Note[]> {
-      const stored = await backend.getItem(NOTES_STORAGE_KEY);
-      if (stored === null) return [];
-
-      let payload: unknown;
-      try {
-        payload = JSON.parse(stored);
-      } catch {
-        throw new Error('Invalid notes payload: malformed JSON.');
+      const rawIndex = await backend.getItem(INDEX_KEY);
+      if (rawIndex !== null) {
+        const index = parseObject(rawIndex);
+        if (index.version !== 2 || typeof index.generation !== 'string' ||
+          !/^[a-z0-9-]+$/.test(index.generation) || !Array.isArray(index.ids) ||
+          index.ids.some(id => typeof id !== 'string')) {
+          throw new Error('Unsupported or corrupt notes index.');
+        }
+        const records: unknown[] = [];
+        for (let i = 0; i < index.ids.length; i++) {
+          const raw = await backend.getItem(noteKey(index.generation, i));
+          if (raw === null) throw new Error('A saved note is missing.');
+          const record = parseObject(raw);
+          if (record.id !== index.ids[i]) throw new Error('Saved note ID mismatch.');
+          records.push(record);
+        }
+        return validateNotes(records);
       }
+      // Legacy PR #3 snapshot is retained and never overwritten during migration.
+      const legacy = await backend.getItem(NOTES_STORAGE_KEY);
+      if (legacy === null) return [];
+      let payload: unknown;
+      try { payload = JSON.parse(legacy); }
+      catch { throw new Error('Invalid notes payload: malformed JSON.'); }
       if (!isRecord(payload) || payload.version !== STORAGE_VERSION) {
-        throw new Error(`Unsupported or invalid notes payload version; expected ${STORAGE_VERSION}.`);
+        throw new Error('Unsupported or invalid notes payload version; expected 1.');
       }
       return validateNotes(payload.notes);
     },
-
     async save(notes: Note[]): Promise<void> {
-      const validatedNotes = validateNotes(notes);
-      const payload = JSON.stringify({ version: STORAGE_VERSION, notes: validatedNotes });
-      await backend.setItem(NOTES_STORAGE_KEY, payload);
+      const validated = validateNotes(notes);
+      const generation = Date.now().toString(36) + '-' +
+        (++generationCounter).toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+      const index = bounded(JSON.stringify({
+        version: 2, generation, ids: validated.map(note => note.id),
+      }), 'Notes index');
+      // Write an immutable generation before switching the single committed pointer.
+      for (let i = 0; i < validated.length; i++) {
+        await backend.setItem(noteKey(generation, i),
+          bounded(JSON.stringify(validated[i]), 'Note'));
+      }
+      await backend.setItem(INDEX_KEY, index);
+      // Old generations are retained for recovery until safe GC is implemented.
     },
   };
 }
