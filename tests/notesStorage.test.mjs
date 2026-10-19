@@ -2,114 +2,94 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NOTES_STORAGE_KEY, createNotesStorage } from '../src/notesStorage.ts';
 
-const CREATED_AT = '2025-01-02T03:04:05.000Z';
-const UPDATED_AT = '2025-02-03T04:05:06.000Z';
-
-function note(id, title, text, createdAt = CREATED_AT, updatedAt = createdAt) {
-  return { id, category: 'general', title, text, createdAt, updatedAt };
-}
-
-function memoryBackend(initial = null) {
-  let value = initial;
-  const writes = [];
+const date = '2026-10-19T18:00:00.000Z';
+const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date });
+function backend() {
+  const data = new Map();
+  let failKey = null;
   return {
-    writes,
-    get value() { return value; },
-    set value(nextValue) { value = nextValue; },
-    async getItem(key) {
-      assert.equal(key, NOTES_STORAGE_KEY);
-      return value;
-    },
-    async setItem(key, nextValue) {
-      assert.equal(key, NOTES_STORAGE_KEY);
-      writes.push(nextValue);
-      value = nextValue;
+    data,
+    setFail(key) { failKey = key; },
+    async getItem(key) { return data.get(key) ?? null; },
+    async setItem(key, value) {
+      if (key === failKey) throw Error('simulated write failure');
+      if (new TextEncoder().encode(value).length > 1024 * 1024) throw Error('oversized entry');
+      data.set(key, value);
     },
   };
 }
 
-test('uses a stable namespaced key and returns an empty list when storage is missing', async () => {
-  const backend = memoryBackend();
-  assert.equal(NOTES_STORAGE_KEY, '@snapnotes-mobile/notes');
-  assert.deepEqual(await createNotesStorage(backend).load(), []);
-  assert.deepEqual(backend.writes, []);
+test('empty storage loads an empty collection without writing', async () => {
+  const db = backend();
+  assert.deepEqual(await createNotesStorage(db).load(), []);
+  assert.equal(db.data.size, 0);
 });
 
-test('round-trips ordered notes through a fresh instance, preserving unicode and metadata', async () => {
-  const backend = memoryBackend();
-  const original = [
-    { ...note('new-id', '🌱 Café', 'こんにちは — body', CREATED_AT, UPDATED_AT), transient: 'omit me' },
-    note('older-id', '', 'Second note', '2024-12-01T00:00:00Z'),
-  ];
-
-  await createNotesStorage(backend).save(original);
-  const savedPayload = JSON.parse(backend.value);
-  assert.deepEqual(savedPayload, {
-    version: 1,
-    notes: [
-      note('new-id', '🌱 Café', 'こんにちは — body', CREATED_AT, UPDATED_AT),
-      note('older-id', '', 'Second note', '2024-12-01T00:00:00Z'),
-    ],
-  });
-  assert.deepEqual(await createNotesStorage(backend).load(), savedPayload.notes);
-
-  backend.value = JSON.stringify({
-    version: 1,
-    futureTopLevelField: true,
-    notes: [{ ...savedPayload.notes[0], futureNoteField: 'discard me' }, savedPayload.notes[1]],
-  });
-  assert.deepEqual(await createNotesStorage(backend).load(), savedPayload.notes);
+test('saves many notes as individual bounded records with stable order', async () => {
+  const db = backend();
+  const notes = Array.from({ length: 800 }, (_, i) => note('id-' + i, 'x'.repeat(1400)));
+  await createNotesStorage(db).save(notes);
+  assert.deepEqual(await createNotesStorage(db).load(), notes);
+  assert.equal(db.data.has(NOTES_STORAGE_KEY), false);
+  const index = JSON.parse(db.data.get('@snapnotes-mobile/notes-index'));
+  assert.equal(index.version, 2);
+  assert.equal(index.ids.length, 800);
 });
 
-test('saves an empty collection as a valid versioned payload', async () => {
-  const backend = memoryBackend();
-  await createNotesStorage(backend).save([]);
-  assert.deepEqual(JSON.parse(backend.value), { version: 1, notes: [] });
-  assert.deepEqual(await createNotesStorage(backend).load(), []);
+test('reads PR 3 legacy notes and migrates on next successful save without deleting legacy', async () => {
+  const db = backend();
+  const old = [note('old'), note('older')];
+  const raw = JSON.stringify({ version: 1, notes: old });
+  db.data.set(NOTES_STORAGE_KEY, raw);
+  const store = createNotesStorage(db);
+  assert.deepEqual(await store.load(), old);
+  await store.save([note('new'), ...old]);
+  assert.deepEqual(await createNotesStorage(db).load(), [note('new'), ...old]);
+  assert.equal(db.data.get(NOTES_STORAGE_KEY), raw);
 });
 
-const corruptPayloads = [
-  ['malformed JSON', '{not json'],
-  ['non-object payload', '[]'],
-  ['missing version', JSON.stringify({ notes: [] })],
-  ['unsupported version', JSON.stringify({ version: 2, notes: [] })],
-  ['missing notes', JSON.stringify({ version: 1 })],
-  ['non-array notes', JSON.stringify({ version: 1, notes: {} })],
-  ['non-object note', JSON.stringify({ version: 1, notes: [null] })],
-  ['missing note field', JSON.stringify({ version: 1, notes: [{ ...note('one', 'Title', 'Body'), text: undefined }] })],
-  ['invalid category', JSON.stringify({ version: 1, notes: [{ ...note('one', 'Title', 'Body'), category: 'work' }] })],
-  ['empty id', JSON.stringify({ version: 1, notes: [note('  ', 'Title', 'Body')] })],
-  ['duplicate ids', JSON.stringify({ version: 1, notes: [note('same', 'One', ''), note('same', '', 'Two')] })],
-  ['invalid timestamp', JSON.stringify({ version: 1, notes: [note('one', 'Title', 'Body', 'not-a-date')] })],
-  ['impossible calendar date', JSON.stringify({ version: 1, notes: [note('one', 'Title', 'Body', '2025-02-30T00:00:00Z')] })],
-  ['empty draft', JSON.stringify({ version: 1, notes: [note('one', '  ', '\n\t')] })],
-  ['oversize draft', JSON.stringify({ version: 1, notes: [note('one', '', 'x'.repeat(1501))] })],
-];
-
-for (const [label, raw] of corruptPayloads) {
-  test(`rejects ${label} without overwriting stored data`, async () => {
-    const backend = memoryBackend(raw);
-    await assert.rejects(createNotesStorage(backend).load());
-    assert.equal(backend.value, raw);
-    assert.deepEqual(backend.writes, []);
-  });
-}
-
-test('validates an entire collection before saving and leaves storage untouched on invalid input', async () => {
-  const existing = JSON.stringify({ version: 1, notes: [note('saved', 'Keep', 'Stored')] });
-  const backend = memoryBackend(existing);
-  const invalid = [note('first', 'Valid', 'Note'), note('second', '', '')];
-  await assert.rejects(createNotesStorage(backend).save(invalid), /Write a title or note before saving/);
-  assert.equal(backend.value, existing);
-  assert.deepEqual(backend.writes, []);
+test('interrupted record writes do not switch committed index', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  await store.save([note('safe')]);
+  const originalIndex = db.data.get('@snapnotes-mobile/notes-index');
+  const rejecting = { getItem: db.getItem, async setItem(key, value) {
+    if (key.includes('/note/')) throw Error('disk full');
+    await db.setItem(key, value);
+  } };
+  await assert.rejects(createNotesStorage(rejecting).save([note('changed')]), /disk full/);
+  assert.equal(db.data.get('@snapnotes-mobile/notes-index'), originalIndex);
+  assert.deepEqual(await store.load(), [note('safe')]);
 });
 
-test('propagates backend read and write rejections without masking them', async () => {
-  const readError = new Error('read failed');
-  const readBackend = { getItem: async () => { throw readError; }, setItem: async () => {} };
-  await assert.rejects(createNotesStorage(readBackend).load(), error => error === readError);
+test('failed index commit keeps prior generation readable', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  await store.save([note('safe')]);
+  db.setFail('@snapnotes-mobile/notes-index');
+  await assert.rejects(store.save([note('next')]), /simulated/);
+  assert.deepEqual(await store.load(), [note('safe')]);
+});
 
-  const writeError = new Error('write failed');
-  const writeBackend = { getItem: async () => null, setItem: async () => { throw writeError; } };
-  await assert.rejects(createNotesStorage(writeBackend).save([note('one', 'Title', 'Body')]), error => error === writeError);
+test('corrupt index or missing note refuses to silently replace existing data', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  await store.save([note('safe')]);
+  const index = JSON.parse(db.data.get('@snapnotes-mobile/notes-index'));
+  db.data.delete('@snapnotes-mobile/note/' + index.generation + '/0');
+  await assert.rejects(store.load(), /missing/);
+  assert.ok(db.data.has('@snapnotes-mobile/notes-index'));
+});
+
+test('rejects invalid input before writing any records', async () => {
+  const db = backend();
+  await assert.rejects(createNotesStorage(db).save([note('same'), note('same')]), /duplicate/);
+  assert.equal(db.data.size, 0);
+});
+
+test('rejects corrupt legacy without changing it', async () => {
+  const db = backend();
+  db.data.set(NOTES_STORAGE_KEY, '{broken');
+  await assert.rejects(createNotesStorage(db).load(), /malformed JSON/);
+  assert.equal(db.data.get(NOTES_STORAGE_KEY), '{broken');
 });
