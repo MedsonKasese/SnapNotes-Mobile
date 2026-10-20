@@ -42,6 +42,35 @@ test('initial state is empty with a clean, blank draft', () => {
   assert.deepEqual(state.draft, { title: '', text: '' });
 });
 
+test('restores an unsaved draft for an existing note without changing saved content', () => {
+  const original = createNote('existing-note', { title: 'Original title', text: 'Saved body' });
+  const base = { ...initialNotesState(), notes: [original] };
+  const restored = notesReducer(base, {
+    type: 'restore-draft',
+    draft: { title: 'Recovered title', text: 'Recovered body' },
+    editingId: original.id,
+  });
+
+  assert.deepEqual(restored.draft, { title: 'Recovered title', text: 'Recovered body' });
+  assert.equal(restored.editingId, original.id);
+  assert.equal(hasUnsavedChanges(restored), true);
+  assert.deepEqual(restored.notes, [original]);
+  assert.equal(restored.notice, 'Recovered unsaved draft from this device.');
+});
+
+test('restores a draft as a new note if its previous editing target no longer exists', () => {
+  const restored = notesReducer(initialNotesState(), {
+    type: 'restore-draft',
+    draft: { title: 'Keep this work', text: 'Recovered text' },
+    editingId: 'deleted-note',
+  });
+
+  assert.deepEqual(restored.draft, { title: 'Keep this work', text: 'Recovered text' });
+  assert.equal(restored.editingId, null);
+  assert.equal(hasUnsavedChanges(restored), true);
+  assert.deepEqual(restored.notes, []);
+});
+
 test('creates a body-only note with deterministic metadata', () => {
   const state = save(fillDraft(initialNotesState(), { text: 'A body' }), 'body-1', CREATED_AT);
   assert.deepEqual(state.notes, [{
