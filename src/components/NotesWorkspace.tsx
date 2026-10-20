@@ -1,8 +1,9 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS,
 } from '../notes';
@@ -11,6 +12,9 @@ import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 
 type WorkspaceView = 'library' | 'editor';
+
+const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
+const EDITOR_DRAFT_VERSION = 1;
 
 function Action({ label, onPress, secondary = false, disabled = false }: {
   label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
@@ -55,14 +59,99 @@ export function NotesWorkspace() {
   const [searchQuery, setSearchQuery] = useState('');
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
+  const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const dispatch = controller.dispatch;
   const saving = status === 'saving';
-  useEffect(() => { void controller.load(); }, [controller]);
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
   const visibleNotes = searchNotes(state.notes, searchQuery);
   const searching = searchQuery.trim().length > 0;
+
+  const hydrateWorkspace = useCallback(async () => {
+    await controller.load();
+    if (controller.getSnapshot().status !== 'ready') return;
+
+    try {
+      const raw = await AsyncStorage.getItem(EDITOR_DRAFT_KEY);
+      if (raw !== null) {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('Invalid draft record');
+        }
+        const record = parsed as Record<string, unknown>;
+        if (
+          record.version !== EDITOR_DRAFT_VERSION ||
+          typeof record.title !== 'string' ||
+          typeof record.text !== 'string' ||
+          !(record.editingId === null || typeof record.editingId === 'string')
+        ) {
+          throw new Error('Unsupported draft record');
+        }
+
+        if (record.title.trim() || record.text.trim()) {
+          controller.dispatch({
+            type: 'restore-draft',
+            draft: { title: record.title, text: record.text },
+            editingId: record.editingId,
+          });
+          setView('editor');
+        } else {
+          await AsyncStorage.removeItem(EDITOR_DRAFT_KEY);
+        }
+      }
+      setDraftStorageError(null);
+      setDraftHydrated(true);
+    } catch {
+      // Keep an unreadable recovery record intact. A user can still edit and
+      // deliberately replace it by starting to type into the editor.
+      setDraftStorageError('An earlier recovery draft could not be read. Your saved notes are safe; start editing to replace the unreadable draft.');
+      setDraftHydrated(false);
+    }
+  }, [controller]);
+
+  useEffect(() => {
+    void hydrateWorkspace();
+  }, [hydrateWorkspace]);
+
+  useEffect(() => {
+    if (!draftHydrated || status !== 'ready') return;
+    const hasDraftContent = dirty && Boolean(state.draft.title.trim() || state.draft.text.trim());
+    const serialized = hasDraftContent
+      ? JSON.stringify({
+          version: EDITOR_DRAFT_VERSION,
+          title: state.draft.title,
+          text: state.draft.text,
+          editingId: state.editingId,
+          savedAt: new Date().toISOString(),
+        })
+      : null;
+
+    const timer = setTimeout(() => {
+      draftWriteQueue.current = draftWriteQueue.current
+        .catch(() => undefined)
+        .then(async () => {
+          if (serialized === null) await AsyncStorage.removeItem(EDITOR_DRAFT_KEY);
+          else await AsyncStorage.setItem(EDITOR_DRAFT_KEY, serialized);
+          setDraftStorageError(null);
+        })
+        .catch(() => {
+          setDraftStorageError('Your latest draft could not be saved for recovery. Keep the app open and save the note manually.');
+        });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.editingId]);
+
+  function changeDraft(field: 'title' | 'text', value: string) {
+    if (!draftHydrated) {
+      setDraftHydrated(true);
+      setDraftStorageError(null);
+    }
+    dispatch({ type: 'change', field, value });
+  }
 
   function confirmDiscard(continueAction: () => void) {
     if (!dirty) {
@@ -132,7 +221,7 @@ export function NotesWorkspace() {
           ? <Text accessibilityLiveRegion="polite" style={styles.hint}>Loading notes from this device…</Text>
           : <>
               <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>
-              <Action label="Retry loading notes" onPress={() => { void controller.load(); }} />
+              <Action label="Retry loading notes" onPress={() => { void hydrateWorkspace(); }} />
             </>}
       </View>
     );
@@ -219,7 +308,7 @@ export function NotesWorkspace() {
                 editable={!saving}
                 accessibilityLabel="Note title (optional)"
                 value={state.draft.title}
-                onChangeText={value => dispatch({ type: 'change', field: 'title', value })}
+                onChangeText={value => changeDraft('title', value)}
                 placeholder="Give your note a title"
                 placeholderTextColor="#64748b"
                 style={styles.input}
@@ -230,7 +319,7 @@ export function NotesWorkspace() {
                 editable={!saving}
                 accessibilityLabel="Note body"
                 value={state.draft.text}
-                onChangeText={value => dispatch({ type: 'change', field: 'text', value })}
+                onChangeText={value => changeDraft('text', value)}
                 placeholder="What's on your mind?"
                 placeholderTextColor="#64748b"
                 multiline
@@ -242,6 +331,7 @@ export function NotesWorkspace() {
               </Text>
               <Text style={styles.hint}>Plain text only for now. The PWA’s “## ” title marker is included in the character count.</Text>
               {storageError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{storageError}</Text>}
+              {draftStorageError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftStorageError}</Text>}
               {saving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving on this device…</Text>}
               {state.error !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{state.error}</Text>}
               {state.notice !== null && <Text accessibilityLiveRegion="polite" style={styles.notice}>{state.notice}</Text>}
