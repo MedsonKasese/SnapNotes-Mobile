@@ -413,7 +413,8 @@ export function NotesWorkspace() {
                           accessibilityState={{ checked }}
                           accessibilityLabel={checklist[4] || 'Checklist item'}
                           onPress={() => toggleChecklistItem(item.id, index)}
-                          disabled={saving}\n                          style={styles.checklistRow}>
+                          disabled={saving}
+                          style={styles.checklistRow}>
                           <Text style={styles.checkboxGlyph}>{checked ? '☑' : '☐'}</Text>
                           <Text style={[styles.noteText, checked && styles.checkedText]}>{checklist[4] || ' '}</Text>
                         </Pressable>
