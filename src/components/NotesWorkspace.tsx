@@ -96,6 +96,24 @@ export function NotesWorkspace() {
           <View style={styles.header}>
             <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
             <Text style={styles.tagline}>Save Your Mind.</Text>
+            <View style={styles.searchRow}>
+              <TextInput
+                accessibilityLabel="Search saved notes"
+                autoCorrect={false}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search titles and note text"
+                placeholderTextColor="#64748b"
+                returnKeyType="search"
+                style={[styles.input, styles.searchInput]}
+              />
+              {searchQuery.length > 0 && (
+                <Action label="Clear" secondary onPress={() => setSearchQuery('')} />
+              )}
+            </View>
+            {searching && <Text accessibilityLiveRegion="polite" style={styles.hint}>
+              {visibleNotes.length} of {state.notes.length} notes match
+            </Text>}
             <View style={styles.warning}>
               <Text style={styles.warningText}>Saved on this device only — saved notes survive reloads and restarts. Unsaved drafts do not. Storage is not encrypted; clearing app data or uninstalling can remove notes. No cloud backup or PWA sync.</Text>
             </View>
@@ -140,24 +158,6 @@ export function NotesWorkspace() {
               </View>
             </View>
             <Text accessibilityRole="header" style={styles.heading}>Device notes ({state.notes.length})</Text>
-            <View style={styles.searchRow}>
-              <TextInput
-                accessibilityLabel="Search saved notes"
-                autoCorrect={false}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search titles and note text"
-                placeholderTextColor="#64748b"
-                returnKeyType="search"
-                style={[styles.input, styles.searchInput]}
-              />
-              {searchQuery.length > 0 && (
-                <Action label="Clear" secondary onPress={() => setSearchQuery('')} />
-              )}
-            </View>
-            {searching && <Text accessibilityLiveRegion="polite" style={styles.hint}>
-              {visibleNotes.length} of {state.notes.length} notes match
-            </Text>}
           </View>
         }
         ListEmptyComponent={<Text style={styles.empty}>{searching ? "No matching notes. Try a different search or clear the query." : "No notes yet. Write a title or a note above, then tap Save note."}</Text>}
