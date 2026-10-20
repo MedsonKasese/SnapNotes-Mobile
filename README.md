@@ -30,6 +30,26 @@ npm start
 
 Use Expo Go with an Expo Go version compatible with SDK 58. Scan the QR code to open the app on a phone; LAN is the simplest connection, and the phone and computer should be on the same network. If the network blocks device discovery, check the Expo CLI connection options or use a USB-connected Android device with USB debugging and ADB configured. You can also launch an Android emulator or, on macOS with Xcode installed, an iOS simulator.
 
+### PR #10 checkout and testing in Termux (Android)
+
+Keep the repository in Termux's home directory, not shared `/sdcard` storage. Use a supported Node version listed above (`node --version`). If you have not cloned this private repository, first run `gh repo clone MedsonKasese/SnapNotes-Mobile` from your home directory using your authenticated GitHub CLI.
+
+For an existing clone, check `git status --short` first. If it lists local changes, commit or stash them before switching; do not reset or delete them. Then run:
+
+```sh
+cd ~/SnapNotes-Mobile
+git fetch origin
+git switch feat/pr10-editor-draft-recovery
+git pull --ff-only
+npm ci
+npm run check
+npx expo start --go --localhost
+```
+
+On the same Android phone, open the printed `exp://127.0.0.1:8081` URL in an SDK-58-compatible Expo Go (use the actual port printed by Expo). If needed, open it from another Termux session with `termux-open-url exp://127.0.0.1:8081`. Localhost avoids scanning a QR code on the same phone and keeps the development server off public networks; see [Expo CLI connection options](https://docs.expo.dev/more/expo-cli/#server-url). Keep Termux running while testing. These commands have not been verified on the owner's phone.
+
+Before approving PR #10: type a new draft, wait at least one second, close/reopen Expo Go, and confirm recovery. Repeat for an existing-note edit; its saved original must stay unchanged until Save. Save or explicitly Discard, wait at least one second, and restart again: the draft must not return or duplicate notes. Android restart and storage-error checks remain pending in `MIGRATION_CHECKLIST.md`; passing `npm run check` is not device verification.
+
 ## Commands
 
 Available npm scripts:

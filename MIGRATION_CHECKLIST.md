@@ -160,7 +160,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 ## 13. Drafts and edit history
 
 - [ ] Audit PWA draft/autosave behaviour and decide when a note becomes a draft.
-- [ ] Preserve unfinished work after navigation or unexpected app closure. (PR #10 adds debounced device-only editor-draft recovery; Android restart/error-path verification required.)
+- [ ] Preserve unfinished work after navigation or unexpected app closure. (Testing required: PR #10 adds debounced device-only editor-draft recovery; automated checks pass locally, but Android restart/error-path verification is still required.)
 - [ ] Provide a Drafts view if supported by the PWA.
 - [ ] Audit the PWA's edit-history behaviour before implementation.
 - [ ] Restore prior content safely if edit history is supported.
@@ -270,7 +270,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
 | Categories and folders | Not started | Must match PWA behaviour |
 | Formatting and checklists | Not started | Audit native editor against PWA |
-| Drafts and edit history | Not started | Audit PWA behaviour first |
+| Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
 | Attachments and document viewer | Not started | Audit PWA rules and Android file access |
 | Private Notes/security | Not started | Requires explicit privacy testing |
@@ -283,7 +283,7 @@ Update this table as PRs merge and testing results are confirmed.
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-20 | PR #6 search | Native note search, clear action, match count, no-results state | Automated test/check results should be recorded from the actual run | **User verified: search works correctly** | Continue regression checks as navigation and filtering expand |
 | 2026-10-20 | [PR #9 app shell](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/9) | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation; fixed React Native 0.88 drawer backdrop API compatibility | Local `npm run check` passed before review; user confirms all tests passed | **User verified: app worked perfectly on Android** | Keep regression testing as features expand |
-| 2026-10-20 | PR #10 editor draft recovery (open PR) | Adds a separate versioned AsyncStorage recovery record, 500 ms debounced draft autosave, ordered writes, restore-after-notes-load, and visible recovery-storage errors; saved notes remain unchanged until explicit Save | Two reducer recovery tests and five source regression tests added; CI/check results pending | **Device testing required** | Test new/edit draft recovery after force-close/restart, discard behavior, save clearing, malformed draft, and storage errors |
+| 2026-10-20 | [PR #10 editor draft recovery (open PR)](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/10) | Adds separate versioned recovery storage, 500 ms debounce, ordered writes, and visible errors. CI fix separates storage loading from the recovery completion callback for startup and Retry; no lint suppression, storage-format change, or PWA edits | Clean `npm ci`; `npm run check` passed (typecheck, lint, **66 tests**); `npx expo install --check` passed; Android/iOS JavaScript export passed on Node 24.19.0. Added deferred-startup and Retry regression checks. See PR checks for hosted CI rerun results | **Device testing required; not claimed verified** | Use README Termux checkout commands; test new/edit recovery, Save/Discard clearing, malformed data and storage failures. Leave PR open for review |
 
 ---
 
@@ -297,7 +297,9 @@ Before merging PR #10:
 - [x] Audit the native note reducer, controller, and storage boundary before adding recovery.
 - [x] Keep recovery data in a separate versioned key so it cannot overwrite saved notes.
 - [x] Add reducer and source regression tests for recovery and error handling.
-- [ ] Run `npm run check` and review CI results.
+- [x] Run `npm run check` and inspect the original CI failure. (Fixed `react-hooks/set-state-in-effect` without disabling it; typecheck, lint and all 66 tests pass locally. See PR checks for the hosted rerun.)
+- [x] Validate Expo dependency compatibility and export Android/iOS JavaScript bundles locally. (Not native builds or device tests.)
+- [x] Document safe checkout, automated checks, and same-phone Expo Go startup in Termux in README.
 - [ ] Verify autosave and restore on Android after force-close/restart for both new notes and edits.
 - [ ] Verify explicit Save and Discard clear the recovery record, and malformed/storage-failure cases preserve saved notes.
 - [ ] Update this roadmap with final test and device results before merge.

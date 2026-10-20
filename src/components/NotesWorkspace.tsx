@@ -70,8 +70,7 @@ export function NotesWorkspace() {
   const visibleNotes = searchNotes(state.notes, searchQuery);
   const searching = searchQuery.trim().length > 0;
 
-  const hydrateWorkspace = useCallback(async () => {
-    await controller.load();
+  const restoreEditorDraft = useCallback(async () => {
     if (controller.getSnapshot().status !== 'ready') return;
 
     try {
@@ -113,8 +112,9 @@ export function NotesWorkspace() {
   }, [controller]);
 
   useEffect(() => {
-    void hydrateWorkspace();
-  }, [hydrateWorkspace]);
+    // Restore React state from the storage completion callback, not the effect body.
+    void controller.load().then(restoreEditorDraft);
+  }, [controller, restoreEditorDraft]);
 
   useEffect(() => {
     if (!draftHydrated || status !== 'ready') return;
@@ -221,7 +221,7 @@ export function NotesWorkspace() {
           ? <Text accessibilityLiveRegion="polite" style={styles.hint}>Loading notes from this device…</Text>
           : <>
               <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>
-              <Action label="Retry loading notes" onPress={() => { void hydrateWorkspace(); }} />
+              <Action label="Retry loading notes" onPress={() => { void controller.load().then(restoreEditorDraft); }} />
             </>}
       </View>
     );
