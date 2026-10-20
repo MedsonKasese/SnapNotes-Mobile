@@ -45,6 +45,34 @@ export function createNotesController(storage: NotesStorage) {
     publish({ ...snapshot, state: notesReducer(snapshot.state, action) });
   }
 
+  async function updateNoteText(id: string, text: string, now: string) {
+    if (snapshot.status !== 'ready') return;
+    const previous = snapshot.state;
+    if (!previous.notes.some(note => note.id === id)) {
+      publish({ ...snapshot, state: { ...previous, error: 'This note could not be found.' } });
+      return;
+    }
+
+    const notes = previous.notes.map(note => note.id === id
+      ? { ...note, text, updatedAt: now }
+      : note);
+    publish({ ...snapshot, status: 'saving', state: previous, storageError: null });
+    try {
+      await storage.save(notes);
+      publish({
+        state: { ...previous, notes, error: null, notice: 'Checklist updated.' },
+        status: 'ready',
+        storageError: null,
+      });
+    } catch {
+      publish({
+        state: previous,
+        status: 'ready',
+        storageError: 'Could not save this checklist change on this device. Your saved note has not been changed. Please try again.',
+      });
+    }
+  }
+
   async function save(now: string) {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
@@ -73,6 +101,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save,
+    load, dispatch, save, updateNoteText,
   };
 }
