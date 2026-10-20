@@ -209,6 +209,17 @@ export function NotesWorkspace() {
     return () => subscription.remove();
   });
 
+  function insertChecklistItem() {
+    const current = state.draft.text;
+    const separator = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
+    const next = current + separator + '☐ ';
+    if (characterCount({ ...state.draft, text: next }) > MAX_NOTE_CHARACTERS) {
+      Alert.alert('Note is too long', 'Remove some text before adding a checklist item.');
+      return;
+    }
+    changeDraft('text', next);
+  }
+
   function saveNote() {
     void controller.save(new Date().toISOString());
   }
@@ -314,7 +325,10 @@ export function NotesWorkspace() {
                 style={styles.input}
                 returnKeyType="next"
               />
-              <Text style={styles.label}>Note</Text>
+              <View style={styles.editorTools}>
+                <Text style={styles.label}>Note</Text>
+                <Action label="+ Checklist item" secondary disabled={saving} onPress={insertChecklistItem} />
+              </View>
               <TextInput
                 editable={!saving}
                 accessibilityLabel="Note body"
@@ -496,6 +510,7 @@ const styles = StyleSheet.create({
   editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
   input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
+  editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   bodyInput: { minHeight: 190, maxHeight: 360, textAlignVertical: 'top' },
   hint: { color: '#687763', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 },
