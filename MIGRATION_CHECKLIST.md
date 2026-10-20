@@ -67,7 +67,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 - [ ] Preserve note content when switching views, opening navigation, or temporarily leaving the editor.
 - [ ] Handle empty titles/bodies and whitespace consistently with the PWA.
 - [ ] Add supported formatting (headings, emphasis, lists, links, and other PWA-supported formatting) with native-friendly editing.
-- [ ] Support checklists/task items if present in the PWA; verify checkbox alignment and interaction.
+- [ ] Support checklists/task items if present in the PWA; verify checkbox alignment and interaction. (PR #11 adds a native text checklist-item insertion action using the PWA's `☐ ` marker; interactive completion and alignment remain future work; Android testing required.)
 - [ ] Handle keyboard focus, multiline text, selection, paste, and scrolling while editing.
 - [ ] Warn about unsaved changes only when necessary and never discard content unexpectedly.
 
@@ -269,7 +269,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
 | Categories and folders | Not started | Must match PWA behaviour |
-| Formatting and checklists | Not started | Audit native editor against PWA |
+| Formatting and checklists | In progress; Android testing required | PR #11 adds text checklist-item insertion, matching the PWA's `☐ ` marker; interactive checkbox completion remains future work. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
 | Attachments and document viewer | Not started | Audit PWA rules and Android file access |
