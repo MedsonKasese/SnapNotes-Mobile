@@ -18,6 +18,7 @@ export type NotesAction =
   | { type: 'change'; field: keyof NoteDraft; value: string }
   | { type: 'edit'; id: string }
   | { type: 'reset' }
+  | { type: 'restore-draft'; draft: NoteDraft; editingId: string | null }
   | { type: 'save'; id: string; now: string };
 
 export function initialNotesState(): NotesState {
@@ -59,6 +60,18 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
     }
     case 'reset':
       return { ...initialNotesState(), notes: state.notes };
+    case 'restore-draft': {
+      const editingId = action.editingId !== null && state.notes.some(note => note.id === action.editingId)
+        ? action.editingId
+        : null;
+      return {
+        ...state,
+        draft: { title: action.draft.title, text: action.draft.text },
+        editingId,
+        error: null,
+        notice: 'Recovered unsaved draft from this device.',
+      };
+    }
     case 'save': {
       const error = validateDraft(state.draft);
       if (error) return { ...state, error, notice: null };
