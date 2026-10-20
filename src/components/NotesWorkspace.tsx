@@ -226,7 +226,7 @@ export function NotesWorkspace() {
     const lines = note.text.split('\n');
     const line = lines[lineIndex];
     if (line === undefined) return;
-    const match = /^(\\s*)(☐|☑)(\\s)/.exec(line);
+    const match = /^(\s*)(☐|☑)(\s)/.exec(line);
     if (!match) return;
     const replacement = match[2] === '☐' ? '☑' : '☐';
     lines[lineIndex] = match[1] + replacement + line.slice(match[1].length + match[2].length);
@@ -406,7 +406,7 @@ export function NotesWorkspace() {
                 {item.text !== '' && (
                   <View style={styles.notePreview}>
                     {item.text.split('\n').slice(0, 6).map((line, index) => {
-                      const checklist = /^(\\s*)(☐|☑)(\\s)(.*)$/.exec(line);
+                      const checklist = /^(\s*)(☐|☑)(\s)(.*)$/.exec(line);
                       if (!checklist) return <Text key={index} style={styles.noteText}>{line || ' '}</Text>;
                       const checked = checklist[2] === '☑';
                       return (
