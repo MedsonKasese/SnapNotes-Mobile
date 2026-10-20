@@ -282,7 +282,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-20 | PR #6 search | Native note search, clear action, match count, no-results state | Automated test/check results should be recorded from the actual run | **User verified: search works correctly** | Continue regression checks as navigation and filtering expand |
-| 2026-10-20 | PR #9 app shell | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation | CI / local checks pending at PR creation | **Device verification required** | Verify small-screen layout, drawer, back button, keyboard, editor transitions, search, persistence, and unsaved-change prompt |
+| 2026-10-20 | [PR #9 app shell](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/9) | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation; fixed React Native 0.88 drawer backdrop API compatibility | Local `npm run check` passes (TypeScript, ESLint, 57 tests including backdrop regression); `npx expo install --check` passes; `CI=1 EXPO_NO_TELEMETRY=1 npx expo export --platform all` exports Android and iOS JS bundles (not native builds) | **Device verification required** | Verify small-screen layout, drawer, back button, keyboard, editor transitions, search, persistence, and unsaved-change prompt |
 
 ---
 
