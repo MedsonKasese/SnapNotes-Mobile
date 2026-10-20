@@ -67,7 +67,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 - [ ] Preserve note content when switching views, opening navigation, or temporarily leaving the editor.
 - [ ] Handle empty titles/bodies and whitespace consistently with the PWA.
 - [ ] Add supported formatting (headings, emphasis, lists, links, and other PWA-supported formatting) with native-friendly editing.
-- [ ] Support checklists/task items if present in the PWA; verify checkbox alignment and interaction. (PR #11 adds a native text checklist-item insertion action using the PWA's `☐ ` marker; interactive completion and alignment remain future work; Android testing required.)
+- [ ] Support checklists/task items if present in the PWA; verify checkbox alignment and interaction. (PR #11 adds native checklist insertion; PR #12 now adds inline preview toggles with automatic device-storage persistence and tighter row spacing. Automated and Android testing are still required before marking complete.)
 - [ ] Handle keyboard focus, multiline text, selection, paste, and scrolling while editing.
 - [ ] Warn about unsaved changes only when necessary and never discard content unexpectedly.
 
