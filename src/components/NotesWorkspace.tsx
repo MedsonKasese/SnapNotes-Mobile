@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
-  Alert, FlatList, Keyboard, KeyboardAvoidingView, Platform,
-  Pressable, StyleSheet, Text, TextInput, View,
+  Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
+  Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS,
@@ -11,13 +11,42 @@ import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 
+type WorkspaceView = 'library' | 'editor';
+
 function Action({ label, onPress, secondary = false, disabled = false }: {
   label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
 }) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} disabled={disabled} accessibilityState={{ disabled }}
-      style={({ pressed }) => [styles.button, secondary && styles.secondaryButton, (pressed || disabled) && styles.pressed]}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
+      style={({ pressed }) => [
+        styles.button, secondary && styles.secondaryButton,
+        (pressed || disabled) && styles.pressed,
+      ]}
+    >
       <Text style={[styles.buttonText, secondary && styles.secondaryText]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function MenuRow({ label, detail, onPress, active = false }: {
+  label: string; detail: string; onPress: () => void; active?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.menuRow, active && styles.menuRowActive, pressed && styles.pressed]}
+    >
+      <View style={styles.menuRowCopy}>
+        <Text style={[styles.menuRowTitle, active && styles.menuRowTitleActive]}>{label}</Text>
+        <Text style={styles.menuRowDetail}>{detail}</Text>
+      </View>
+      <Text style={styles.menuChevron} accessibilityElementsHidden>›</Text>
     </Pressable>
   );
 }
@@ -25,11 +54,12 @@ function Action({ label, onPress, secondary = false, disabled = false }: {
 export function NotesWorkspace() {
   const [controller] = useState(() => createNotesController(deviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
+  const [view, setView] = useState<WorkspaceView>('library');
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const dispatch = controller.dispatch;
   const saving = status === 'saving';
   useEffect(() => { void controller.load(); }, [controller]);
-  const list = useRef<FlatList<Note>>(null);
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
   const visibleNotes = searchNotes(state.notes, searchQuery);
@@ -46,24 +76,50 @@ export function NotesWorkspace() {
     ], { cancelable: true });
   }
 
-  function resetEditor() {
+  function openLibrary() {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
-      list.current?.scrollToOffset({ offset: 0, animated: true });
+      setDrawerOpen(false);
+      setView('library');
+    });
+  }
+
+  function openNewNote() {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      setDrawerOpen(false);
+      setView('editor');
     });
   }
 
   function editNote(id: string) {
     if (state.editingId === id) {
-      list.current?.scrollToOffset({ offset: 0, animated: true });
+      setView('editor');
       return;
     }
     confirmDiscard(() => {
       dispatch({ type: 'edit', id });
-      list.current?.scrollToOffset({ offset: 0, animated: true });
+      setView('editor');
     });
   }
+
+  function handleBack() {
+    if (drawerOpen) {
+      setDrawerOpen(false);
+      return true;
+    }
+    if (view === 'editor') {
+      openLibrary();
+      return true;
+    }
+    return false;
+  }
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', handleBack);
+    return () => subscription.remove();
+  });
 
   function saveNote() {
     void controller.save(new Date().toISOString());
@@ -71,7 +127,7 @@ export function NotesWorkspace() {
 
   if (status === 'loading' || status === 'load-error') {
     return (
-      <View style={styles.content}>
+      <View style={styles.loadingScreen}>
         <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
         {status === 'loading'
           ? <Text accessibilityLiveRegion="polite" style={styles.hint}>Loading notes from this device…</Text>
@@ -84,43 +140,81 @@ export function NotesWorkspace() {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <FlatList
-        ref={list}
-        data={visibleNotes}
-        keyExtractor={note => note.id}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        ListHeaderComponent={
-          <View style={styles.header}>
-            <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
-            <Text style={styles.tagline}>Save Your Mind.</Text>
+    <View style={styles.screen}>
+      <View style={styles.appHeader}>
+        <View style={styles.headerTopRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open notes navigation"
+            accessibilityState={{ expanded: drawerOpen }}
+            onPress={() => setDrawerOpen(true)}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.menuGlyph}>☰</Text>
+          </Pressable>
+          <View style={styles.brandGroup}>
+            <View style={styles.brandMark}><Text style={styles.brandMarkText}>S</Text></View>
+            <View style={styles.brandCopy}>
+              <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
+              <Text style={styles.tagline}>Save Your Mind.</Text>
+            </View>
+          </View>
+          <View style={styles.countPill} accessibilityLiveRegion="polite">
+            <Text style={styles.countText}>{state.notes.length}</Text>
+            <Text style={styles.countLabel}>{state.notes.length === 1 ? 'note' : 'notes'}</Text>
+          </View>
+        </View>
+        <View style={styles.searchRow}>
+          <Text style={styles.searchGlyph} accessibilityElementsHidden>⌕</Text>
+          <TextInput
+            accessibilityLabel="Search saved notes"
+            autoCorrect={false}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search titles and note text"
+            placeholderTextColor="#64748b"
+            returnKeyType="search"
+            style={styles.searchInput}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={() => setSearchQuery('')}
+              style={({ pressed }) => [styles.clearSearch, pressed && styles.pressed]}
+            >
+              <Text style={styles.clearSearchText}>×</Text>
+            </Pressable>
+          )}
+        </View>
+        {searching && view === 'library' && (
+          <Text accessibilityLiveRegion="polite" style={styles.searchSummary}>
+            {visibleNotes.length} of {state.notes.length} notes match
+          </Text>
+        )}
+      </View>
+
+      {view === 'editor' ? (
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            contentContainerStyle={styles.editorContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
+            <View style={styles.viewHeading}>
+              <View style={styles.headingCopy}>
+                <Text style={styles.eyebrow}>WRITE SOMETHING DOWN</Text>
+                <Text accessibilityRole="header" style={styles.screenTitle}>
+                  {state.editingId === null ? 'New note' : 'Edit note'}
+                </Text>
+              </View>
+              <Action label="All notes" secondary onPress={openLibrary} disabled={saving} />
+            </View>
             <View style={styles.warning}>
-              <Text style={styles.warningText}>Saved on this device only — saved notes survive reloads and restarts. Unsaved drafts do not. Storage is not encrypted; clearing app data or uninstalling can remove notes. No cloud backup or PWA sync.</Text>
+              <Text style={styles.warningTitle}>Stored on this device</Text>
+              <Text style={styles.warningText}>Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.</Text>
             </View>
-            <View style={styles.searchRow}>
-              <TextInput
-                accessibilityLabel="Search saved notes"
-                autoCorrect={false}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search titles and note text"
-                placeholderTextColor="#64748b"
-                returnKeyType="search"
-                style={[styles.input, styles.searchInput]}
-              />
-              {searchQuery.length > 0 && (
-                <Action label="Clear" secondary onPress={() => setSearchQuery('')} />
-              )}
-            </View>
-            {searching && <Text accessibilityLiveRegion="polite" style={styles.hint}>
-              {visibleNotes.length} of {state.notes.length} notes match
-            </Text>}
             <View style={styles.editor}>
-              <Text accessibilityRole="header" style={styles.heading}>
-                {state.editingId === null ? 'New note' : 'Edit note'}
-              </Text>
               <Text style={styles.label}>Title (optional)</Text>
               <TextInput
                 editable={!saving}
@@ -130,6 +224,7 @@ export function NotesWorkspace() {
                 placeholder="Give your note a title"
                 placeholderTextColor="#64748b"
                 style={styles.input}
+                returnKeyType="next"
               />
               <Text style={styles.label}>Note</Text>
               <TextInput
@@ -146,66 +241,212 @@ export function NotesWorkspace() {
               <Text style={[styles.hint, count > MAX_NOTE_CHARACTERS && styles.error]}>
                 {count}/{MAX_NOTE_CHARACTERS} characters
               </Text>
-              <Text style={styles.hint}>Title counts include the PWA’s “## ” marker and a line break. Plain text only for now.</Text>
+              <Text style={styles.hint}>Plain text only for now. The PWA’s “## ” title marker is included in the character count.</Text>
               {storageError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{storageError}</Text>}
               {saving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving on this device…</Text>}
               {state.error !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{state.error}</Text>}
               {state.notice !== null && <Text accessibilityLiveRegion="polite" style={styles.notice}>{state.notice}</Text>}
               <View style={styles.actions}>
                 <Action disabled={saving} label={saving ? 'Saving…' : state.editingId === null ? 'Save note' : 'Save changes'} onPress={saveNote} />
-                {(state.editingId !== null || dirty) && <Action disabled={saving} label="Cancel" onPress={resetEditor} secondary />}
-                {state.editingId !== null && <Action disabled={saving} label="New note" onPress={resetEditor} secondary />}
+                {(state.editingId !== null || dirty) && <Action disabled={saving} label="Cancel" onPress={openLibrary} secondary />}
+                {state.editingId !== null && <Action disabled={saving} label="New note" onPress={openNewNote} secondary />}
               </View>
             </View>
-            <Text accessibilityRole="header" style={styles.heading}>Device notes ({state.notes.length})</Text>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      ) : (
+        <View style={styles.flex}>
+          <View style={styles.libraryHeading}>
+            <View>
+              <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
+              <Text accessibilityRole="header" style={styles.screenTitle}>All notes</Text>
+            </View>
+            <Action label="+ New note" onPress={openNewNote} />
           </View>
-        }
-        ListEmptyComponent={<Text style={styles.empty}>{searching ? "No matching notes. Try a different search or clear the query." : "No notes yet. Write a title or a note above, then tap Save note."}</Text>}
-        renderItem={({ item }) => (
-          <View style={[styles.card, state.editingId === item.id && styles.editingCard]}>
-            <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
-            {item.text !== '' && <Text style={styles.noteText}>{item.text}</Text>}
-            <Text style={styles.hint}>Created {new Date(item.createdAt).toLocaleString()}</Text>
-            {item.updatedAt !== item.createdAt && <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>}
-            <Pressable disabled={saving} accessibilityState={{ disabled: saving }} accessibilityRole="button" accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
-              onPress={() => editNote(item.id)} style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}>
-              <Text style={styles.secondaryText}>{state.editingId === item.id ? 'Editing this note' : 'Edit note'}</Text>
-            </Pressable>
+          <Text style={styles.libraryHint}>Your saved notes, all in one place.</Text>
+          {storageError !== null && <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>}
+          <FlatList
+            data={visibleNotes}
+            keyExtractor={note => note.id}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <View style={styles.emptyMark}><Text style={styles.emptyMarkText}>{searching ? '⌕' : '+'}</Text></View>
+                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : 'Your space is ready'}</Text>
+                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
+                {!searching && <Action label="Create your first note" onPress={openNewNote} />}
+              </View>
+            }
+            renderItem={({ item }) => (
+              <View style={styles.card}>
+                <View style={styles.noteCardTop}>
+                  <View style={styles.noteAccent} />
+                  <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
+                </View>
+                {item.text !== '' && <Text numberOfLines={6} style={styles.noteText}>{item.text}</Text>}
+                <View style={styles.noteFooter}>
+                  <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleDateString()}</Text>
+                  <Pressable
+                    disabled={saving}
+                    accessibilityState={{ disabled: saving }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
+                    onPress={() => editNote(item.id)}
+                    style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.editButtonText}>Open note ›</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          />
+        </View>
+      )}
+
+      <Modal
+        visible={drawerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDrawerOpen(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.drawerLayer}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close navigation"
+            style={styles.drawerBackdrop}
+            onPress={() => setDrawerOpen(false)}
+          />
+          <View style={styles.drawerPanel} accessibilityViewIsModal>
+            <View style={styles.drawerHeader}>
+              <View style={styles.drawerBrand}>
+                <View style={styles.brandMark}><Text style={styles.brandMarkText}>S</Text></View>
+                <View>
+                  <Text style={styles.drawerEyebrow}>LIBRARY</Text>
+                  <Text accessibilityRole="header" style={styles.drawerTitle}>My notes</Text>
+                </View>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close notes navigation" onPress={() => setDrawerOpen(false)} style={styles.iconButton}>
+                <Text style={styles.closeGlyph}>×</Text>
+              </Pressable>
+            </View>
+            <View style={styles.drawerNavigation}>
+              <MenuRow label="All notes" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library'} onPress={openLibrary} />
+              <MenuRow label="New note" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
+            </View>
+            <View style={styles.drawerNotice}>
+              <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
+              <Text style={styles.drawerNoticeText}>Categories, folders, archive, trash, settings, and account features will appear here as they are migrated and tested. They are not shown as active destinations yet.</Text>
+            </View>
+            <View style={styles.drawerFooter}>
+              <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
+              <Text style={styles.drawerFooterText}>Save Your Mind.</Text>
+            </View>
           </View>
-        )}
-      />
-    </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {view === 'library' && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Create a new note"
+          onPress={openNewNote}
+          style={({ pressed }) => [styles.floatingAdd, pressed && styles.pressed]}
+        >
+          <Text style={styles.floatingAddText}>+</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  content: { padding: 20, gap: 16, maxWidth: 680, width: '100%', alignSelf: 'center', paddingBottom: 40 },
-  header: { gap: 16 },
-  brand: { color: '#172554', fontSize: 34, fontWeight: '800' },
-  tagline: { color: '#475569', fontSize: 18 },
-  warning: { backgroundColor: '#fff3cc', padding: 16, borderRadius: 12 },
-  warningText: { color: '#664300', fontSize: 14, lineHeight: 21 },
-  editor: { backgroundColor: '#fff', borderColor: '#dce2ee', borderWidth: 1, borderRadius: 16, padding: 18, gap: 12 },
-  heading: { color: '#172554', fontSize: 22, fontWeight: '700' },
-  label: { color: '#334155', fontSize: 15, fontWeight: '600' },
-  input: { color: '#172554', backgroundColor: '#f8fafc', borderColor: '#94a3b8', borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 16, minHeight: 48 },
-  bodyInput: { minHeight: 160, maxHeight: 280 },
-  hint: { color: '#475569', fontSize: 12, lineHeight: 18 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  searchInput: { flex: 1, minWidth: 0 },
-  button: { backgroundColor: '#1e40af', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14, minHeight: 48, justifyContent: 'center' },
-  secondaryButton: { backgroundColor: '#edf2fc' },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  secondaryText: { color: '#1e40af', fontSize: 16, fontWeight: '600' },
+  flex: { flex: 1, minHeight: 0 },
+  screen: { flex: 1, backgroundColor: '#f7f9f5' },
+  loadingScreen: { flex: 1, justifyContent: 'center', padding: 24, gap: 16, backgroundColor: '#f7f9f5' },
+  appHeader: {
+    backgroundColor: '#ffffff', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: '#e4eadf',
+  },
+  headerTopRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#f3f7ef' },
+  menuGlyph: { fontSize: 22, color: '#263b22' },
+  brandGroup: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  brandMark: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#48a111' },
+  brandMarkText: { color: '#ffffff', fontSize: 23, fontWeight: '900' },
+  brandCopy: { minWidth: 0 },
+  brand: { color: '#20351d', fontSize: 19, fontWeight: '800', letterSpacing: -0.4 },
+  tagline: { color: '#64715e', fontSize: 11, marginTop: 1 },
+  countPill: { minWidth: 58, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 12, backgroundColor: '#eef7e7' },
+  countText: { color: '#347b0a', fontSize: 17, fontWeight: '800', lineHeight: 20 },
+  countLabel: { color: '#55734a', fontSize: 10, fontWeight: '600' },
+  searchRow: { minHeight: 44, marginTop: 10, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: '#dce5d5', borderRadius: 13, backgroundColor: '#f8faf6' },
+  searchGlyph: { color: '#60715a', fontSize: 25, lineHeight: 30 },
+  searchInput: { flex: 1, minWidth: 0, color: '#20351d', fontSize: 15, paddingVertical: 9 },
+  clearSearch: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: '#e8efe3' },
+  clearSearchText: { color: '#3b5731', fontSize: 24, lineHeight: 26 },
+  searchSummary: { marginTop: 7, marginLeft: 3, color: '#5d6e55', fontSize: 12 },
+  libraryHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 18, paddingTop: 20, paddingBottom: 5 },
+  headingCopy: { flex: 1, gap: 4 },
+  viewHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  eyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
+  screenTitle: { color: '#20351d', fontSize: 27, fontWeight: '800', letterSpacing: -0.7, marginTop: 2 },
+  libraryHint: { color: '#64715e', fontSize: 13, paddingHorizontal: 18, paddingBottom: 8 },
+  listContent: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 100, gap: 12, flexGrow: 1 },
+  emptyState: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, paddingVertical: 45, gap: 12 },
+  emptyMark: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#eaf5e1', marginBottom: 3 },
+  emptyMarkText: { color: '#48a111', fontSize: 34, fontWeight: '500' },
+  emptyTitle: { color: '#20351d', fontSize: 21, fontWeight: '800', textAlign: 'center' },
+  emptyText: { color: '#64715e', fontSize: 14, lineHeight: 21, textAlign: 'center', maxWidth: 290, marginBottom: 6 },
+  warning: { padding: 14, borderRadius: 13, backgroundColor: '#fff6db', borderWidth: 1, borderColor: '#f1e1ad', gap: 4 },
+  warningTitle: { color: '#79520a', fontSize: 13, fontWeight: '800' },
+  warningText: { color: '#79520a', fontSize: 12, lineHeight: 18 },
+  editorContent: { padding: 18, paddingBottom: 40, gap: 16 },
+  editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
+  label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
+  input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
+  bodyInput: { minHeight: 190, maxHeight: 360, textAlignVertical: 'top' },
+  hint: { color: '#687763', fontSize: 12, lineHeight: 18 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 },
+  button: { backgroundColor: '#48a111', borderRadius: 11, paddingHorizontal: 15, paddingVertical: 12, minHeight: 46, justifyContent: 'center', alignItems: 'center' },
+  secondaryButton: { backgroundColor: '#f0f5eb', borderWidth: 1, borderColor: '#dce6d4' },
+  buttonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  secondaryText: { color: '#3b6f25' },
   pressed: { opacity: 0.7 },
   error: { color: '#b91c1c', fontSize: 14, lineHeight: 21 },
-  notice: { color: '#166534', fontSize: 14, lineHeight: 21 },
-  empty: { color: '#475569', fontSize: 16, lineHeight: 24 },
-  card: { backgroundColor: '#fff', borderColor: '#dce2ee', borderWidth: 1, borderRadius: 16, padding: 18, gap: 10 },
-  editingCard: { borderColor: '#1e40af', borderWidth: 2 },
-  noteTitle: { color: '#172554', fontSize: 20, fontWeight: '700' },
-  noteText: { color: '#334155', fontSize: 16, lineHeight: 24 },
-  editButton: { alignSelf: 'flex-start', minHeight: 48, justifyContent: 'center', paddingHorizontal: 12, backgroundColor: '#edf2fc', borderRadius: 10 },
+  notice: { color: '#26723b', fontSize: 14, lineHeight: 21 },
+  card: { backgroundColor: '#ffffff', borderColor: '#e2e9dc', borderWidth: 1, borderRadius: 16, padding: 15, gap: 10, shadowColor: '#213a1b', shadowOpacity: 0.035, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 1 },
+  noteCardTop: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  noteAccent: { width: 4, alignSelf: 'stretch', minHeight: 22, borderRadius: 4, backgroundColor: '#48a111' },
+  noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
+  noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
+  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
+  editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
+  editButtonText: { color: '#3b7f16', fontSize: 13, fontWeight: '800' },
+  drawerLayer: { flex: 1, flexDirection: 'row' },
+  drawerBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 28, 12, 0.42)' },
+  drawerPanel: { width: '86%', maxWidth: 340, height: '100%', paddingHorizontal: 16, paddingTop: Platform.OS === 'android' ? 38 : 22, paddingBottom: 20, backgroundColor: '#ffffff', borderRightWidth: 1, borderRightColor: '#e1e9db' },
+  drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#e8eee3' },
+  drawerBrand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  drawerEyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.3, marginBottom: 3 },
+  drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
+  closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
+  drawerNavigation: { paddingTop: 15, gap: 7 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 62, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
+  menuRowActive: { backgroundColor: '#eff7e9', borderColor: '#e0efd5' },
+  menuRowCopy: { flex: 1, gap: 3 },
+  menuRowTitle: { color: '#293d23', fontSize: 15, fontWeight: '700' },
+  menuRowTitleActive: { color: '#3b7f16' },
+  menuRowDetail: { color: '#6a7764', fontSize: 12 },
+  menuChevron: { color: '#6a7764', fontSize: 25 },
+  drawerNotice: { marginTop: 25, padding: 14, gap: 7, borderRadius: 14, backgroundColor: '#f7f9f5', borderWidth: 1, borderColor: '#e6ecdf' },
+  drawerNoticeTitle: { color: '#334b2b', fontSize: 13, fontWeight: '800' },
+  drawerNoticeText: { color: '#64715e', fontSize: 12, lineHeight: 18 },
+  drawerFooter: { marginTop: 'auto', paddingTop: 18, borderTopWidth: 1, borderTopColor: '#e8eee3' },
+  drawerFooterBrand: { color: '#304728', fontSize: 13, fontWeight: '800' },
+  drawerFooterText: { color: '#73816d', fontSize: 12, marginTop: 3 },
+  floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
+  floatingAddText: { color: '#ffffff', fontSize: 34, lineHeight: 38, fontWeight: '400', marginTop: -2 },
 });
