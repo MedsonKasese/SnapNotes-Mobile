@@ -220,6 +220,21 @@ export function NotesWorkspace() {
     changeDraft('text', next);
   }
 
+  function toggleChecklistItem(noteId: string, lineIndex: number) {
+    const note = state.notes.find(item => item.id === noteId);
+    if (!note) return;
+    const lines = note.text.split('\n');
+    const line = lines[lineIndex];
+    if (line === undefined) return;
+    const match = /^(\\s*)(☐|☑)(\\s)/.exec(line);
+    if (!match) return;
+    const replacement = match[2] === '☐' ? '☑' : '☐';
+    lines[lineIndex] = match[1] + replacement + line.slice(match[1].length + match[2].length);
+    dispatch({ type: 'edit', id: noteId });
+    dispatch({ type: 'change', field: 'text', value: lines.join('\n') });
+    setView('editor');
+  }
+
   function saveNote() {
     void controller.save(new Date().toISOString());
   }
@@ -388,7 +403,25 @@ export function NotesWorkspace() {
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
                 </View>
-                {item.text !== '' && <Text numberOfLines={6} style={styles.noteText}>{item.text}</Text>}
+                {item.text !== '' && (
+                  <View style={styles.notePreview}>
+                    {item.text.split('\n').slice(0, 6).map((line, index) => {
+                      const checklist = /^(\\s*)(☐|☑)(\\s)(.*)$/.exec(line);
+                      if (!checklist) return <Text key={index} style={styles.noteText}>{line || ' '}</Text>;
+                      const checked = checklist[2] === '☑';
+                      return (
+                        <Pressable key={index} accessibilityRole="checkbox"
+                          accessibilityState={{ checked }}
+                          accessibilityLabel={checklist[4] || 'Checklist item'}
+                          onPress={() => toggleChecklistItem(item.id, index)}
+                          style={styles.checklistRow}>
+                          <Text style={styles.checkboxGlyph}>{checked ? '☑' : '☐'}</Text>
+                          <Text style={[styles.noteText, checked && styles.checkedText]}>{checklist[4] || ' '}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
                 <View style={styles.noteFooter}>
                   <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleDateString()}</Text>
                   <Pressable
@@ -511,6 +544,10 @@ const styles = StyleSheet.create({
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
   input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
   editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  notePreview: { gap: 3 },
+  checklistRow: { flexDirection: 'row', alignItems: 'center', minHeight: 40, gap: 8 },
+  checkboxGlyph: { fontSize: 23, color: '#347b0a' },
+  checkedText: { textDecorationLine: 'line-through', opacity: 0.65 },
   bodyInput: { minHeight: 190, maxHeight: 360, textAlignVertical: 'top' },
   hint: { color: '#687763', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 },
