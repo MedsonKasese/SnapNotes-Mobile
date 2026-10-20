@@ -96,6 +96,9 @@ export function NotesWorkspace() {
           <View style={styles.header}>
             <Text accessibilityRole="header" style={styles.brand}>SnapNotes</Text>
             <Text style={styles.tagline}>Save Your Mind.</Text>
+            <View style={styles.warning}>
+              <Text style={styles.warningText}>Saved on this device only — saved notes survive reloads and restarts. Unsaved drafts do not. Storage is not encrypted; clearing app data or uninstalling can remove notes. No cloud backup or PWA sync.</Text>
+            </View>
             <View style={styles.searchRow}>
               <TextInput
                 accessibilityLabel="Search saved notes"
@@ -114,9 +117,6 @@ export function NotesWorkspace() {
             {searching && <Text accessibilityLiveRegion="polite" style={styles.hint}>
               {visibleNotes.length} of {state.notes.length} notes match
             </Text>}
-            <View style={styles.warning}>
-              <Text style={styles.warningText}>Saved on this device only — saved notes survive reloads and restarts. Unsaved drafts do not. Storage is not encrypted; clearing app data or uninstalling can remove notes. No cloud backup or PWA sync.</Text>
-            </View>
             <View style={styles.editor}>
               <Text accessibilityRole="header" style={styles.heading}>
                 {state.editingId === null ? 'New note' : 'Edit note'}
