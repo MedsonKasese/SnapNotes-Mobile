@@ -4,12 +4,12 @@ A private, standalone React Native app built with Expo SDK 58 and TypeScript. Th
 
 ## Current scope
 
-You can create and edit plain-text notes saved **on this device**. After Save succeeds, notes survive app reloads and restarts. Unsaved drafts are not restored. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
+You can create and edit plain-text notes saved **on this device**. After Save succeeds, notes survive app reloads and restarts. The editor also autosaves one recovery draft on this device and restores it into the editor after a successful notes load. Recovery drafts are not saved notes, do not appear in the library, and are cleared after a successful save or an explicit discard. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
 
 - Optional title and body; at least one must contain non-whitespace text. Body-only notes display as “Untitled note” without storing that fallback.
 - The 1,500-character budget follows the PWA inline editor: normalized title + body, including `## ` and a line break when a title is present. The live counter and save validator use the same rule. Title/body are explicit native fields; Markdown heading parsing and rich text are not included.
 - Saving creates a new note at the top of the device list. Editing updates that note without changing its ID, creation time, or default `general` category; update time changes on save.
-- Draft changes do not touch a saved note until Save changes is tapped. Cancel, New note, and switching to another note ask before discarding a changed draft. Only explicitly saved notes are recovered after restart; draft changes are not persisted.
+- Draft changes do not touch a saved note until Save changes is tapped. The latest changed editor draft is autosaved to a separate device-only recovery key after a short debounce and restored after restart; changing views still asks before discarding it. Recovery is a single editor draft, not the PWA's full multi-draft library.
 
 There is no account/auth, cloud sync, migration/import from the PWA, categories UI, deletion, or notifications. The PWA repository and its users/data are untouched.
 
@@ -81,7 +81,7 @@ The SDK 58 dependency tree currently reports **22 npm audit findings (15 high, 7
 5. Change an edit, then Cancel or choose another note. Keep editing must preserve the draft; Discard changes must leave the saved original intact. New note while editing must start a blank composer after confirmation.
 6. Save multiple notes and edit an older one; other notes must stay unchanged. Check typing focus, keyboard scrolling, large system text, and screen-reader labels on Android and iOS.
 7. After a successful Save, reload the app, then fully close and reopen it. Saved notes, their order, IDs, content and timestamps must remain. Edit a restored note, save, and restart again; the edit must remain without duplication. Create a new note after restart and verify existing notes are not replaced.
-8. Type a new draft or change an existing note without saving, then restart. Only the last successfully saved collection should return; the draft must not.
+8. Type a new draft or change an existing note without saving. Wait briefly for recovery autosave, then fully close and reopen the app. The editor should reopen with the unsaved text; the saved library collection must remain unchanged. Explicitly discard the recovered draft and restart again to confirm it does not return.
 9. With a delayed/rejecting storage backend in a development harness, verify that startup hides the editor until loading succeeds. Read errors must show Retry and never write an empty collection. A failed Save must keep the draft and original saved list, show an error, and allow retry. While saving, fields/actions are disabled and rapid Save taps cannot overlap. These paths are covered deterministically by the controller tests; native presentation still needs device review.
 10. With malformed or newer-version data in the development storage key, restart: show a load error, retain the original bytes, and block editing/saving rather than silently resetting. There is intentionally no destructive reset/recovery button in this slice.
 
