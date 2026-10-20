@@ -11,3 +11,8 @@ test('toggling opens editor draft rather than silently changing saved data', () 
   assert.match(source, /dispatch\(\{ type: 'edit', id: noteId \}\)/);
   assert.match(source, /dispatch\(\{ type: 'change', field: 'text', value: lines\.join\('\\n'\) \}\)/);
 });
+
+test('checklist parser uses whitespace regexes rather than literal backslashes', () => {
+  assert.match(source, /const match = \/\^\(\\s\*\)\(☐\|☑\)\(\\s\)\//);
+  assert.match(source, /const checklist = \/\^\(\\s\*\)\(☐\|☑\)\(\\s\)\(\.\*\)\$\//);
+});
