@@ -5,9 +5,9 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
 const controller = readFileSync(new URL('../src/notesController.ts', import.meta.url), 'utf8');
 
-test('checklist preview exposes accessible checked state and prevents toggles during writes', () => {
+test('checklist preview exposes accessible checked and disabled states during writes', () => {
   assert.match(source, /accessibilityRole="checkbox"/);
-  assert.match(source, /accessibilityState=\{\{ checked \}\}/);
+  assert.match(source, /accessibilityState=\{\{ checked, disabled: saving \}\}/);
   assert.match(source, /disabled=\{saving\}/);
 });
 
@@ -20,9 +20,12 @@ test('toggling a checklist item persists directly without opening the editor', (
   assert.match(controller, /Could not save this checklist change on this device/);
 });
 
-test('checklist rows use compact spacing while retaining a practical touch target', () => {
+test('checklist rows remove excess height and keep wrapped labels aligned', () => {
   assert.match(source, /notePreview: \{ gap: 0 \}/);
-  assert.match(source, /checklistRow: \{[^}]*minHeight: 36/);
+  assert.match(source, /checklistRow: \{[^}]*minHeight: 28, paddingVertical: 2/);
+  assert.match(source, /checklistRow: \{[^}]*alignItems: 'flex-start'/);
+  assert.match(source, /checkboxGlyph: \{[^}]*includeFontPadding: false, flexShrink: 0/);
+  assert.match(source, /<ChecklistLabel text=\{checklist\[4\]\} checked=\{checked\}/);
 });
 
 test('checklist parser uses whitespace regexes rather than literal backslashes', () => {

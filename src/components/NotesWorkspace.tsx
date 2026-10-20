@@ -10,6 +10,7 @@ import {
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
+import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor';
 
@@ -410,13 +411,13 @@ export function NotesWorkspace() {
                       const checked = checklist[2] === '☑';
                       return (
                         <Pressable key={index} accessibilityRole="checkbox"
-                          accessibilityState={{ checked }}
+                          accessibilityState={{ checked, disabled: saving }}
                           accessibilityLabel={checklist[4] || 'Checklist item'}
                           onPress={() => toggleChecklistItem(item.id, index)}
                           disabled={saving}
                           style={styles.checklistRow}>
                           <Text style={styles.checkboxGlyph}>{checked ? '☑' : '☐'}</Text>
-                          <Text style={[styles.noteText, checked && styles.checkedText]}>{checklist[4] || ' '}</Text>
+                          <ChecklistLabel text={checklist[4]} checked={checked} />
                         </Pressable>
                       );
                     })}
@@ -545,9 +546,8 @@ const styles = StyleSheet.create({
   input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
   editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   notePreview: { gap: 0 },
-  checklistRow: { flexDirection: 'row', alignItems: 'center', minHeight: 36, paddingVertical: 2, gap: 8 },
-  checkboxGlyph: { fontSize: 20, lineHeight: 24, color: '#347b0a' },
-  checkedText: { textDecorationLine: 'line-through', opacity: 0.65 },
+  checklistRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 28, paddingVertical: 2, gap: 8 },
+  checkboxGlyph: { fontSize: 20, lineHeight: 24, includeFontPadding: false, flexShrink: 0, color: '#347b0a' },
   bodyInput: { minHeight: 190, maxHeight: 360, textAlignVertical: 'top' },
   hint: { color: '#687763', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 },
