@@ -6,7 +6,6 @@ import {
 import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS,
 } from '../notes';
-import type { Note } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
@@ -426,7 +425,7 @@ const styles = StyleSheet.create({
   editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
   editButtonText: { color: '#3b7f16', fontSize: 13, fontWeight: '800' },
   drawerLayer: { flex: 1, flexDirection: 'row' },
-  drawerBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 28, 12, 0.42)' },
+  drawerBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.42)' },
   drawerPanel: { width: '86%', maxWidth: 340, height: '100%', paddingHorizontal: 16, paddingTop: Platform.OS === 'android' ? 38 : 22, paddingBottom: 20, backgroundColor: '#ffffff', borderRightWidth: 1, borderRightColor: '#e1e9db' },
   drawerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#e8eee3' },
   drawerBrand: { flexDirection: 'row', alignItems: 'center', gap: 10 },

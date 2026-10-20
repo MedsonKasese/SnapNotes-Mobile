@@ -17,6 +17,12 @@ test('navigation exposes only implemented destinations and explains upcoming mig
   assert.doesNotMatch(source, /data-category=/);
 });
 
+test('drawer backdrop fills the screen using the supported React Native API', () => {
+  assert.match(source, /style={styles\.drawerBackdrop}/);
+  assert.match(source, /drawerBackdrop: \{ \.\.\.StyleSheet\.absoluteFill,/);
+  assert.doesNotMatch(source, /StyleSheet\.absoluteFillObject/);
+});
+
 test('Android back and navigation guard unsaved editor changes', () => {
   assert.match(source, /BackHandler\.addEventListener\('hardwareBackPress', handleBack\)/);
   assert.match(source, /Discard unsaved changes\?/);
