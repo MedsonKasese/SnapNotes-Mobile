@@ -9,6 +9,7 @@ import {
 import type { Note } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
+import { searchNotes } from '../noteSearch';
 
 function Action({ label, onPress, secondary = false, disabled = false }: {
   label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
@@ -23,6 +24,7 @@ function Action({ label, onPress, secondary = false, disabled = false }: {
 
 export function NotesWorkspace() {
   const [controller] = useState(() => createNotesController(deviceNotesStorage));
+  const [searchQuery, setSearchQuery] = useState('');
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const dispatch = controller.dispatch;
   const saving = status === 'saving';
@@ -30,6 +32,8 @@ export function NotesWorkspace() {
   const list = useRef<FlatList<Note>>(null);
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
+  const visibleNotes = searchNotes(state.notes, searchQuery);
+  const searching = searchQuery.trim().length > 0;
 
   function confirmDiscard(continueAction: () => void) {
     if (!dirty) {
@@ -83,7 +87,7 @@ export function NotesWorkspace() {
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <FlatList
         ref={list}
-        data={state.notes}
+        data={visibleNotes}
         keyExtractor={note => note.id}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -136,9 +140,27 @@ export function NotesWorkspace() {
               </View>
             </View>
             <Text accessibilityRole="header" style={styles.heading}>Device notes ({state.notes.length})</Text>
+            <View style={styles.searchRow}>
+              <TextInput
+                accessibilityLabel="Search saved notes"
+                autoCorrect={false}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search titles and note text"
+                placeholderTextColor="#64748b"
+                returnKeyType="search"
+                style={[styles.input, styles.searchInput]}
+              />
+              {searchQuery.length > 0 && (
+                <Action label="Clear" secondary onPress={() => setSearchQuery('')} />
+              )}
+            </View>
+            {searching && <Text accessibilityLiveRegion="polite" style={styles.hint}>
+              {visibleNotes.length} of {state.notes.length} notes match
+            </Text>}
           </View>
         }
-        ListEmptyComponent={<Text style={styles.empty}>No notes yet. Write a title or a note above, then tap Save note.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>{searching ? "No matching notes. Try a different search or clear the query." : "No notes yet. Write a title or a note above, then tap Save note."}</Text>}
         renderItem={({ item }) => (
           <View style={[styles.card, state.editingId === item.id && styles.editingCard]}>
             <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
@@ -171,6 +193,8 @@ const styles = StyleSheet.create({
   bodyInput: { minHeight: 160, maxHeight: 280 },
   hint: { color: '#475569', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchInput: { flex: 1, minWidth: 0 },
   button: { backgroundColor: '#1e40af', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14, minHeight: 48, justifyContent: 'center' },
   secondaryButton: { backgroundColor: '#edf2fc' },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
