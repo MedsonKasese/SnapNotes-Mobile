@@ -23,9 +23,9 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 - [x] Treat the PWA as the product and behaviour reference.
 - [x] Keep this checklist in the mobile repository as the shared migration roadmap.
-- [ ] Before each feature, inspect the corresponding PWA implementation, including relevant HTML, JavaScript, CSS, storage, and edge cases.
-- [ ] Audit the existing mobile implementation before changing it; reuse working code and avoid duplicating features.
-- [ ] Document any intentional native-Android difference and why it is needed.
+- [x] Before each feature, inspect the corresponding PWA implementation, including relevant HTML, JavaScript, CSS, storage, and edge cases. (Followed for PR #9 and PR #10; continue for each new feature.)
+- [x] Audit the existing mobile implementation before changing it; reuse working code and avoid duplicating features. (Followed for PR #9 and PR #10; continue for each new feature.)
+- [x] Document any intentional native-Android difference and why it is needed. (PR #10 uses one local recovery draft; the PWA supports a fuller Drafts library, which remains future work.)
 - [ ] Preserve existing user data and backward compatibility when changing storage models.
 - [ ] Make controls functional; do not add decorative buttons that have no working destination or action.
 - [ ] Include loading, empty, error, offline, and permission-denied states where relevant.
@@ -49,11 +49,11 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 ## 3. Main interface and visual design
 
 - [ ] Audit the PWA's real header, branding, navigation, editor, list, spacing, typography, and colour tokens before implementation.
-- [ ] Recreate the SnapNotes visual identity and green primary accent in native-friendly layouts. (PR #9 implementation; Android verification required)
-- [ ] Build a clear app header with menu/navigation, product identity, note count, and account action where applicable. (PR #9 adds menu, brand, and note count; account action remains out of scope until auth is migrated.)
-- [ ] Keep essential navigation/header elements fixed where appropriate instead of scrolling away with the note list. (Implemented; device verification required)
-- [ ] Establish distinct, understandable Library and Editor experiences. (Implemented; device verification required)
-- [ ] Match PWA empty states, loading states, error states, and confirmation patterns. (Initial native states implemented; further parity work remains.)
+- [x] Recreate the SnapNotes visual identity and green primary accent in native-friendly layouts. (PR #9; user verified the app on Android.)
+- [x] Build a clear app header with menu/navigation, product identity, and note count. (PR #9 verified; account action remains out of scope until auth is migrated.)
+- [x] Keep essential navigation/header elements fixed where appropriate instead of scrolling away with the note list. (PR #9 verified on Android.)
+- [x] Establish distinct, understandable Library and Editor experiences. (PR #9 verified on Android.)
+- [x] Implement and verify initial native empty states, loading/error states, and unsaved-change confirmation patterns. (Full PWA parity remains.)
 - [ ] Ensure layouts work on small Android screens and with the on-screen keyboard open.
 - [ ] Respect Android safe areas, status/navigation bars, and system back behaviour.
 - [ ] Avoid clutter, unnecessary animation, and oversized cards; keep the interface focused.
@@ -160,7 +160,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 ## 13. Drafts and edit history
 
 - [ ] Audit PWA draft/autosave behaviour and decide when a note becomes a draft.
-- [ ] Preserve unfinished work after navigation or unexpected app closure.
+- [ ] Preserve unfinished work after navigation or unexpected app closure. (Testing required: PR #10 adds debounced device-only editor-draft recovery; automated checks pass locally, but Android restart/error-path verification is still required.)
 - [ ] Provide a Drafts view if supported by the PWA.
 - [ ] Audit the PWA's edit-history behaviour before implementation.
 - [ ] Restore prior content safely if edit history is supported.
@@ -267,10 +267,10 @@ Update this table as PRs merge and testing results are confirmed.
 | Local note storage foundation | Implemented | Initial JSON snapshot and per-note storage work merged |
 | Storage reliability | Implemented; regression testing remains | Serialization, cleanup, and recovery work merged |
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
-| Main interface and navigation | Implemented; Android testing required | PR #9 introduces a fixed header/search, separate library/editor views, drawer, and Android back handling. Categories/folders/archive/trash/settings/auth are explicitly not active destinations yet. |
+| Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
 | Categories and folders | Not started | Must match PWA behaviour |
 | Formatting and checklists | Not started | Audit native editor against PWA |
-| Drafts and edit history | Not started | Audit PWA behaviour first |
+| Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
 | Attachments and document viewer | Not started | Audit PWA rules and Android file access |
 | Private Notes/security | Not started | Requires explicit privacy testing |
@@ -282,18 +282,26 @@ Update this table as PRs merge and testing results are confirmed.
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-20 | PR #6 search | Native note search, clear action, match count, no-results state | Automated test/check results should be recorded from the actual run | **User verified: search works correctly** | Continue regression checks as navigation and filtering expand |
-| 2026-10-20 | [PR #9 app shell](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/9) | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation; fixed React Native 0.88 drawer backdrop API compatibility | Local `npm run check` passes (TypeScript, ESLint, 57 tests including backdrop regression); `npx expo install --check` passes; `CI=1 EXPO_NO_TELEMETRY=1 npx expo export --platform all` exports Android and iOS JS bundles (not native builds) | **Device verification required** | Verify small-screen layout, drawer, back button, keyboard, editor transitions, search, persistence, and unsaved-change prompt |
+| 2026-10-20 | [PR #9 app shell](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/9) | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation; fixed React Native 0.88 drawer backdrop API compatibility | Local `npm run check` passed before review; user confirms all tests passed | **User verified: app worked perfectly on Android** | Keep regression testing as features expand |
+| 2026-10-20 | [PR #10 editor draft recovery (open PR)](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/10) | Adds separate versioned recovery storage, 500 ms debounce, ordered writes, and visible errors. CI fix separates storage loading from the recovery completion callback for startup and Retry; no lint suppression, storage-format change, or PWA edits | Clean `npm ci`; `npm run check` passed (typecheck, lint, **66 tests**); `npx expo install --check` passed; Android/iOS JavaScript export passed on Node 24.19.0. Added deferred-startup and Retry regression checks. See PR checks for hosted CI rerun results | **Device testing required; not claimed verified** | Use README Termux checkout commands; test new/edit recovery, Save/Discard clearing, malformed data and storage failures. Leave PR open for review |
 
 ---
 
-## Next milestone: main interface and navigation
+## Current milestone: editor draft recovery (PR #10)
 
-Before starting the next feature PR:
+PR #9's app shell and navigation have been merged and user-verified on Android. PR #10 adds recovery for one unsaved native editor draft without changing the saved-note format or pretending the full PWA Drafts library is already migrated.
 
-- [x] Inspect the PWA header, navigation drawer, library/list, search, editor, and relevant styles/scripts.
-- [x] Compare those flows with the current native screens and document gaps.
-- [x] Agree a focused PR scope that establishes the app shell without prematurely implementing every future feature.
-- [x] Implement only controls and destinations that can work within the PR; track later destinations here.
-- [ ] Update this roadmap with the PR link, tests, and device results.
+Before merging PR #10:
+
+- [x] Audit the PWA editor and draft autosave implementation (`index.html`, `js/app.js`, `js/drafts.js`).
+- [x] Audit the native note reducer, controller, and storage boundary before adding recovery.
+- [x] Keep recovery data in a separate versioned key so it cannot overwrite saved notes.
+- [x] Add reducer and source regression tests for recovery and error handling.
+- [x] Run `npm run check` and inspect the original CI failure. (Fixed `react-hooks/set-state-in-effect` without disabling it; typecheck, lint and all 66 tests pass locally. See PR checks for the hosted rerun.)
+- [x] Validate Expo dependency compatibility and export Android/iOS JavaScript bundles locally. (Not native builds or device tests.)
+- [x] Document safe checkout, automated checks, and same-phone Expo Go startup in Termux in README.
+- [ ] Verify autosave and restore on Android after force-close/restart for both new notes and edits.
+- [ ] Verify explicit Save and Discard clear the recovery record, and malformed/storage-failure cases preserve saved notes.
+- [ ] Update this roadmap with final test and device results before merge.
 
 **Golden rule:** PWA parity is a behaviour-and-reliability goal, not a screenshot-only goal. Mark items complete only when implemented and verified.
