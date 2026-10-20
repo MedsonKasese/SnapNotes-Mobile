@@ -281,7 +281,8 @@ Update this table as PRs merge and testing results are confirmed.
 
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
-| 2026-10-20 | PR #6 search | Native note search, clear action, match count, no-results state | Automated test/check results should be recorded from the actual run | **User verified: search works correctly** | Continue regression checks as navigation and filtering expand |\n| 2026-10-20 | PR #9 app shell | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation | CI / local checks pending at PR creation | **Device verification required** | Verify small-screen layout, drawer, back button, keyboard, editor transitions, search, persistence, and unsaved-change prompt |
+| 2026-10-20 | PR #6 search | Native note search, clear action, match count, no-results state | Automated test/check results should be recorded from the actual run | **User verified: search works correctly** | Continue regression checks as navigation and filtering expand |
+| 2026-10-20 | PR #9 app shell | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation | CI / local checks pending at PR creation | **Device verification required** | Verify small-screen layout, drawer, back button, keyboard, editor transitions, search, persistence, and unsaved-change prompt |
 
 ---
 
@@ -289,10 +290,10 @@ Update this table as PRs merge and testing results are confirmed.
 
 Before starting the next feature PR:
 
-- [ ] Inspect the PWA header, navigation drawer, library/list, search, editor, and relevant styles/scripts.
-- [ ] Compare those flows with the current native screens and document gaps.
-- [ ] Agree a focused PR scope that establishes the app shell without prematurely implementing every future feature.
-- [ ] Implement only controls and destinations that can work within the PR; track later destinations here.
+- [x] Inspect the PWA header, navigation drawer, library/list, search, editor, and relevant styles/scripts.
+- [x] Compare those flows with the current native screens and document gaps.
+- [x] Agree a focused PR scope that establishes the app shell without prematurely implementing every future feature.
+- [x] Implement only controls and destinations that can work within the PR; track later destinations here.
 - [ ] Update this roadmap with the PR link, tests, and device results.
 
 **Golden rule:** PWA parity is a behaviour-and-reliability goal, not a screenshot-only goal. Mark items complete only when implemented and verified.
