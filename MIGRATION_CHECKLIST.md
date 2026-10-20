@@ -49,11 +49,11 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 ## 3. Main interface and visual design
 
 - [ ] Audit the PWA's real header, branding, navigation, editor, list, spacing, typography, and colour tokens before implementation.
-- [ ] Recreate the SnapNotes visual identity and green primary accent in native-friendly layouts.
-- [ ] Build a clear app header with menu/navigation, product identity, note count, and account action where applicable.
-- [ ] Keep essential navigation/header elements fixed where appropriate instead of scrolling away with the note list.
-- [ ] Establish distinct, understandable Library and Editor experiences.
-- [ ] Match PWA empty states, loading states, error states, and confirmation patterns.
+- [ ] Recreate the SnapNotes visual identity and green primary accent in native-friendly layouts. (PR #9 implementation; Android verification required)
+- [ ] Build a clear app header with menu/navigation, product identity, note count, and account action where applicable. (PR #9 adds menu, brand, and note count; account action remains out of scope until auth is migrated.)
+- [ ] Keep essential navigation/header elements fixed where appropriate instead of scrolling away with the note list. (Implemented; device verification required)
+- [ ] Establish distinct, understandable Library and Editor experiences. (Implemented; device verification required)
+- [ ] Match PWA empty states, loading states, error states, and confirmation patterns. (Initial native states implemented; further parity work remains.)
 - [ ] Ensure layouts work on small Android screens and with the on-screen keyboard open.
 - [ ] Respect Android safe areas, status/navigation bars, and system back behaviour.
 - [ ] Avoid clutter, unnecessary animation, and oversized cards; keep the interface focused.
@@ -266,8 +266,8 @@ Update this table as PRs merge and testing results are confirmed.
 | Expo / React Native foundation | Implemented; continue regression testing | App runs in the current development setup |
 | Local note storage foundation | Implemented | Initial JSON snapshot and per-note storage work merged |
 | Storage reliability | Implemented; regression testing remains | Serialization, cleanup, and recovery work merged |
-| Native note search | Verified by user | Search works correctly on Android after merge |
-| Main interface and navigation | Not started | Next planned implementation milestone; audit PWA first |
+| Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
+| Main interface and navigation | Implemented; Android testing required | PR #9 introduces a fixed header/search, separate library/editor views, drawer, and Android back handling. Categories/folders/archive/trash/settings/auth are explicitly not active destinations yet. |
 | Categories and folders | Not started | Must match PWA behaviour |
 | Formatting and checklists | Not started | Audit native editor against PWA |
 | Drafts and edit history | Not started | Audit PWA behaviour first |
@@ -282,6 +282,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-20 | PR #6 search | Native note search, clear action, match count, no-results state | Automated test/check results should be recorded from the actual run | **User verified: search works correctly** | Continue regression checks as navigation and filtering expand |
+| 2026-10-20 | [PR #9 app shell](https://github.com/MedsonKasese/SnapNotes-Mobile/pull/9) | Fixed header/search, separate All Notes library and editor views, functional drawer for implemented destinations, green native styling, back navigation and unsaved-change confirmation; fixed React Native 0.88 drawer backdrop API compatibility | Local `npm run check` passes (TypeScript, ESLint, 57 tests including backdrop regression); `npx expo install --check` passes; `CI=1 EXPO_NO_TELEMETRY=1 npx expo export --platform all` exports Android and iOS JS bundles (not native builds) | **Device verification required** | Verify small-screen layout, drawer, back button, keyboard, editor transitions, search, persistence, and unsaved-change prompt |
 
 ---
 
@@ -289,10 +290,10 @@ Update this table as PRs merge and testing results are confirmed.
 
 Before starting the next feature PR:
 
-- [ ] Inspect the PWA header, navigation drawer, library/list, search, editor, and relevant styles/scripts.
-- [ ] Compare those flows with the current native screens and document gaps.
-- [ ] Agree a focused PR scope that establishes the app shell without prematurely implementing every future feature.
-- [ ] Implement only controls and destinations that can work within the PR; track later destinations here.
+- [x] Inspect the PWA header, navigation drawer, library/list, search, editor, and relevant styles/scripts.
+- [x] Compare those flows with the current native screens and document gaps.
+- [x] Agree a focused PR scope that establishes the app shell without prematurely implementing every future feature.
+- [x] Implement only controls and destinations that can work within the PR; track later destinations here.
 - [ ] Update this roadmap with the PR link, tests, and device results.
 
 **Golden rule:** PWA parity is a behaviour-and-reliability goal, not a screenshot-only goal. Mark items complete only when implemented and verified.
