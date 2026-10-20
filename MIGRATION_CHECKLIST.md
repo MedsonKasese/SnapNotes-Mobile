@@ -269,7 +269,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
 | Categories and folders | Not started | Must match PWA behaviour |
-| Formatting and checklists | In progress; Android testing required | PR #11 adds text checklist-item insertion, matching the PWA's `☐ ` marker; interactive checkbox completion remains future work. |
+| Formatting and checklists | In progress; Android testing required | PR #11 adds insertion; PR #12 adds tappable checklist previews that open an unsaved editor draft. Full formatting and inline checkbox editing remain. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
 | Attachments and document viewer | Not started | Audit PWA rules and Android file access |
