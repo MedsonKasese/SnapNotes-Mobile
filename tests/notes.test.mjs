@@ -284,3 +284,19 @@ test('invalid edits preserve the saved original and remain editable', () => {
   assert.equal(corrected.notes[0].id, 'original');
   assert.equal(corrected.notes[0].text, 'Corrected');
 });
+
+
+test('category selection persists through create, edit, and category-only dirty detection', () => {
+  const selected = notesReducer(initialNotesState(), { type: 'category', category: 'work' });
+  assert.equal(hasUnsavedChanges(selected), true);
+  const created = save(fillDraft(selected, { text: 'Project task' }), 'category-work');
+  assert.equal(created.notes[0].category, 'work');
+  const editing = notesReducer(created, { type: 'edit', id: 'category-work' });
+  assert.equal(editing.draft.category, 'work');
+  assert.equal(hasUnsavedChanges(editing), false);
+  const changed = notesReducer(editing, { type: 'category', category: 'ideas' });
+  assert.equal(hasUnsavedChanges(changed), true);
+  const updated = save(changed, 'unused', UPDATED_AT);
+  assert.equal(updated.notes[0].category, 'ideas');
+  assert.equal(updated.notes[0].id, 'category-work');
+});
