@@ -147,6 +147,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
       if (name === 'react/jsx-runtime') return require(name);
+      // Native font loading is outside this deterministic recovery harness.
+      if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };
       if (name === '@react-native-async-storage/async-storage') return AsyncStorage;
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };

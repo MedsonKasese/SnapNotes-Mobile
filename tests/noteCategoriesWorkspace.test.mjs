@@ -51,6 +51,8 @@ function workspace() {
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
       if (name === 'react/jsx-runtime') return require(name);
+      // Keep the icon element/props inspectable without loading native fonts.
+      if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };
       if (name === '@react-native-async-storage/async-storage') return {};
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };
@@ -131,4 +133,33 @@ test('empty categories explain the filter instead of claiming there are no saved
   assert.doesNotMatch(text(empty), /Your first note|Your space is ready/);
   assert.equal(action(empty, 'Create a note').props.label, 'Create a note');
   assert.equal(app.controller.getSnapshot().state.notes.length, 3);
+});
+
+test('drawer icons retain their names and remain decorative within labelled buttons', () => {
+  const app = workspace();
+  const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'plus']);
+  for (const row of rows) {
+    const rendered = row.type(row.props);
+    assert.equal(rendered.props.accessibilityRole, 'button');
+    assert.ok(text(rendered).includes(row.props.label));
+    const icon = find(rendered, element => element.type === 'FontAwesome');
+    assert.equal(icon.props.name, row.props.icon);
+    assert.equal(icon.props.accessible, false);
+  }
+});
+
+test('icon-only pin controls retain accessible pin/unpin labels and selected state', () => {
+  const app = workspace();
+  for (const pinned of [false, true]) {
+    const item = { ...savedNotes[0], pinned };
+    const card = list(app.render()).props.renderItem({ item });
+    const button = find(card, element => element.type === 'Pressable' && element.props.accessibilityLabel === `${pinned ? 'Unpin' : 'Pin'} Project alpha`);
+    assert.equal(button.props.accessibilityRole, 'button');
+    assert.equal(button.props.accessibilityState.selected, pinned);
+    const icon = find(button, element => element.type === 'FontAwesome');
+    assert.equal(icon.props.name, 'thumb-tack');
+    assert.equal(icon.props.accessible, false);
+    assert.equal(icon.props.color, pinned ? '#b98500' : '#52634b');
+  }
 });
