@@ -491,7 +491,10 @@ export function NotesWorkspace() {
                   </View>
                 )}
                 <View style={styles.noteFooter}>
-                  <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleDateString()}</Text>
+                  <View style={styles.noteMeta}>
+                    <Text style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
+                    <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
+                  </View>
                   <Pressable
                     disabled={saving}
                     accessibilityState={{ disabled: saving }}
@@ -642,6 +645,8 @@ const styles = StyleSheet.create({
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
+  noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
+  noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
   editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
   editButtonText: { color: '#3b7f16', fontSize: 13, fontWeight: '800' },
   drawerLayer: { flex: 1, flexDirection: 'row' },
