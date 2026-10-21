@@ -594,7 +594,7 @@ export function NotesWorkspace() {
                       style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
                     >
                       <Text style={styles.editButtonText}>Open note ›</Text>
-                    </Pressable>
+                    </Pressable>}
                   </View>
                 </View>
               </View>
