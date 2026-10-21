@@ -103,6 +103,36 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  async function setArchived(id: string, archived: boolean, now: string) {
+    if (snapshot.status !== 'ready') return;
+    const previous = snapshot.state;
+    const target = previous.notes.find(note => note.id === id);
+    if (!target) {
+      publish({ ...snapshot, state: { ...previous, error: 'This note could not be found.' } });
+      return;
+    }
+    if (target.archived === archived) return;
+
+    const notes = previous.notes.map(note => note.id === id
+      ? { ...note, archived, updatedAt: now }
+      : note);
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      publish({
+        state: { ...previous, notes, error: null, notice: archived ? 'Note archived.' : 'Note restored.' },
+        status: 'ready',
+        storageError: null,
+      });
+    } catch {
+      publish({
+        state: previous,
+        status: 'ready',
+        storageError: `Could not ${archived ? 'archive' : 'restore'} this note on this device. Your saved note has not been changed. Please try again.`,
+      });
+    }
+  }
+
   async function save(now: string) {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
@@ -131,6 +161,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin,
+    load, dispatch, save, updateNoteText, togglePin, setArchived,
   };
 }
