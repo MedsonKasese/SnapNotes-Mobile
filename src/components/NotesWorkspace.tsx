@@ -71,7 +71,8 @@ export function NotesWorkspace() {
   const saving = status === 'saving';
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
-  const visibleNotes = searchNotes(state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter), searchQuery);
+  const categoryNotes = state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
+  const visibleNotes = searchNotes(categoryNotes, searchQuery);
   const searching = searchQuery.trim().length > 0;
 
   const restoreEditorDraft = useCallback(async () => {
@@ -324,7 +325,7 @@ export function NotesWorkspace() {
         </View>
         {searching && view === 'library' && (
           <Text accessibilityLiveRegion="polite" style={styles.searchSummary}>
-            {visibleNotes.length} of {state.notes.length} notes match
+            {visibleNotes.length} of {categoryNotes.length} notes match
           </Text>
         )}
       </View>
@@ -343,7 +344,7 @@ export function NotesWorkspace() {
                   {state.editingId === null ? 'New note' : 'Edit note'}
                 </Text>
               </View>
-              <Action label="All notes" secondary onPress={openLibrary} disabled={saving} />
+              <Action label="All notes" secondary onPress={() => selectLibraryCategory('all')} disabled={saving} />
             </View>
             <View style={styles.warning}>
               <Text style={styles.warningTitle}>Stored on this device</Text>
@@ -411,7 +412,7 @@ export function NotesWorkspace() {
             </View>
             <Action label="+ New note" onPress={openNewNote} />
           </View>
-          <Text style={styles.libraryHint}>{categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${visibleNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          <Text style={styles.libraryHint}>{categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
           </ScrollView>
@@ -425,9 +426,9 @@ export function NotesWorkspace() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyMark}><Text style={styles.emptyMarkText}>{searching ? '⌕' : '+'}</Text></View>
-                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : 'Your space is ready'}</Text>
-                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
-                {!searching && <Action label="Create your first note" onPress={openNewNote} />}
+                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
+                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
+                {!searching && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
               </View>
             }
             renderItem={({ item }) => (
