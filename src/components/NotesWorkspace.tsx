@@ -514,6 +514,7 @@ export function NotesWorkspace() {
                     <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
                   </View>
                   <View style={styles.noteFooterActions}>
+                    {view !== 'archive' && (
                     <Pressable
                       disabled={saving}
                       accessibilityRole="button"
@@ -524,6 +525,31 @@ export function NotesWorkspace() {
                     >
                       <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#52634b'} accessible={false} />
                     </Pressable>
+                    )}
+                    {view !== 'archive' && (
+                      <Pressable
+                        disabled={saving}
+                        accessibilityRole="button"
+                        accessibilityLabel={'Archive ' + (item.title || 'Untitled note')}
+                        accessibilityState={{ disabled: saving }}
+                        onPress={() => { void controller.setArchived(item.id, true, new Date().toISOString()); }}
+                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
+                      >
+                        <FontAwesome name="archive" size={18} color="#52634b" accessible={false} />
+                      </Pressable>
+                    )}
+                    {view === 'archive' && (
+                      <Pressable
+                        disabled={saving}
+                        accessibilityRole="button"
+                        accessibilityLabel={'Restore ' + (item.title || 'Untitled note')}
+                        accessibilityState={{ disabled: saving }}
+                        onPress={() => { void controller.setArchived(item.id, false, new Date().toISOString()); }}
+                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
+                      >
+                        <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
+                      </Pressable>
+                    )}
                     <Pressable
                       disabled={saving}
                       accessibilityState={{ disabled: saving }}
@@ -572,11 +598,12 @@ export function NotesWorkspace() {
             <View style={styles.drawerNavigation}>
               <MenuRow label="All notes" icon="inbox" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <MenuRow label="Archived" icon="archive" detail={archiveNotes.length + " notes"} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
-              <Text style={styles.drawerNoticeText}>Folders, archive, trash, settings, and account features will appear here as they are migrated and tested. They are not shown as active destinations yet.</Text>
+              <Text style={styles.drawerNoticeText}>Folders, Trash, settings, and account features will appear here as they are migrated and tested. Archive is now available.</Text>
             </View>
             <View style={styles.drawerFooter}>
               <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
@@ -678,6 +705,7 @@ const styles = StyleSheet.create({
   noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
   pinButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
+  archiveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
 
   noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
   noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
