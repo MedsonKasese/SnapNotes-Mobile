@@ -5,7 +5,7 @@ import { createNotesStorage, NOTES_STORAGE_KEY } from '../src/notesStorage.ts';
 
 const NOW = '2026-10-19T18:00:00.000Z';
 const LATER = '2026-10-19T19:00:00.000Z';
-const note = { id: 'local-note-2', title: 'Original', text: 'Body', category: 'general', createdAt: NOW, updatedAt: NOW };
+const note = { id: 'local-note-2', title: 'Original', text: 'Body', category: 'general', createdAt: NOW, updatedAt: NOW, pinned: false, archived: false };
 function deferred() {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
