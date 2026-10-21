@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { NOTES_STORAGE_KEY, createNotesStorage } from '../src/notesStorage.ts';
 
 const date = '2026-10-19T18:00:00.000Z';
-const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date, pinned: false });
+const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date, pinned: false, archived: false });
 function backend() {
   const data = new Map();
   let failKey = null;
@@ -341,6 +341,25 @@ test('pinned state persists and legacy records without pinned default to unpinne
   delete legacyRecord.category;
   legacyDb.data.set(NOTES_STORAGE_KEY, JSON.stringify({ version: 1, notes: [legacyRecord] }));
   assert.deepEqual(await createNotesStorage(legacyDb).load(), [note('legacy')]);
+});
+
+test('archived state persists and legacy records default to active', async () => {
+  const db = backend();
+  const notes = [{ ...note('archived'), archived: true }, note('active')];
+  await createNotesStorage(db).save(notes);
+  assert.deepEqual(await createNotesStorage(db).load(), notes);
+
+  const legacyDb = backend();
+  const legacyRecord = { ...note('legacy-archive') };
+  delete legacyRecord.archived;
+  legacyDb.data.set(NOTES_STORAGE_KEY, JSON.stringify({ version: 1, notes: [legacyRecord] }));
+  assert.deepEqual(await createNotesStorage(legacyDb).load(), [note('legacy-archive')]);
+});
+
+test('rejects invalid archived values without committing a save', async () => {
+  const db = backend();
+  await assert.rejects(createNotesStorage(db).save([{ ...note('bad-archive'), archived: 'yes' }]), /archived must be a boolean/);
+  assert.equal(db.data.size, 0);
 });
 
 test('rejects invalid pinned values without committing a save', async () => {

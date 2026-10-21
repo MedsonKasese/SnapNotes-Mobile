@@ -12,6 +12,7 @@ export type Note = NoteDraft & {
   createdAt: string;
   updatedAt: string;
   pinned: boolean;
+  archived: boolean;
 };
 export type NotesState = {
   notes: Note[];
@@ -106,7 +107,7 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
         if (state.notes.some(note => note.id === action.id)) {
           return { ...state, error: 'Could not create a unique note. Please try saving again.', notice: null };
         }
-        notes = [{ ...draft, id: action.id, category: normalizeCategory(state.draft.category), createdAt: action.now, updatedAt: action.now, pinned: false }, ...state.notes];
+        notes = [{ ...draft, id: action.id, category: normalizeCategory(state.draft.category), createdAt: action.now, updatedAt: action.now, pinned: false, archived: false }, ...state.notes];
       }
       return {
         ...initialNotesState(), notes,

@@ -106,9 +106,9 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 8. Note management
 
-- [ ] Pin and unpin notes, matching PWA behaviour. (PR #14 implements the action, pinned-first sorting, and local persistence; Android verification required.)
+- [x] Pin and unpin notes, matching PWA behaviour. (PR #14 merged; user verified the pin icon, pinned-first sorting, persistence, and clean card layout against the PWA.)
 - [ ] Duplicate notes if supported by the PWA.
-- [ ] Archive and restore notes.
+- [ ] Archive and restore notes. (PR #15 implements the initial archive library, persisted archive state, and restore action; testing required.)
 - [ ] Move notes to Trash and restore them.
 - [ ] Permanently delete notes with clear confirmation.
 - [ ] Select and manage multiple notes if the PWA supports bulk actions.
@@ -268,7 +268,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Storage reliability | Implemented; regression testing remains | Serialization, cleanup, and recovery work merged |
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
-| Categories and folders | **Categories implemented; testing required** | PR #13 adds category selection, library filters, drawer counts, backward-compatible storage, and automated regression tests. Folders remain future work. |
+| Categories and folders | **Categories implemented; user verified** | PR #13 merged; user verified category display and assignment on Android. Folders remain future work. |
 | Formatting and checklists | In progress; Android testing required | PR #11 adds insertion; PR #12 toggles and persists checklist previews without opening the editor. Compact rows and italic checked labels with a thicker strike-through are implemented. Automated checks pass; native visual, font-scaling, and touch testing remain. Full formatting remains future work. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
@@ -282,7 +282,7 @@ Update this table as PRs merge and testing results are confirmed.
 **PR #14 icon follow-up:** The later FontAwesome change reproduced 25 test failures because two strict VM test harnesses lacked the new native icon import mock. Added explicit module mocks without disabling unknown-import guards or existing tests, plus two regressions for drawer icons and accessible pin/unpin labels/state. Updated `expo-font` from `~58.0.8` to Expo's recommended `~58.0.9` and refreshed the lockfile without adding native configuration. A fresh `npm ci`, typecheck, lint, all **123 tests**, Expo dependency compatibility, and Android/iOS JavaScript exports passed; the exports include `FontAwesome.ttf`. Independent review found no further confirmed icon defect; no DeepCode/Snyk scan was available. Hold merge until hosted CI and Android/Expo Go checks (including icon loading, pinning/restart, and TalkBack) pass. The Node module-type warning is non-fatal; device verification is still outstanding.
 
 | 2026-10-21 | PR #13 (implementation in progress) | Five-category editor picker, library filtering, drawer counts, backward-compatible category storage and regression tests | Not yet run in Termux; do not treat as passed | **Android / Expo Go testing required** | Check create/edit/category-only changes, filtering combined with search, restart persistence, legacy notes defaulting to General, and drawer navigation. |
-| 2026-10-21 | PR #14 (fixes validated locally; open for review) | Fixed unclosed note-card JSX and two outdated unpinned-default assertions; added pin-controller persistence, pending-write, failure/retry, draft-preservation, and missing-ID regressions | Clean `npm ci`; `npm run check` passed on Node 24.19.0 (typecheck, lint, **121 tests**); `npx expo install --check` passed; Android/iOS JavaScript exports passed (not native builds). Independent in-depth code review completed; no DeepCode/Snyk scan was available. Hosted checks could not be read due to integration permissions | **Android / Expo Go testing required; not claimed verified** | Hold merge until hosted CI and device tests pass: pin/unpin from All/category/search, ordering, timestamps, restart persistence, edit/checklist preservation, rapid taps, storage-failure rollback, narrow-screen/larger-font layout, and TalkBack labels. |
+| 2026-10-21 | PR #14 (merged; user verified) | Pin/unpin action with Font Awesome thumbtack, pinned-first ordering, local persistence, uncluttered icon-only card action, and Font Awesome category drawer icons | PR #14's prior automated checks recorded in the preceding log; user reports the merged UI looks and behaves like the PWA | **User verified on Android** | Continue regression checks while archive and trash are migrated. |
 
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
@@ -311,3 +311,6 @@ Before merging PR #10:
 - [ ] Update this roadmap with final test and device results before merge.
 
 **Golden rule:** PWA parity is a behaviour-and-reliability goal, not a screenshot-only goal. Mark items complete only when implemented and verified.
+
+
+| 2026-10-21 | PR #15 (in progress) | Adds persisted archive state, Archived drawer destination, archive action, and restore action; legacy notes default to active | Automated checks not run in the developer's local Termux environment | **Android / Expo Go testing required** | Verify archive removes a note from All/category counts, archived notes appear only in Archived, restore returns them to the library, state survives restart, search works in both views, and failed writes roll back safely. |

@@ -13,7 +13,7 @@ import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 import { ChecklistLabel } from './ChecklistLabel';
 
-type WorkspaceView = 'library' | 'editor';
+type WorkspaceView = 'library' | 'editor' | 'archive';
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -93,8 +93,11 @@ export function NotesWorkspace() {
   const saving = status === 'saving';
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
-  const categoryNotes = state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
-  const visibleNotes = sortNotesPinnedFirst(searchNotes(categoryNotes, searchQuery));
+  const activeNotes = state.notes.filter(note => !note.archived);
+  const categoryNotes = activeNotes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
+  const archiveNotes = state.notes.filter(note => note.archived);
+  const sourceNotes = view === 'archive' ? archiveNotes : categoryNotes;
+  const visibleNotes = sortNotesPinnedFirst(searchNotes(sourceNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
 
   const restoreEditorDraft = useCallback(async () => {
@@ -213,6 +216,16 @@ export function NotesWorkspace() {
     });
   }
 
+  function selectArchive() {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      setCategoryFilter('all');
+      setDrawerOpen(false);
+      setView('archive');
+    });
+  }
+
   function confirmDiscard(continueAction: () => void) {
     if (!dirty) {
       continueAction();
@@ -257,7 +270,7 @@ export function NotesWorkspace() {
       setDrawerOpen(false);
       return true;
     }
-    if (view === 'editor') {
+    if (view === 'editor' || view === 'archive') {
       openLibrary();
       return true;
     }
@@ -334,8 +347,8 @@ export function NotesWorkspace() {
             </View>
           </View>
           <View style={styles.countPill} accessibilityLiveRegion="polite">
-            <Text style={styles.countText}>{state.notes.length}</Text>
-            <Text style={styles.countLabel}>{state.notes.length === 1 ? 'note' : 'notes'}</Text>
+            <Text style={styles.countText}>{view === 'archive' ? archiveNotes.length : activeNotes.length}</Text>
+            <Text style={styles.countLabel}>{(view === 'archive' ? archiveNotes.length : activeNotes.length) === 1 ? 'note' : 'notes'}</Text>
           </View>
         </View>
         <View style={styles.searchRow}>
@@ -446,14 +459,14 @@ export function NotesWorkspace() {
           <View style={styles.libraryHeading}>
             <View>
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
-              <Text accessibilityRole="header" style={styles.screenTitle}>{categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
+              <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
             <Action label="+ New note" onPress={openNewNote} />
           </View>
-          <Text style={styles.libraryHint}>{categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
+          <Text style={styles.libraryHint}>{view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          {view !== 'archive' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
-          </ScrollView>
+          </ScrollView>}
           {storageError !== null && <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>}
           <FlatList
             data={visibleNotes}
@@ -464,9 +477,9 @@ export function NotesWorkspace() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyMark}><Text style={styles.emptyMarkText}>{searching ? '⌕' : '+'}</Text></View>
-                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
-                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
-                {!searching && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
+                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : view === 'archive' ? 'Your archive is empty' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
+                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : view === 'archive' ? 'Notes you archive will appear here. You can restore them at any time.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
+                {!searching && view !== 'archive' && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
               </View>
             }
             renderItem={({ item }) => (
@@ -501,6 +514,7 @@ export function NotesWorkspace() {
                     <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
                   </View>
                   <View style={styles.noteFooterActions}>
+                    {view !== 'archive' && (
                     <Pressable
                       disabled={saving}
                       accessibilityRole="button"
@@ -511,6 +525,31 @@ export function NotesWorkspace() {
                     >
                       <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#52634b'} accessible={false} />
                     </Pressable>
+                    )}
+                    {view !== 'archive' && (
+                      <Pressable
+                        disabled={saving}
+                        accessibilityRole="button"
+                        accessibilityLabel={'Archive ' + (item.title || 'Untitled note')}
+                        accessibilityState={{ disabled: saving }}
+                        onPress={() => { void controller.setArchived(item.id, true, new Date().toISOString()); }}
+                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
+                      >
+                        <FontAwesome name="archive" size={18} color="#52634b" accessible={false} />
+                      </Pressable>
+                    )}
+                    {view === 'archive' && (
+                      <Pressable
+                        disabled={saving}
+                        accessibilityRole="button"
+                        accessibilityLabel={'Restore ' + (item.title || 'Untitled note')}
+                        accessibilityState={{ disabled: saving }}
+                        onPress={() => { void controller.setArchived(item.id, false, new Date().toISOString()); }}
+                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
+                      >
+                        <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
+                      </Pressable>
+                    )}
                     <Pressable
                       disabled={saving}
                       accessibilityState={{ disabled: saving }}
@@ -557,13 +596,14 @@ export function NotesWorkspace() {
               </Pressable>
             </View>
             <View style={styles.drawerNavigation}>
-              <MenuRow label="All notes" icon="inbox" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
-              {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
+              {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
-              <Text style={styles.drawerNoticeText}>Folders, archive, trash, settings, and account features will appear here as they are migrated and tested. They are not shown as active destinations yet.</Text>
+              <Text style={styles.drawerNoticeText}>Folders, Trash, settings, and account features will appear here as they are migrated and tested. Archive is now available.</Text>
             </View>
             <View style={styles.drawerFooter}>
               <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
@@ -665,6 +705,7 @@ const styles = StyleSheet.create({
   noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
   pinButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
+  archiveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
 
   noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
   noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },

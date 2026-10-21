@@ -13,7 +13,10 @@ test('native shell keeps branding and search outside the scrolling note list', (
 test('navigation exposes only implemented destinations and explains upcoming migration areas', () => {
   assert.match(source, /label="All notes"/);
   assert.match(source, /label="New note"/);
-  assert.match(source, /Folders, archive, trash, settings, and account features/);
+  assert.match(source, /label="Archived" icon="archive"[\s\S]*?onPress={selectArchive}/);
+  assert.match(source, /Folders, Trash, settings, and account features/);
+  assert.match(source, /Archive is now available\./);
+  assert.doesNotMatch(source, /Folders, archive, trash/);
   assert.doesNotMatch(source, /Categories, folders/);
   assert.match(source, /NOTE_CATEGORIES\.map\(category => <MenuRow/);
   assert.match(source, /onPress=\{\(\) => selectLibraryCategory\('all'\)\}/);
