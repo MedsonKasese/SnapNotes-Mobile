@@ -110,10 +110,11 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (!isRecord(value)) {
     throw new Error(`Invalid note at index ${index}: expected an object.`);
   }
-  const { id, category: rawCategory, title, text, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived } = value;
+  const { id, category: rawCategory, title, text, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived, deletedAt: rawDeletedAt } = value;
   const category = normalizeCategory(rawCategory);
   const pinned = rawPinned === undefined ? false : rawPinned;
   const archived = rawArchived === undefined ? false : rawArchived;
+  const deletedAt = rawDeletedAt === undefined ? null : rawDeletedAt;
   if (typeof id !== 'string' || id.trim().length === 0) {
     throw new Error(`Invalid note at index ${index}: id must be a nonempty string.`);
   }
@@ -129,6 +130,8 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (typeof archived !== 'boolean') {
     throw new Error(`Invalid note at index ${index}: archived must be a boolean.`);
   }
+  if (deletedAt !== null) validateTimestamp(deletedAt, 'deletedAt', index);
+  if (deletedAt !== null && archived) throw new Error(`Invalid note at index ${index}: trashed notes cannot be archived.`);
   if (typeof title !== 'string' || typeof text !== 'string') {
     throw new Error(`Invalid note at index ${index}: title and text must be strings.`);
   }
@@ -137,7 +140,7 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   validateDraft({ title, text }, index);
 
   ids.add(id);
-  return { id, category, title, text, createdAt, updatedAt, pinned, archived };
+  return { id, category, title, text, createdAt, updatedAt, pinned, archived, deletedAt };
 }
 
 function validateNotes(value: unknown): Note[] {
