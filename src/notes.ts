@@ -11,6 +11,7 @@ export type Note = NoteDraft & {
   category: NoteCategory;
   createdAt: string;
   updatedAt: string;
+  pinned: boolean;
 };
 export type NotesState = {
   notes: Note[];
@@ -26,6 +27,15 @@ export type NotesAction =
   | { type: 'reset' }
   | { type: 'restore-draft'; draft: NoteDraft; editingId: string | null }
   | { type: 'save'; id: string; now: string };
+
+export function sortNotesPinnedFirst(notes: Note[]): Note[] {
+  return [...notes].sort((a, b) => {
+    if (Boolean(a.pinned) !== Boolean(b.pinned)) return b.pinned ? 1 : -1;
+    const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+    return bTime - aTime;
+  });
+}
 
 export function initialNotesState(): NotesState {
   return { notes: [], draft: { title: '', text: '' }, editingId: null, error: null, notice: null };
@@ -96,7 +106,7 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
         if (state.notes.some(note => note.id === action.id)) {
           return { ...state, error: 'Could not create a unique note. Please try saving again.', notice: null };
         }
-        notes = [{ ...draft, id: action.id, category: normalizeCategory(state.draft.category), createdAt: action.now, updatedAt: action.now }, ...state.notes];
+        notes = [{ ...draft, id: action.id, category: normalizeCategory(state.draft.category), createdAt: action.now, updatedAt: action.now, pinned: false }, ...state.notes];
       }
       return {
         ...initialNotesState(), notes,
