@@ -20,14 +20,16 @@ const savedNotes = [
 
 // Exercise real component JSX and handlers with native primitives stubbed out.
 // Effects/native layout are intentionally excluded; this does not replace device QA.
-function workspace() {
-  let state = { ...notes.initialNotesState(), notes: savedNotes };
+function workspace(initialNotes = savedNotes) {
+  let state = { ...notes.initialNotesState(), notes: initialNotes };
   const slots = [];
   const alerts = [];
+  const archiveCalls = [];
   let cursor = 0;
   const controller = {
     dispatch(action) { state = notes.notesReducer(state, action); },
     getSnapshot: () => ({ state, status: 'ready', storageError: null }),
+    setArchived(...args) { archiveCalls.push(args); },
   };
   const exports = {};
   vm.runInNewContext(outputText, {
@@ -64,7 +66,7 @@ function workspace() {
   });
   return {
     render() { cursor = 0; return exports.NotesWorkspace(); },
-    controller, alerts,
+    controller, alerts, archiveCalls,
   };
 }
 
@@ -138,7 +140,8 @@ test('empty categories explain the filter instead of claiming there are no saved
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
   const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'plus']);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'plus']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'New note']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');
@@ -162,4 +165,80 @@ test('icon-only pin controls retain accessible pin/unpin labels and selected sta
     assert.equal(icon.props.accessible, false);
     assert.equal(icon.props.color, pinned ? '#b98500' : '#52634b');
   }
+});
+
+const archivedNote = { ...savedNotes[0], id: 'archived-1', title: 'Archived project', archived: true, pinned: true };
+
+test('active library and category counts exclude archived notes while the archive shows only archived notes', () => {
+  const app = workspace([...savedNotes, archivedNote]);
+  const tree = app.render();
+  assert.deepEqual(list(tree).props.data.map(note => note.id), savedNotes.map(note => note.id));
+  assert.equal(action(tree, 'All notes').props.detail, '3 saved notes');
+  assert.equal(action(tree, 'Work').props.detail, '2 notes');
+  assert.equal(action(tree, 'Archived').props.detail, '1 archived note');
+  chip(tree, 'Work').props.onPress();
+  assert.equal(list(app.render()).props.data.length, 2);
+  action(app.render(), 'Archived').props.onPress();
+  const archive = app.render();
+  assert.deepEqual(list(archive).props.data.map(note => note.id), ['archived-1']);
+  assert.equal(action(archive, 'Archived').props.active, true);
+  assert.equal(elements(archive).some(element => element.type === 'Pressable' && text(element) === 'Work'), false);
+  action(archive, 'All notes').props.onPress();
+  assert.equal(list(app.render()).props.data.length, 3);
+});
+
+test('search is scoped to the active library or archive and empty archives explain restoration', () => {
+  const app = workspace([...savedNotes, archivedNote]);
+  find(app.render(), element => element.props.accessibilityLabel === 'Search saved notes').props.onChangeText('Archived project');
+  assert.equal(list(app.render()).props.data.length, 0);
+  action(app.render(), 'Archived').props.onPress();
+  assert.equal(list(app.render()).props.data[0].id, archivedNote.id);
+  find(app.render(), element => element.props.accessibilityLabel === 'Search saved notes').props.onChangeText('weekend');
+  assert.equal(list(app.render()).props.data.length, 0);
+  assert.match(text(list(app.render()).props.ListEmptyComponent), /No matching notes/);
+
+  const emptyApp = workspace();
+  action(emptyApp.render(), 'Archived').props.onPress();
+  const empty = list(emptyApp.render()).props.ListEmptyComponent;
+  assert.match(text(empty), /Your archive is empty/);
+  assert.match(text(empty), /restore them at any time/);
+  assert.equal(elements(empty).some(element => element.props.label), false);
+});
+
+test('archive and restore card controls are labelled and call the controller with the correct intent', () => {
+  const app = workspace([...savedNotes, archivedNote]);
+  for (const [label, item, archived, iconName] of [
+    ['Archive Project alpha', savedNotes[0], true, 'archive'],
+    ['Restore Archived project', archivedNote, false, 'undo'],
+  ]) {
+    if (!archived) action(app.render(), 'Archived').props.onPress();
+    const card = list(app.render()).props.renderItem({ item });
+    const button = find(card, element => element.props.accessibilityLabel === label);
+    assert.equal(button.props.accessibilityRole, 'button');
+    assert.equal(button.props.accessibilityState.disabled, false);
+    const icon = find(button, element => element.type === 'FontAwesome' && element.props.name === iconName);
+    assert.equal(icon.props.accessible, false);
+    button.props.onPress();
+    const call = app.archiveCalls.at(-1);
+    assert.equal(call[0], item.id);
+    assert.equal(call[1], archived);
+    assert.ok(Number.isFinite(Date.parse(call[2])));
+    if (!archived) assert.equal(elements(card).some(element => /^Pin |^Unpin |^Archive /.test(element.props.accessibilityLabel ?? '')), false);
+  }
+});
+
+test('opening Archived preserves dirty edits until the user explicitly discards them', () => {
+  const app = workspace();
+  editWorkNote(app);
+  app.controller.dispatch({ type: 'change', field: 'text', value: 'Unsaved work' });
+  action(app.render(), 'Archived').props.onPress();
+  assert.equal(app.alerts.length, 1);
+  assert.equal(app.alerts[0][0], 'Discard unsaved changes?');
+  assert.equal(app.controller.getSnapshot().state.draft.text, 'Unsaved work');
+  assert.equal(elements(app.render()).some(element => element.type === 'FlatList'), false);
+  app.alerts[0][2].find(button => button.text === 'Discard changes').onPress();
+  assert.equal(list(app.render()).props.data.length, 0);
+  assert.equal(action(app.render(), 'Archived').props.active, true);
+  assert.equal(app.controller.getSnapshot().state.editingId, null);
+  assert.equal(app.controller.getSnapshot().state.notes, savedNotes);
 });
