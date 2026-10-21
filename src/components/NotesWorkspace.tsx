@@ -66,8 +66,25 @@ export function NotesWorkspace() {
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const dispatch = controller.dispatch;
+  // User intent takes ownership synchronously, before React can render again.
+  // This also covers reset/edit actions that leave the editor clean or blank.
+  function claimEditorDraft(hydrate: boolean) {
+    draftRecoveryRevision.current += 1;
+    if (hydrate) {
+      setDraftHydrated(true);
+      setDraftStorageError(null);
+    }
+  }
+  const dispatch: typeof controller.dispatch = action => {
+    const current = controller.getSnapshot().state.draft;
+    // Merely choosing a category/navigation destination must not delete an
+    // unreadable or still-pending recovery record from an otherwise empty editor.
+    claimEditorDraft(draftHydrated || action.type === 'change' || action.type === 'edit' ||
+      Boolean(current.title.trim() || current.text.trim()));
+    controller.dispatch(action);
+  };
   const saving = status === 'saving';
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
@@ -78,8 +95,12 @@ export function NotesWorkspace() {
   const restoreEditorDraft = useCallback(async () => {
     if (controller.getSnapshot().status !== 'ready') return;
 
+    const revision = ++draftRecoveryRevision.current;
     try {
       const raw = await AsyncStorage.getItem(EDITOR_DRAFT_KEY);
+      // A later recovery attempt or editor action supersedes this read, including
+      // its error/cleanup paths. Never restore or delete storage from a stale read.
+      if (revision !== draftRecoveryRevision.current) return;
       if (raw !== null) {
         const parsed: unknown = JSON.parse(raw);
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -97,19 +118,35 @@ export function NotesWorkspace() {
         }
 
         if (record.title.trim() || record.text.trim()) {
+          // A checklist save changes the saved collection, not the editor.
+          // Its controller temporarily rejects dispatches, so wait rather than
+          // losing this recovery record or pretending it was restored.
+          if (controller.getSnapshot().status === 'saving') {
+            await new Promise<void>(resolve => {
+              const unsubscribe = controller.subscribe(() => {
+                if (controller.getSnapshot().status !== 'saving') {
+                  unsubscribe();
+                  resolve();
+                }
+              });
+            });
+          }
+          if (revision !== draftRecoveryRevision.current || controller.getSnapshot().status !== 'ready') return;
           controller.dispatch({
             type: 'restore-draft',
             draft: { title: record.title, text: record.text, category: normalizeCategory(record.category) },
             editingId: record.editingId,
           });
           setView('editor');
-        } else {
-          await AsyncStorage.removeItem(EDITOR_DRAFT_KEY);
         }
       }
+      // Empty records are cleared by the debounced write queue below, so a
+      // slow recovery cleanup cannot overtake a newer user-owned draft write.
+      if (revision !== draftRecoveryRevision.current) return;
       setDraftStorageError(null);
       setDraftHydrated(true);
     } catch {
+      if (revision !== draftRecoveryRevision.current) return;
       // Keep an unreadable recovery record intact. A user can still edit and
       // deliberately replace it by starting to type into the editor.
       setDraftStorageError('An earlier recovery draft could not be read. Your saved notes are safe; start editing to replace the unreadable draft.');
@@ -153,15 +190,10 @@ export function NotesWorkspace() {
   }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.category, state.editingId]);
 
   function changeDraft(field: 'title' | 'text', value: string) {
-    if (!draftHydrated) {
-      setDraftHydrated(true);
-      setDraftStorageError(null);
-    }
     dispatch({ type: 'change', field, value });
   }
 
   function selectDraftCategory(category: NoteCategory) {
-    if (!draftHydrated) { setDraftHydrated(true); setDraftStorageError(null); }
     dispatch({ type: 'category', category });
     setCategoryPickerOpen(false);
   }
@@ -258,6 +290,7 @@ export function NotesWorkspace() {
   }
 
   function saveNote() {
+    claimEditorDraft(draftHydrated || Boolean(state.draft.title.trim() || state.draft.text.trim()));
     void controller.save(new Date().toISOString());
   }
 
