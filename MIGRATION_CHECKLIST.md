@@ -106,7 +106,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 8. Note management
 
-- [ ] Pin and unpin notes, matching PWA behaviour.
+- [ ] Pin and unpin notes, matching PWA behaviour. (PR #14 implements the action, pinned-first sorting, and local persistence; Android verification required.)
 - [ ] Duplicate notes if supported by the PWA.
 - [ ] Archive and restore notes.
 - [ ] Move notes to Trash and restore them.
@@ -280,6 +280,7 @@ Update this table as PRs merge and testing results are confirmed.
 ### PR / device test log
 
 | 2026-10-21 | PR #13 (implementation in progress) | Five-category editor picker, library filtering, drawer counts, backward-compatible category storage and regression tests | Not yet run in Termux; do not treat as passed | **Android / Expo Go testing required** | Check create/edit/category-only changes, filtering combined with search, restart persistence, legacy notes defaulting to General, and drawer navigation. |
+| 2026-10-21 | PR #14 (implementation in progress) | Pin/unpin action, pinned-first ordering, persisted pin state, legacy notes default to unpinned, regression tests | Not yet run in Termux; do not treat as passed | **Android / Expo Go testing required** | Test pin/unpin from All and category/search results, ordering, updated timestamp, restart persistence, and storage failure rollback. |
 
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
