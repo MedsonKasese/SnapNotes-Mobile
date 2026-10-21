@@ -13,7 +13,7 @@ import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 import { ChecklistLabel } from './ChecklistLabel';
 
-type WorkspaceView = 'library' | 'editor';
+type WorkspaceView = 'library' | 'editor' | 'archive';
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -93,8 +93,11 @@ export function NotesWorkspace() {
   const saving = status === 'saving';
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
-  const categoryNotes = state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
-  const visibleNotes = sortNotesPinnedFirst(searchNotes(categoryNotes, searchQuery));
+  const activeNotes = state.notes.filter(note => !note.archived);
+  const categoryNotes = activeNotes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
+  const archiveNotes = state.notes.filter(note => note.archived);
+  const sourceNotes = view === 'archive' ? archiveNotes : categoryNotes;
+  const visibleNotes = sortNotesPinnedFirst(searchNotes(sourceNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
 
   const restoreEditorDraft = useCallback(async () => {
@@ -213,6 +216,16 @@ export function NotesWorkspace() {
     });
   }
 
+  function selectArchive() {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      setCategoryFilter('all');
+      setDrawerOpen(false);
+      setView('archive');
+    });
+  }
+
   function confirmDiscard(continueAction: () => void) {
     if (!dirty) {
       continueAction();
@@ -257,7 +270,7 @@ export function NotesWorkspace() {
       setDrawerOpen(false);
       return true;
     }
-    if (view === 'editor') {
+    if (view === 'editor' || view === 'archive') {
       openLibrary();
       return true;
     }
@@ -446,14 +459,14 @@ export function NotesWorkspace() {
           <View style={styles.libraryHeading}>
             <View>
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
-              <Text accessibilityRole="header" style={styles.screenTitle}>{categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
+              <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
             <Action label="+ New note" onPress={openNewNote} />
           </View>
-          <Text style={styles.libraryHint}>{categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
+          <Text style={styles.libraryHint}>{view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          {view !== 'archive' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
-          </ScrollView>
+          </ScrollView>}
           {storageError !== null && <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>}
           <FlatList
             data={visibleNotes}
@@ -464,9 +477,9 @@ export function NotesWorkspace() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyMark}><Text style={styles.emptyMarkText}>{searching ? '⌕' : '+'}</Text></View>
-                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
-                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
-                {!searching && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
+                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : view === 'archive' ? 'Your archive is empty' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
+                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : view === 'archive' ? 'Notes you archive will appear here. You can restore them at any time.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
+                {!searching && view !== 'archive' && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
               </View>
             }
             renderItem={({ item }) => (
