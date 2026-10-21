@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { NOTES_STORAGE_KEY, createNotesStorage } from '../src/notesStorage.ts';
 
 const date = '2026-10-19T18:00:00.000Z';
-const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date, pinned: false });
+const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date, pinned: false, archived: false });
 function backend() {
   const data = new Map();
   let failKey = null;
