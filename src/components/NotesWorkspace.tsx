@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, type NoteCategory,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
@@ -89,7 +89,7 @@ export function NotesWorkspace() {
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
   const categoryNotes = state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
-  const visibleNotes = searchNotes(categoryNotes, searchQuery);
+  const visibleNotes = sortNotesPinnedFirst(searchNotes(categoryNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
 
   const restoreEditorDraft = useCallback(async () => {
@@ -493,9 +493,21 @@ export function NotesWorkspace() {
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
                     <Text style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
+                    {item.pinned && <Text style={styles.pinnedBadge}>Pinned</Text>}
                     <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
                   </View>
-                  <Pressable
+                  <View style={styles.noteFooterActions}>
+                    <Pressable
+                      disabled={saving}
+                      accessibilityRole="button"
+                      accessibilityLabel={(item.pinned ? 'Unpin ' : 'Pin ') + (item.title || 'Untitled note')}
+                      accessibilityState={{ disabled: saving, selected: item.pinned }}
+                      onPress={() => { void controller.togglePin(item.id, new Date().toISOString()); }}
+                      style={({ pressed }) => [styles.pinButton, item.pinned && styles.pinButtonActive, pressed && styles.pressed]}
+                    >
+                      <Text style={[styles.pinButtonText, item.pinned && styles.pinButtonTextActive]}>{item.pinned ? '📌 Pinned' : '📌 Pin'}</Text>
+                    </Pressable>
+                    <Pressable
                     disabled={saving}
                     accessibilityState={{ disabled: saving }}
                     accessibilityRole="button"
@@ -645,6 +657,12 @@ const styles = StyleSheet.create({
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
+  noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
+  pinButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 9, borderRadius: 10, backgroundColor: '#f5f7f2', borderWidth: 1, borderColor: '#e1e8da' },
+  pinButtonActive: { backgroundColor: '#fff4d6', borderColor: '#f0d58a' },
+  pinButtonText: { color: '#52634b', fontSize: 12, fontWeight: '700' },
+  pinButtonTextActive: { color: '#825b08' },
+  pinnedBadge: { color: '#825b08', fontSize: 11, fontWeight: '800', backgroundColor: '#fff4d6', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
   noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
   noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
   editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
