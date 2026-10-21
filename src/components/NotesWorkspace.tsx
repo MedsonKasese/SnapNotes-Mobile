@@ -166,9 +166,13 @@ export function NotesWorkspace() {
   }
 
   function selectLibraryCategory(category: NoteCategory | 'all') {
-    setCategoryFilter(category);
-    setDrawerOpen(false);
-    setView('library');
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      setCategoryFilter(category);
+      setDrawerOpen(false);
+      setView('library');
+    });
   }
 
   function confirmDiscard(continueAction: () => void) {
@@ -499,7 +503,7 @@ export function NotesWorkspace() {
               </Pressable>
             </View>
             <View style={styles.drawerNavigation}>
-              <MenuRow label="All notes" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library'} onPress={openLibrary} />
+              <MenuRow label="All notes" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
               <MenuRow label="New note" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
