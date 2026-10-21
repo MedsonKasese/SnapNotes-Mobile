@@ -80,6 +80,7 @@ test('creates a body-only note with deterministic metadata', () => {
     text: 'A body',
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
+    pinned: false,
   }]);
   assert.equal(state.notice, 'Note created.');
   assert.equal(state.editingId, null);
@@ -171,7 +172,7 @@ test('reset cancels an edit, clears the draft, and retains original notes unchan
   assert.equal(reset.notes[0], originalNote);
   assert.deepEqual(originalNote, {
     id: 'original-id', category: 'general', title: 'Original', text: 'Body',
-    createdAt: CREATED_AT, updatedAt: CREATED_AT,
+    createdAt: CREATED_AT, updatedAt: CREATED_AT, pinned: false,
   });
   assert.deepEqual(base.notes, [originalNote]);
 });

@@ -508,15 +508,16 @@ export function NotesWorkspace() {
                       <Text style={[styles.pinButtonText, item.pinned && styles.pinButtonTextActive]}>{item.pinned ? '📌 Pinned' : '📌 Pin'}</Text>
                     </Pressable>
                     <Pressable
-                    disabled={saving}
-                    accessibilityState={{ disabled: saving }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
-                    onPress={() => editNote(item.id)}
-                    style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.editButtonText}>Open note ›</Text>
-                  </Pressable>
+                      disabled={saving}
+                      accessibilityState={{ disabled: saving }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
+                      onPress={() => editNote(item.id)}
+                      style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.editButtonText}>Open note ›</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             )}
