@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
@@ -13,6 +13,7 @@ import { searchNotes } from '../noteSearch';
 import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor';
+const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
 const EDITOR_DRAFT_VERSION = 1;
@@ -58,6 +59,8 @@ function MenuRow({ label, detail, onPress, active = false }: {
 export function NotesWorkspace() {
   const [controller] = useState(() => createNotesController(deviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draftHydrated, setDraftHydrated] = useState(false);
@@ -68,7 +71,7 @@ export function NotesWorkspace() {
   const saving = status === 'saving';
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
-  const visibleNotes = searchNotes(state.notes, searchQuery);
+  const visibleNotes = searchNotes(state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter), searchQuery);
   const searching = searchQuery.trim().length > 0;
 
   const restoreEditorDraft = useCallback(async () => {
@@ -86,6 +89,7 @@ export function NotesWorkspace() {
           record.version !== EDITOR_DRAFT_VERSION ||
           typeof record.title !== 'string' ||
           typeof record.text !== 'string' ||
+          (record.category !== undefined && !NOTE_CATEGORIES.includes(record.category as NoteCategory)) ||
           !(record.editingId === null || typeof record.editingId === 'string')
         ) {
           throw new Error('Unsupported draft record');
@@ -94,7 +98,7 @@ export function NotesWorkspace() {
         if (record.title.trim() || record.text.trim()) {
           controller.dispatch({
             type: 'restore-draft',
-            draft: { title: record.title, text: record.text },
+            draft: { title: record.title, text: record.text, category: normalizeCategory(record.category) },
             editingId: record.editingId,
           });
           setView('editor');
@@ -125,6 +129,7 @@ export function NotesWorkspace() {
           version: EDITOR_DRAFT_VERSION,
           title: state.draft.title,
           text: state.draft.text,
+          category: normalizeCategory(state.draft.category),
           editingId: state.editingId,
           savedAt: new Date().toISOString(),
         })
@@ -144,7 +149,7 @@ export function NotesWorkspace() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.editingId]);
+  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.category, state.editingId]);
 
   function changeDraft(field: 'title' | 'text', value: string) {
     if (!draftHydrated) {
@@ -152,6 +157,18 @@ export function NotesWorkspace() {
       setDraftStorageError(null);
     }
     dispatch({ type: 'change', field, value });
+  }
+
+  function selectDraftCategory(category: NoteCategory) {
+    if (!draftHydrated) { setDraftHydrated(true); setDraftStorageError(null); }
+    dispatch({ type: 'category', category });
+    setCategoryPickerOpen(false);
+  }
+
+  function selectLibraryCategory(category: NoteCategory | 'all') {
+    setCategoryFilter(category);
+    setDrawerOpen(false);
+    setView('library');
   }
 
   function confirmDiscard(continueAction: () => void) {
@@ -329,6 +346,15 @@ export function NotesWorkspace() {
               <Text style={styles.warningText}>Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.</Text>
             </View>
             <View style={styles.editor}>
+              <Text style={styles.label}>Category</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="Choose note category" accessibilityState={{ expanded: categoryPickerOpen }} onPress={() => setCategoryPickerOpen(!categoryPickerOpen)} style={styles.categoryButton}>
+                <Text style={styles.categoryButtonText}>{categoryLabel(normalizeCategory(state.draft.category))}  ▾</Text>
+              </Pressable>
+              {categoryPickerOpen && <View style={styles.categoryOptions}>{NOTE_CATEGORIES.map(category => (
+                <Pressable key={category} accessibilityRole="button" accessibilityLabel={`Set category ${categoryLabel(category)}`} accessibilityState={{ selected: normalizeCategory(state.draft.category) === category }} onPress={() => selectDraftCategory(category)} style={styles.categoryOption}>
+                  <Text style={styles.categoryButtonText}>{categoryLabel(category)}</Text>
+                </Pressable>
+              ))}</View>}
               <Text style={styles.label}>Title (optional)</Text>
               <TextInput
                 editable={!saving}
@@ -377,11 +403,14 @@ export function NotesWorkspace() {
           <View style={styles.libraryHeading}>
             <View>
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
-              <Text accessibilityRole="header" style={styles.screenTitle}>All notes</Text>
+              <Text accessibilityRole="header" style={styles.screenTitle}>{categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
             <Action label="+ New note" onPress={openNewNote} />
           </View>
-          <Text style={styles.libraryHint}>Your saved notes, all in one place.</Text>
+          <Text style={styles.libraryHint}>{categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${visibleNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
+            {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
+          </ScrollView>
           {storageError !== null && <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>}
           <FlatList
             data={visibleNotes}
@@ -471,11 +500,12 @@ export function NotesWorkspace() {
             </View>
             <View style={styles.drawerNavigation}>
               <MenuRow label="All notes" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library'} onPress={openLibrary} />
+              {NOTE_CATEGORIES.map(category => <MenuRow key={category} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
               <MenuRow label="New note" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
-              <Text style={styles.drawerNoticeText}>Categories, folders, archive, trash, settings, and account features will appear here as they are migrated and tested. They are not shown as active destinations yet.</Text>
+              <Text style={styles.drawerNoticeText}>Folders, archive, trash, settings, and account features will appear here as they are migrated and tested. They are not shown as active destinations yet.</Text>
             </View>
             <View style={styles.drawerFooter}>
               <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
@@ -544,6 +574,16 @@ const styles = StyleSheet.create({
   editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
   input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
+  categoryButton: { padding: 12, borderRadius: 11, backgroundColor: '#eff7e9', borderWidth: 1, borderColor: '#dce6d4' },
+  categoryButtonText: { color: '#304728', fontSize: 14, fontWeight: '700' },
+  categoryOptions: { gap: 2, borderRadius: 11, borderWidth: 1, borderColor: '#dce6d4' },
+  categoryOption: { padding: 12, minHeight: 42 },
+  categoryFilterBar: { flexGrow: 0, maxHeight: 55 },
+  categoryFilterItems: { paddingHorizontal: 18, paddingVertical: 7, gap: 7 },
+  categoryChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, backgroundColor: '#edf2e9' },
+  categoryChipActive: { backgroundColor: '#48a111' },
+  categoryChipText: { color: '#3b5731', fontSize: 13 },
+  categoryChipTextActive: { color: '#fff', fontWeight: '700' },
   editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   notePreview: { gap: 0 },
   checklistRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 28, paddingVertical: 2, gap: 8 },
