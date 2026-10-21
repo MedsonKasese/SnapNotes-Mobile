@@ -1,4 +1,4 @@
-import { validateDraft as validateNoteDraft, type Note } from './notes.ts';
+import { normalizeCategory, NOTE_CATEGORIES, validateDraft as validateNoteDraft, type Note, type NoteCategory } from './notes.ts';
 
 export const NOTES_STORAGE_KEY = '@snapnotes-mobile/notes';
 
@@ -110,15 +110,16 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (!isRecord(value)) {
     throw new Error(`Invalid note at index ${index}: expected an object.`);
   }
-  const { id, category, title, text, createdAt, updatedAt } = value;
+  const { id, category: rawCategory, title, text, createdAt, updatedAt } = value;
+  const category = normalizeCategory(rawCategory);
   if (typeof id !== 'string' || id.trim().length === 0) {
     throw new Error(`Invalid note at index ${index}: id must be a nonempty string.`);
   }
   if (ids.has(id)) {
     throw new Error(`Invalid note at index ${index}: duplicate id "${id}".`);
   }
-  if (category !== 'general') {
-    throw new Error(`Invalid note at index ${index}: category must be "general".`);
+  if (rawCategory !== undefined && (typeof rawCategory !== 'string' || !NOTE_CATEGORIES.includes(rawCategory as NoteCategory))) {
+    throw new Error(`Invalid note at index ${index}: category is unsupported.`);
   }
   if (typeof title !== 'string' || typeof text !== 'string') {
     throw new Error(`Invalid note at index ${index}: title and text must be strings.`);
