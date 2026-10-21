@@ -596,9 +596,9 @@ export function NotesWorkspace() {
               </Pressable>
             </View>
             <View style={styles.drawerNavigation}>
-              <MenuRow label="All notes" icon="inbox" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
-              {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
-              <MenuRow label="Archived" icon="archive" detail={archiveNotes.length + " notes"} active={view === 'archive'} onPress={selectArchive} />
+              <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
+              {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
             <View style={styles.drawerNotice}>
