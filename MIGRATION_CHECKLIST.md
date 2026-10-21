@@ -84,11 +84,11 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 6. Categories and organisation
 
-- [ ] Audit the PWA's category names, defaults, assignment rules, and filtering behaviour.
-- [ ] Support the existing categories: General, Work, Personal, Ideas, and Important.
-- [ ] Assign, change, and remove a category according to PWA behaviour.
-- [ ] Filter and count notes by category accurately.
-- [ ] Preserve category assignment through edits, restarts, and future cloud sync.
+- [x] Audit the PWA's category names, defaults, assignment rules, and filtering behaviour. (Compared `js/app.js`, `js/notes.js`, and `index.html`.)
+- [ ] Support the existing categories: General, Work, Personal, Ideas, and Important. (Implemented in PR #13; Android verification required.)
+- [ ] Assign and change a category according to PWA behaviour. (PR #13 implements the five-category picker; a separate remove/unassign action is not applicable because every note has a category.)
+- [ ] Filter and count notes by category accurately. (PR #13 implements library chips and drawer counts; automated/device verification required.)
+- [ ] Preserve category assignment through edits and restarts. (PR #13 includes reducer/storage changes and legacy records default to General; cloud sync remains future work.)
 - [ ] Provide sensible category empty states and accessible category controls.
 
 ## 7. Navigation drawer and library
@@ -268,7 +268,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Storage reliability | Implemented; regression testing remains | Serialization, cleanup, and recovery work merged |
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
-| Categories and folders | Not started | Must match PWA behaviour |
+| Categories and folders | **Categories implemented; testing required** | PR #13 adds category selection, library filters, drawer counts, backward-compatible storage, and automated regression tests. Folders remain future work. |
 | Formatting and checklists | In progress; Android testing required | PR #11 adds insertion; PR #12 toggles and persists checklist previews without opening the editor. Compact rows and italic checked labels with a thicker strike-through are implemented. Automated checks pass; native visual, font-scaling, and touch testing remain. Full formatting remains future work. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
@@ -278,6 +278,8 @@ Update this table as PRs merge and testing results are confirmed.
 | Full regression and release readiness | Not started | Complete after feature migration |
 
 ### PR / device test log
+
+| 2026-10-21 | PR #13 (implementation in progress) | Five-category editor picker, library filtering, drawer counts, backward-compatible category storage and regression tests | Not yet run in Termux; do not treat as passed | **Android / Expo Go testing required** | Check create/edit/category-only changes, filtering combined with search, restart persistence, legacy notes defaulting to General, and drawer navigation. |
 
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |
