@@ -51,7 +51,7 @@ test('restores an unsaved draft for an existing note without changing saved cont
     editingId: original.id,
   });
 
-  assert.deepEqual(restored.draft, { title: 'Recovered title', text: 'Recovered body' });
+  assert.deepEqual(restored.draft, { title: 'Recovered title', text: 'Recovered body', category: 'general' });
   assert.equal(restored.editingId, original.id);
   assert.equal(hasUnsavedChanges(restored), true);
   assert.deepEqual(restored.notes, [original]);
@@ -65,7 +65,7 @@ test('restores a draft as a new note if its previous editing target no longer ex
     editingId: 'deleted-note',
   });
 
-  assert.deepEqual(restored.draft, { title: 'Keep this work', text: 'Recovered text' });
+  assert.deepEqual(restored.draft, { title: 'Keep this work', text: 'Recovered text', category: 'general' });
   assert.equal(restored.editingId, null);
   assert.equal(hasUnsavedChanges(restored), true);
   assert.deepEqual(restored.notes, []);
@@ -198,7 +198,7 @@ test('switching edit targets clones the selected note into the draft and discard
   const secondEdit = notesReducer(dirty, { type: 'edit', id: two.id });
 
   assert.equal(secondEdit.editingId, two.id);
-  assert.deepEqual(secondEdit.draft, { title: 'Two', text: 'Second body' });
+  assert.deepEqual(secondEdit.draft, { title: 'Two', text: 'Second body', category: 'general' });
   assert.notEqual(secondEdit.draft, two);
   assert.equal(secondEdit.notes[0], one);
   assert.equal(secondEdit.notes[1], two);
@@ -283,4 +283,52 @@ test('invalid edits preserve the saved original and remain editable', () => {
   assert.equal(corrected.notes.length, 1);
   assert.equal(corrected.notes[0].id, 'original');
   assert.equal(corrected.notes[0].text, 'Corrected');
+});
+
+
+test('category selection persists through create, edit, and category-only dirty detection', () => {
+  const selected = notesReducer(initialNotesState(), { type: 'category', category: 'work' });
+  assert.equal(hasUnsavedChanges(selected), true);
+  const created = save(fillDraft(selected, { text: 'Project task' }), 'category-work');
+  assert.equal(created.notes[0].category, 'work');
+  const editing = notesReducer(created, { type: 'edit', id: 'category-work' });
+  assert.equal(editing.draft.category, 'work');
+  assert.equal(hasUnsavedChanges(editing), false);
+  const changed = notesReducer(editing, { type: 'category', category: 'ideas' });
+  assert.equal(hasUnsavedChanges(changed), true);
+  const updated = save(changed, 'unused', UPDATED_AT);
+  assert.equal(updated.notes[0].category, 'ideas');
+  assert.equal(updated.notes[0].id, 'category-work');
+});
+
+for (const category of ['general', 'work', 'personal', 'ideas', 'important']) {
+  test(`recovered ${category} category survives saving an existing or missing target`, () => {
+    const original = createNote('existing', { title: 'Saved title', text: 'Saved body' });
+    for (const editingId of [original.id, 'missing']) {
+      const recovered = notesReducer({ ...initialNotesState(), notes: [original] }, {
+        type: 'restore-draft',
+        draft: { title: 'Recovered', text: 'Unsaved body', category },
+        editingId,
+      });
+      assert.equal(recovered.draft.category, category);
+      assert.equal(recovered.notes[0], original, 'recovery must not mutate saved content');
+      const saved = save(recovered, 'new-note', UPDATED_AT);
+      assert.equal(saved.notes[0].category, category);
+      assert.equal(saved.notes[0].id, editingId === original.id ? original.id : 'new-note');
+      assert.equal(original.category, 'general');
+    }
+  });
+}
+
+test('switching categorized targets replaces the entire draft without changing either saved note', () => {
+  const one = { ...createNote('one', { text: 'First body' }), category: 'work' };
+  const two = { ...createNote('two', { text: 'Second body' }), category: 'personal' };
+  const base = { ...initialNotesState(), notes: [one, two] };
+  const firstEdit = notesReducer(base, { type: 'edit', id: one.id });
+  const dirty = notesReducer(firstEdit, { type: 'category', category: 'ideas' });
+  const secondEdit = notesReducer(dirty, { type: 'edit', id: two.id });
+  assert.deepEqual(secondEdit.draft, { title: '', text: 'Second body', category: 'personal' });
+  assert.equal(hasUnsavedChanges(secondEdit), false);
+  assert.equal(one.category, 'work');
+  assert.equal(two.category, 'personal');
 });

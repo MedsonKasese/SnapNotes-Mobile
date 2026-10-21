@@ -1,9 +1,14 @@
 export const MAX_NOTE_CHARACTERS = 1500;
 
-export type NoteDraft = { title: string; text: string };
+export const NOTE_CATEGORIES = ['general', 'work', 'personal', 'ideas', 'important'] as const;
+export type NoteCategory = typeof NOTE_CATEGORIES[number];
+export function normalizeCategory(value: unknown): NoteCategory {
+  return typeof value === 'string' && (NOTE_CATEGORIES as readonly string[]).includes(value) ? value as NoteCategory : 'general';
+}
+export type NoteDraft = { title: string; text: string; category?: NoteCategory };
 export type Note = NoteDraft & {
   id: string;
-  category: 'general';
+  category: NoteCategory;
   createdAt: string;
   updatedAt: string;
 };
@@ -15,7 +20,8 @@ export type NotesState = {
   notice: string | null;
 };
 export type NotesAction =
-  | { type: 'change'; field: keyof NoteDraft; value: string }
+  | { type: 'change'; field: 'title' | 'text'; value: string }
+  | { type: 'category'; category: NoteCategory }
   | { type: 'edit'; id: string }
   | { type: 'reset' }
   | { type: 'restore-draft'; draft: NoteDraft; editingId: string | null }
@@ -46,17 +52,19 @@ export function validateDraft(draft: NoteDraft): string | null {
 
 export function hasUnsavedChanges(state: NotesState): boolean {
   const original = state.notes.find(note => note.id === state.editingId);
-  return state.draft.title !== (original?.title ?? '') || state.draft.text !== (original?.text ?? '');
+  return state.draft.title !== (original?.title ?? '') || state.draft.text !== (original?.text ?? '') || normalizeCategory(state.draft.category) !== normalizeCategory(original?.category);
 }
 
 export function notesReducer(state: NotesState, action: NotesAction): NotesState {
   switch (action.type) {
+    case 'category':
+      return { ...state, draft: { ...state.draft, category: action.category }, error: null, notice: null };
     case 'change':
       return { ...state, draft: { ...state.draft, [action.field]: action.value }, error: null, notice: null };
     case 'edit': {
       const note = state.notes.find(item => item.id === action.id);
       if (!note) return { ...state, error: 'This note could not be found.' };
-      return { ...state, draft: { title: note.title, text: note.text }, editingId: note.id, error: null, notice: null };
+      return { ...state, draft: { title: note.title, text: note.text, category: normalizeCategory(note.category) }, editingId: note.id, error: null, notice: null };
     }
     case 'reset':
       return { ...initialNotesState(), notes: state.notes };
@@ -66,7 +74,7 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
         : null;
       return {
         ...state,
-        draft: { title: action.draft.title, text: action.draft.text },
+        draft: { title: action.draft.title, text: action.draft.text, category: normalizeCategory(action.draft.category) },
         editingId,
         error: null,
         notice: 'Recovered unsaved draft from this device.',
@@ -82,13 +90,13 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
           return { ...state, error: 'This note could not be found.', notice: null };
         }
         notes = state.notes.map(note => note.id === state.editingId
-          ? { ...note, ...draft, updatedAt: action.now }
+          ? { ...note, ...draft, category: normalizeCategory(state.draft.category), updatedAt: action.now }
           : note);
       } else {
         if (state.notes.some(note => note.id === action.id)) {
           return { ...state, error: 'Could not create a unique note. Please try saving again.', notice: null };
         }
-        notes = [{ ...draft, id: action.id, category: 'general', createdAt: action.now, updatedAt: action.now }, ...state.notes];
+        notes = [{ ...draft, id: action.id, category: normalizeCategory(state.draft.category), createdAt: action.now, updatedAt: action.now }, ...state.notes];
       }
       return {
         ...initialNotesState(), notes,

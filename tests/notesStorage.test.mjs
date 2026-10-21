@@ -312,3 +312,18 @@ test('index size limits count UTF-8 bytes rather than UTF-16 code units', async 
   await assert.rejects(createNotesStorage(db).save([note(oversizedId)]), /Notes index exceeds/);
   assert.equal(db.data.size, 0);
 });
+
+
+test('supports every category and defaults legacy records without a category to General', async () => {
+  const db = backend();
+  const categories = ['general', 'work', 'personal', 'ideas', 'important'];
+  const categorized = categories.map((category, index) => ({ ...note('category-' + index), category }));
+  await createNotesStorage(db).save(categorized);
+  assert.deepEqual(await createNotesStorage(db).load(), categorized);
+
+  const legacyDb = backend();
+  const legacyRecord = { ...note('legacy-no-category') };
+  delete legacyRecord.category;
+  legacyDb.data.set(NOTES_STORAGE_KEY, JSON.stringify({ version: 1, notes: [legacyRecord] }));
+  assert.deepEqual(await createNotesStorage(legacyDb).load(), [note('legacy-no-category')]);
+});
