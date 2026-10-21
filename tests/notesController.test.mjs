@@ -153,6 +153,35 @@ test('fresh controller restores saved creates and edits across restarts without 
   assert.equal(third.getSnapshot().state.notes[1].updatedAt, LATER);
 });
 
+test('archive and restore persist state and update timestamps', async () => {
+  let saved;
+  const controller = createNotesController({
+    async load() { return [note]; },
+    async save(notes) { saved = notes; },
+  });
+  await controller.load();
+  await controller.setArchived(note.id, true, LATER);
+  assert.equal(controller.getSnapshot().state.notes[0].archived, true);
+  assert.equal(controller.getSnapshot().state.notes[0].updatedAt, LATER);
+  assert.equal(saved[0].archived, true);
+  assert.equal(controller.getSnapshot().state.notice, 'Note archived.');
+  await controller.setArchived(note.id, false, NOW);
+  assert.equal(controller.getSnapshot().state.notes[0].archived, false);
+  assert.equal(saved[0].archived, false);
+  assert.equal(controller.getSnapshot().state.notice, 'Note restored.');
+});
+
+test('failed archive write rolls back and keeps the note active', async () => {
+  const controller = createNotesController({
+    async load() { return [note]; },
+    async save() { throw Error('disk full'); },
+  });
+  await controller.load();
+  await controller.setArchived(note.id, true, LATER);
+  assert.equal(controller.getSnapshot().state.notes[0].archived, false);
+  assert.match(controller.getSnapshot().storageError, /Could not archive/);
+});
+
 test('corrupt and future-version storage stays byte-for-byte intact with saves blocked', async () => {
   for (const raw of ['{broken', JSON.stringify({ version: 2, notes: [note] })]) {
     const backend = memoryBackend();
