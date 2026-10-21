@@ -347,8 +347,8 @@ export function NotesWorkspace() {
             </View>
           </View>
           <View style={styles.countPill} accessibilityLiveRegion="polite">
-            <Text style={styles.countText}>{state.notes.length}</Text>
-            <Text style={styles.countLabel}>{state.notes.length === 1 ? 'note' : 'notes'}</Text>
+            <Text style={styles.countText}>{view === 'archive' ? archiveNotes.length : activeNotes.length}</Text>
+            <Text style={styles.countLabel}>{(view === 'archive' ? archiveNotes.length : activeNotes.length) === 1 ? 'note' : 'notes'}</Text>
           </View>
         </View>
         <View style={styles.searchRow}>
