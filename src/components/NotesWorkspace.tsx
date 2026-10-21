@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import {
   Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, type NoteCategory,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
@@ -37,7 +38,10 @@ function Action({ label, onPress, secondary = false, disabled = false }: {
   );
 }
 
-function MenuRow({ label, detail, onPress, active = false }: {
+type FontAwesomeName = ComponentProps<typeof FontAwesome>['name'];
+
+function MenuRow({ label, detail, icon, onPress, active = false }: {
+  icon: FontAwesomeName;
   label: string; detail: string; onPress: () => void; active?: boolean;
 }) {
   return (
@@ -47,6 +51,7 @@ function MenuRow({ label, detail, onPress, active = false }: {
       onPress={onPress}
       style={({ pressed }) => [styles.menuRow, active && styles.menuRowActive, pressed && styles.pressed]}
     >
+      <FontAwesome name={icon} size={18} color={active ? '#3b7f16' : '#65775c'} accessible={false} />
       <View style={styles.menuRowCopy}>
         <Text style={[styles.menuRowTitle, active && styles.menuRowTitleActive]}>{label}</Text>
         <Text style={styles.menuRowDetail}>{detail}</Text>
@@ -89,7 +94,7 @@ export function NotesWorkspace() {
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
   const categoryNotes = state.notes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
-  const visibleNotes = searchNotes(categoryNotes, searchQuery);
+  const visibleNotes = sortNotesPinnedFirst(searchNotes(categoryNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
 
   const restoreEditorDraft = useCallback(async () => {
@@ -495,16 +500,28 @@ export function NotesWorkspace() {
                     <Text style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
                     <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
                   </View>
-                  <Pressable
-                    disabled={saving}
-                    accessibilityState={{ disabled: saving }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
-                    onPress={() => editNote(item.id)}
-                    style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.editButtonText}>Open note ›</Text>
-                  </Pressable>
+                  <View style={styles.noteFooterActions}>
+                    <Pressable
+                      disabled={saving}
+                      accessibilityRole="button"
+                      accessibilityLabel={(item.pinned ? 'Unpin ' : 'Pin ') + (item.title || 'Untitled note')}
+                      accessibilityState={{ disabled: saving, selected: item.pinned }}
+                      onPress={() => { void controller.togglePin(item.id, new Date().toISOString()); }}
+                      style={({ pressed }) => [styles.pinButton, item.pinned && styles.pinButtonActive, pressed && styles.pressed]}
+                    >
+                      <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#52634b'} accessible={false} />
+                    </Pressable>
+                    <Pressable
+                      disabled={saving}
+                      accessibilityState={{ disabled: saving }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
+                      onPress={() => editNote(item.id)}
+                      style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.editButtonText}>Open note ›</Text>
+                    </Pressable>
+                  </View>
                 </View>
               </View>
             )}
@@ -540,9 +557,9 @@ export function NotesWorkspace() {
               </Pressable>
             </View>
             <View style={styles.drawerNavigation}>
-              <MenuRow label="All notes" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
-              {NOTE_CATEGORIES.map(category => <MenuRow key={category} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
-              <MenuRow label="New note" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
+              <MenuRow label="All notes" icon="inbox" detail={`${state.notes.length} saved ${state.notes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
+              {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${state.notes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
@@ -645,6 +662,10 @@ const styles = StyleSheet.create({
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
+  noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
+  pinButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
+  pinButtonActive: { backgroundColor: 'transparent' },
+
   noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
   noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
   editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
@@ -660,6 +681,7 @@ const styles = StyleSheet.create({
   drawerNavigation: { paddingTop: 15, gap: 7 },
   menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 62, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
   menuRowActive: { backgroundColor: '#eff7e9', borderColor: '#e0efd5' },
+
   menuRowCopy: { flex: 1, gap: 3 },
   menuRowTitle: { color: '#293d23', fontSize: 15, fontWeight: '700' },
   menuRowTitleActive: { color: '#3b7f16' },

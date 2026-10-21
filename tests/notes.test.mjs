@@ -80,6 +80,7 @@ test('creates a body-only note with deterministic metadata', () => {
     text: 'A body',
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
+    pinned: false,
   }]);
   assert.equal(state.notice, 'Note created.');
   assert.equal(state.editingId, null);
@@ -171,7 +172,7 @@ test('reset cancels an edit, clears the draft, and retains original notes unchan
   assert.equal(reset.notes[0], originalNote);
   assert.deepEqual(originalNote, {
     id: 'original-id', category: 'general', title: 'Original', text: 'Body',
-    createdAt: CREATED_AT, updatedAt: CREATED_AT,
+    createdAt: CREATED_AT, updatedAt: CREATED_AT, pinned: false,
   });
   assert.deepEqual(base.notes, [originalNote]);
 });
@@ -331,4 +332,29 @@ test('switching categorized targets replaces the entire draft without changing e
   assert.equal(hasUnsavedChanges(secondEdit), false);
   assert.equal(one.category, 'work');
   assert.equal(two.category, 'personal');
+});
+
+
+test('pinned notes sort before unpinned notes, newest first within each group without mutating input', async () => {
+  const { sortNotesPinnedFirst } = await import('../src/notes.ts');
+  const olderPinned = { ...createNote('pinned-old', { text: 'Pinned old' }, CREATED_AT), pinned: true };
+  const newerUnpinned = { ...createNote('unpin-new', { text: 'Unpinned new' }, UPDATED_AT), pinned: false };
+  const newerPinned = { ...createNote('pinned-new', { text: 'Pinned new' }, UPDATED_AT), pinned: true };
+  const olderUnpinned = { ...createNote('unpin-old', { text: 'Unpinned old' }, CREATED_AT), pinned: false };
+  const input = [olderUnpinned, olderPinned, newerUnpinned, newerPinned];
+  assert.deepEqual(sortNotesPinnedFirst(input).map(note => note.id), [
+    'pinned-new', 'pinned-old', 'unpin-new', 'unpin-old',
+  ]);
+  assert.deepEqual(input.map(note => note.id), [
+    'unpin-old', 'pinned-old', 'unpin-new', 'pinned-new',
+  ]);
+});
+
+test('new notes default to unpinned and editing preserves the pinned state', () => {
+  const created = save(fillDraft(initialNotesState(), { text: 'Pin me' }), 'pin-preserved');
+  assert.equal(created.notes[0].pinned, false);
+  const pinned = { ...created.notes[0], pinned: true };
+  const editing = notesReducer({ ...created, notes: [pinned] }, { type: 'edit', id: 'pin-preserved' });
+  const updated = save(change(editing, 'text', 'Updated pinned note'), 'unused', UPDATED_AT);
+  assert.equal(updated.notes[0].pinned, true);
 });

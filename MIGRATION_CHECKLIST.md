@@ -106,7 +106,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 8. Note management
 
-- [ ] Pin and unpin notes, matching PWA behaviour.
+- [ ] Pin and unpin notes, matching PWA behaviour. (PR #14 implements the action, pinned-first sorting, and local persistence; Android verification required.)
 - [ ] Duplicate notes if supported by the PWA.
 - [ ] Archive and restore notes.
 - [ ] Move notes to Trash and restore them.
@@ -279,7 +279,10 @@ Update this table as PRs merge and testing results are confirmed.
 
 ### PR / device test log
 
+**PR #14 icon follow-up:** The later FontAwesome change reproduced 25 test failures because two strict VM test harnesses lacked the new native icon import mock. Added explicit module mocks without disabling unknown-import guards or existing tests, plus two regressions for drawer icons and accessible pin/unpin labels/state. Updated `expo-font` from `~58.0.8` to Expo's recommended `~58.0.9` and refreshed the lockfile without adding native configuration. A fresh `npm ci`, typecheck, lint, all **123 tests**, Expo dependency compatibility, and Android/iOS JavaScript exports passed; the exports include `FontAwesome.ttf`. Independent review found no further confirmed icon defect; no DeepCode/Snyk scan was available. Hold merge until hosted CI and Android/Expo Go checks (including icon loading, pinning/restart, and TalkBack) pass. The Node module-type warning is non-fatal; device verification is still outstanding.
+
 | 2026-10-21 | PR #13 (implementation in progress) | Five-category editor picker, library filtering, drawer counts, backward-compatible category storage and regression tests | Not yet run in Termux; do not treat as passed | **Android / Expo Go testing required** | Check create/edit/category-only changes, filtering combined with search, restart persistence, legacy notes defaulting to General, and drawer navigation. |
+| 2026-10-21 | PR #14 (fixes validated locally; open for review) | Fixed unclosed note-card JSX and two outdated unpinned-default assertions; added pin-controller persistence, pending-write, failure/retry, draft-preservation, and missing-ID regressions | Clean `npm ci`; `npm run check` passed on Node 24.19.0 (typecheck, lint, **121 tests**); `npx expo install --check` passed; Android/iOS JavaScript exports passed (not native builds). Independent in-depth code review completed; no DeepCode/Snyk scan was available. Hosted checks could not be read due to integration permissions | **Android / Expo Go testing required; not claimed verified** | Hold merge until hosted CI and device tests pass: pin/unpin from All/category/search, ordering, timestamps, restart persistence, edit/checklist preservation, rapid taps, storage-failure rollback, narrow-screen/larger-font layout, and TalkBack labels. |
 
 | Date | PR / build | What changed | Automated checks | Android / Expo Go result | Follow-up |
 | --- | --- | --- | --- | --- | --- |

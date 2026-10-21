@@ -110,8 +110,9 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (!isRecord(value)) {
     throw new Error(`Invalid note at index ${index}: expected an object.`);
   }
-  const { id, category: rawCategory, title, text, createdAt, updatedAt } = value;
+  const { id, category: rawCategory, title, text, createdAt, updatedAt, pinned: rawPinned } = value;
   const category = normalizeCategory(rawCategory);
+  const pinned = rawPinned === undefined ? false : rawPinned;
   if (typeof id !== 'string' || id.trim().length === 0) {
     throw new Error(`Invalid note at index ${index}: id must be a nonempty string.`);
   }
@@ -121,6 +122,9 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (rawCategory !== undefined && (typeof rawCategory !== 'string' || !NOTE_CATEGORIES.includes(rawCategory as NoteCategory))) {
     throw new Error(`Invalid note at index ${index}: category is unsupported.`);
   }
+  if (typeof pinned !== 'boolean') {
+    throw new Error(`Invalid note at index ${index}: pinned must be a boolean.`);
+  }
   if (typeof title !== 'string' || typeof text !== 'string') {
     throw new Error(`Invalid note at index ${index}: title and text must be strings.`);
   }
@@ -129,7 +133,7 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   validateDraft({ title, text }, index);
 
   ids.add(id);
-  return { id, category, title, text, createdAt, updatedAt };
+  return { id, category, title, text, createdAt, updatedAt, pinned };
 }
 
 function validateNotes(value: unknown): Note[] {
