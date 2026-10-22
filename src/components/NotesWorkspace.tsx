@@ -487,9 +487,9 @@ export function NotesWorkspace() {
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
               <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'trash' ? 'Trash' : view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
-            <Action label="+ New note" onPress={openNewNote} />
+            {view === 'trash' ? <Action label="Empty Trash" onPress={confirmEmptyTrash} disabled={saving || trashNotes.length === 0} /> : <Action label="+ New note" onPress={openNewNote} />}
           </View>
-          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore or permanently delete them here.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore within 15 days or they are permanently deleted.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
           {view === 'library' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
           </ScrollView>}
