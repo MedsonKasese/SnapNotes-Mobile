@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { NOTES_STORAGE_KEY, createNotesStorage } from '../src/notesStorage.ts';
 
 const date = '2026-10-19T18:00:00.000Z';
-const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date, pinned: false, archived: false });
+const note = (id, text = 'Body') => ({ id, title: '', text, category: 'general', createdAt: date, updatedAt: date, pinned: false, archived: false, deletedAt: null });
 function backend() {
   const data = new Map();
   let failKey = null;
@@ -366,4 +366,52 @@ test('rejects invalid pinned values without committing a save', async () => {
   const db = backend();
   await assert.rejects(createNotesStorage(db).save([{ ...note('bad'), pinned: 'yes' }]), /pinned must be a boolean/);
   assert.equal(db.data.size, 0);
+});
+
+test('version 1 legacy records without deletedAt load as canonical active notes', async () => {
+  const db = backend();
+  const legacy = { ...note('legacy-v1') };
+  delete legacy.deletedAt;
+  db.data.set(NOTES_STORAGE_KEY, JSON.stringify({ version: 1, notes: [legacy] }));
+  assert.deepEqual(await createNotesStorage(db).load(), [note('legacy-v1')]);
+});
+
+test('version 2 indexed legacy records without deletedAt load as canonical active notes', async () => {
+  const db = backend();
+  const legacy = { ...note('legacy-v2') };
+  delete legacy.deletedAt;
+  const generation = 'legacy-v2-generation';
+  db.data.set('@snapnotes-mobile/notes-index', JSON.stringify({ version: 2, generation, ids: ['legacy-v2'] }));
+  db.data.set(`@snapnotes-mobile/note/${generation}/0`, JSON.stringify(legacy));
+  assert.deepEqual(await createNotesStorage(db).load(), [note('legacy-v2')]);
+});
+
+test('valid trashed timestamp round-trips through storage', async () => {
+  const db = backend();
+  const trashed = { ...note('trashed'), deletedAt: '2026-10-20T12:34:56.789Z' };
+  const store = createNotesStorage(db);
+  await store.save([trashed]);
+  assert.deepEqual(await store.load(), [trashed]);
+});
+
+test('rejects invalid deletedAt types and calendar timestamps without committing', async () => {
+  for (const [label, deletedAt] of [
+    ['boolean', true], ['number', 42], ['object', {}], ['array', []], ['empty string', ''],
+    ['invalid day', '2026-02-30T12:00:00.000Z'], ['invalid leap day', '2025-02-29T12:00:00.000Z'],
+    ['invalid month', '2026-13-01T12:00:00.000Z'], ['invalid time', '2026-10-20T25:00:00.000Z'],
+  ]) {
+    const db = backend();
+    await assert.rejects(createNotesStorage(db).save([{ ...note('invalid-' + label), deletedAt }]), /deletedAt.*ISO timestamp/);
+    assert.equal(db.data.size, 0, `${label} must not write records`);
+  }
+});
+
+test('rejects archived and trashed notes without changing previously committed backend', async () => {
+  const db = backend();
+  const store = createNotesStorage(db);
+  await store.save([note('safe')]);
+  const before = [...db.data.entries()];
+  await assert.rejects(store.save([{ ...note('bad-archive-trash'), archived: true, deletedAt: '2026-10-20T12:00:00.000Z' }]), /trashed notes cannot be archived/);
+  assert.deepEqual([...db.data.entries()], before);
+  assert.deepEqual(await store.load(), [note('safe')]);
 });
