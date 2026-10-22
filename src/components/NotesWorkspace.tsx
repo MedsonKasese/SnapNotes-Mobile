@@ -13,7 +13,7 @@ import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 import { ChecklistLabel } from './ChecklistLabel';
 
-type WorkspaceView = 'library' | 'editor' | 'archive';
+type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -93,10 +93,11 @@ export function NotesWorkspace() {
   const saving = status === 'saving';
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
-  const activeNotes = state.notes.filter(note => !note.archived);
+  const activeNotes = state.notes.filter(note => !note.archived && note.deletedAt === null);
   const categoryNotes = activeNotes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
-  const archiveNotes = state.notes.filter(note => note.archived);
-  const sourceNotes = view === 'archive' ? archiveNotes : categoryNotes;
+  const archiveNotes = state.notes.filter(note => note.archived && note.deletedAt === null);
+  const trashNotes = state.notes.filter(note => note.deletedAt !== null);
+  const sourceNotes = view === 'trash' ? trashNotes : view === 'archive' ? archiveNotes : categoryNotes;
   const visibleNotes = sortNotesPinnedFirst(searchNotes(sourceNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
 
@@ -226,6 +227,27 @@ export function NotesWorkspace() {
     });
   }
 
+  function selectTrash() {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      setCategoryFilter('all');
+      setDrawerOpen(false);
+      setView('trash');
+    });
+  }
+  function confirmTrash(id: string, title: string) {
+    Alert.alert('Move to Trash?', 'Move "' + (title || 'Untitled note') + '" to Trash?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Move to Trash', style: 'destructive', onPress: () => { void controller.moveToTrash(id, new Date().toISOString()); } },
+    ]);
+  }
+  function confirmPermanentDelete(id: string, title: string) {
+    Alert.alert('Delete forever?', 'Permanently delete "' + (title || 'Untitled note') + '"? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete forever', style: 'destructive', onPress: () => { void controller.permanentlyDelete(id); } },
+    ]);
+  }
   function confirmDiscard(continueAction: () => void) {
     if (!dirty) {
       continueAction();
@@ -270,7 +292,7 @@ export function NotesWorkspace() {
       setDrawerOpen(false);
       return true;
     }
-    if (view === 'editor' || view === 'archive') {
+    if (view === 'editor' || view === 'archive' || view === 'trash') {
       openLibrary();
       return true;
     }
@@ -347,8 +369,8 @@ export function NotesWorkspace() {
             </View>
           </View>
           <View style={styles.countPill} accessibilityLiveRegion="polite">
-            <Text style={styles.countText}>{view === 'archive' ? archiveNotes.length : activeNotes.length}</Text>
-            <Text style={styles.countLabel}>{(view === 'archive' ? archiveNotes.length : activeNotes.length) === 1 ? 'note' : 'notes'}</Text>
+            <Text style={styles.countText}>{view === 'trash' ? trashNotes.length : view === 'archive' ? archiveNotes.length : activeNotes.length}</Text>
+            <Text style={styles.countLabel}>{(view === 'trash' ? trashNotes.length : view === 'archive' ? archiveNotes.length : activeNotes.length) === 1 ? 'note' : 'notes'}</Text>
           </View>
         </View>
         <View style={styles.searchRow}>
@@ -459,12 +481,12 @@ export function NotesWorkspace() {
           <View style={styles.libraryHeading}>
             <View>
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
-              <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
+              <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'trash' ? 'Trash' : view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
             <Action label="+ New note" onPress={openNewNote} />
           </View>
-          <Text style={styles.libraryHint}>{view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
-          {view !== 'archive' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
+          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore or permanently delete them here.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          {view === 'library' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
           </ScrollView>}
           {storageError !== null && <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>}
@@ -477,9 +499,9 @@ export function NotesWorkspace() {
             ListEmptyComponent={
               <View style={styles.emptyState}>
                 <View style={styles.emptyMark}><Text style={styles.emptyMarkText}>{searching ? '⌕' : '+'}</Text></View>
-                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : view === 'archive' ? 'Your archive is empty' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
-                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : view === 'archive' ? 'Notes you archive will appear here. You can restore them at any time.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
-                {!searching && view !== 'archive' && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
+                <Text accessibilityRole="header" style={styles.emptyTitle}>{searching ? 'No matching notes' : view === 'trash' ? 'Trash is empty' : view === 'archive' ? 'Your archive is empty' : categoryFilter !== 'all' ? `No notes in ${categoryLabel(categoryFilter)} yet` : 'Your space is ready'}</Text>
+                <Text style={styles.emptyText}>{searching ? 'Try another search or clear your query.' : view === 'trash' ? 'Deleted notes appear here until you restore or permanently delete them.' : view === 'archive' ? 'Notes you archive will appear here. You can restore them at any time.' : categoryFilter !== 'all' ? 'Choose another category or create a note and assign it to this category.' : 'Capture a thought before it slips away. Your first note starts here.'}</Text>
+                {!searching && view === 'library' && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
               </View>
             }
             renderItem={({ item }) => (
@@ -514,7 +536,7 @@ export function NotesWorkspace() {
                     <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
                   </View>
                   <View style={styles.noteFooterActions}>
-                    {view !== 'archive' && (
+                    {view === 'library' && (
                     <Pressable
                       disabled={saving}
                       accessibilityRole="button"
@@ -526,7 +548,7 @@ export function NotesWorkspace() {
                       <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#52634b'} accessible={false} />
                     </Pressable>
                     )}
-                    {view !== 'archive' && (
+                    {view === 'library' && (
                       <Pressable
                         disabled={saving}
                         accessibilityRole="button"
@@ -537,6 +559,16 @@ export function NotesWorkspace() {
                       >
                         <FontAwesome name="archive" size={18} color="#52634b" accessible={false} />
                       </Pressable>
+                    )}
+                    {view === 'trash' && (
+                      <>
+                        <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Restore ' + (item.title || 'Untitled note')} onPress={() => { void controller.restoreFromTrash(item.id, new Date().toISOString()); }} style={styles.archiveButton}>
+                          <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
+                        </Pressable>
+                        <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Delete forever ' + (item.title || 'Untitled note')} onPress={() => confirmPermanentDelete(item.id, item.title)} style={styles.archiveButton}>
+                          <FontAwesome name="trash" size={18} color="#b3261e" accessible={false} />
+                        </Pressable>
+                      </>
                     )}
                     {view === 'archive' && (
                       <Pressable
@@ -550,7 +582,10 @@ export function NotesWorkspace() {
                         <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
                       </Pressable>
                     )}
-                    <Pressable
+                    {view !== 'trash' && <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Move to Trash ' + (item.title || 'Untitled note')} onPress={() => confirmTrash(item.id, item.title)} style={styles.archiveButton}>
+                      <FontAwesome name="trash-o" size={18} color="#8a5146" accessible={false} />
+                    </Pressable>}
+                    {view !== 'trash' && <Pressable
                       disabled={saving}
                       accessibilityState={{ disabled: saving }}
                       accessibilityRole="button"
@@ -559,7 +594,7 @@ export function NotesWorkspace() {
                       style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
                     >
                       <Text style={styles.editButtonText}>Open note ›</Text>
-                    </Pressable>
+                    </Pressable>}
                   </View>
                 </View>
               </View>
@@ -599,11 +634,12 @@ export function NotesWorkspace() {
               <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
-              <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
+              <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
+               <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
             </View>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
-              <Text style={styles.drawerNoticeText}>Folders, Trash, settings, and account features will appear here as they are migrated and tested. Archive is now available.</Text>
+              <Text style={styles.drawerNoticeText}>Folders, settings, and account features will appear here as they are migrated and tested.</Text>
             </View>
             <View style={styles.drawerFooter}>
               <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>

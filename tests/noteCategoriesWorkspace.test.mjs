@@ -16,7 +16,7 @@ const savedNotes = [
   { id: 'work-1', title: 'Project alpha', text: 'First task', category: 'work' },
   { id: 'work-2', title: 'Project beta', text: 'Second task', category: 'work' },
   { id: 'personal-1', title: 'Project weekend', text: 'A trip', category: 'personal' },
-].map(note => ({ ...note, createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:00:00Z' }));
+].map(note => ({ ...note, pinned: false, archived: false, deletedAt: null, createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:00:00Z' }));
 
 // Exercise real component JSX and handlers with native primitives stubbed out.
 // Effects/native layout are intentionally excluded; this does not replace device QA.
@@ -25,11 +25,15 @@ function workspace(initialNotes = savedNotes) {
   const slots = [];
   const alerts = [];
   const archiveCalls = [];
+  const trashCalls = [];
   let cursor = 0;
   const controller = {
     dispatch(action) { state = notes.notesReducer(state, action); },
     getSnapshot: () => ({ state, status: 'ready', storageError: null }),
     setArchived(...args) { archiveCalls.push(args); },
+    moveToTrash(...args) { trashCalls.push(['move', ...args]); },
+    restoreFromTrash(...args) { trashCalls.push(['restore', ...args]); },
+    permanentlyDelete(...args) { trashCalls.push(['delete', ...args]); },
   };
   const exports = {};
   vm.runInNewContext(outputText, {
@@ -66,7 +70,7 @@ function workspace(initialNotes = savedNotes) {
   });
   return {
     render() { cursor = 0; return exports.NotesWorkspace(); },
-    controller, alerts, archiveCalls,
+    controller, alerts, archiveCalls, trashCalls,
   };
 }
 
@@ -140,8 +144,8 @@ test('empty categories explain the filter instead of claiming there are no saved
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
   const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'plus']);
-  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'New note']);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'trash', 'plus']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Trash', 'New note']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');
@@ -239,6 +243,91 @@ test('opening Archived preserves dirty edits until the user explicitly discards 
   app.alerts[0][2].find(button => button.text === 'Discard changes').onPress();
   assert.equal(list(app.render()).props.data.length, 0);
   assert.equal(action(app.render(), 'Archived').props.active, true);
+  assert.equal(app.controller.getSnapshot().state.editingId, null);
+  assert.equal(app.controller.getSnapshot().state.notes, savedNotes);
+});
+
+const trashedNote = { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', deletedAt: '2026-10-21T00:00:00Z' };
+
+test('Trash is excluded from library, categories and archive, with independent counts and search', () => {
+  const app = workspace([...savedNotes, archivedNote, trashedNote]);
+  const tree = app.render();
+  assert.deepEqual(list(tree).props.data.map(note => note.id), savedNotes.map(note => note.id));
+  assert.equal(action(tree, 'All notes').props.detail, '3 saved notes');
+  assert.equal(action(tree, 'Work').props.detail, '2 notes');
+  assert.equal(action(tree, 'Trash').props.detail, '1 trashed notes');
+  action(tree, 'Archived').props.onPress();
+  assert.deepEqual(list(app.render()).props.data.map(note => note.id), [archivedNote.id]);
+  action(app.render(), 'Trash').props.onPress();
+  assert.equal(action(app.render(), 'Trash').props.active, true);
+  assert.deepEqual(list(app.render()).props.data.map(note => note.id), [trashedNote.id]);
+  assert.equal(elements(app.render()).some(element => element.type === 'Pressable' && text(element) === 'Work'), false);
+  find(app.render(), element => element.props.accessibilityLabel === 'Search saved notes').props.onChangeText('weekend');
+  assert.equal(list(app.render()).props.data.length, 0);
+  assert.match(text(list(app.render()).props.ListEmptyComponent), /No matching notes/);
+  find(app.render(), element => element.props.accessibilityLabel === 'Search saved notes').props.onChangeText('Deleted');
+  assert.deepEqual(list(app.render()).props.data.map(note => note.id), [trashedNote.id]);
+});
+
+test('moving active or archived notes to Trash requires explicit destructive confirmation', () => {
+  const app = workspace([...savedNotes, archivedNote]);
+  for (const item of [savedNotes[0], archivedNote]) {
+    if (item.archived) action(app.render(), 'Archived').props.onPress();
+    const card = list(app.render()).props.renderItem({ item });
+    find(card, element => element.props.accessibilityLabel === `Move to Trash ${item.title}`).props.onPress();
+    const alert = app.alerts.at(-1);
+    assert.equal(alert[0], 'Move to Trash?');
+    assert.equal(alert[2].find(button => button.text === 'Cancel').style, 'cancel');
+    assert.equal(app.trashCalls.length, item.archived ? 1 : 0);
+    const confirm = alert[2].find(button => button.text === 'Move to Trash');
+    assert.equal(confirm.style, 'destructive');
+    confirm.onPress();
+    assert.equal(app.trashCalls.at(-1)[0], 'move');
+    assert.equal(app.trashCalls.at(-1)[1], item.id);
+    assert.ok(Number.isFinite(Date.parse(app.trashCalls.at(-1)[2])));
+  }
+});
+
+test('Trash cards only restore or confirm permanent deletion and empty Trash explains recovery', () => {
+  const app = workspace([trashedNote]);
+  action(app.render(), 'Trash').props.onPress();
+  const card = list(app.render()).props.renderItem({ item: trashedNote });
+  assert.equal(elements(card).some(element => /^(Edit|Pin|Unpin|Archive|Move to Trash) /.test(element.props.accessibilityLabel ?? '')), false);
+  const restore = find(card, element => element.props.accessibilityLabel === 'Restore Deleted project');
+  assert.equal(restore.props.accessibilityRole, 'button');
+  restore.props.onPress();
+  assert.equal(app.trashCalls[0][0], 'restore');
+  assert.equal(app.trashCalls[0][1], trashedNote.id);
+  assert.ok(Number.isFinite(Date.parse(app.trashCalls[0][2])));
+  find(card, element => element.props.accessibilityLabel === 'Delete forever Deleted project').props.onPress();
+  assert.equal(app.trashCalls.length, 1);
+  const alert = app.alerts.at(-1);
+  assert.equal(alert[0], 'Delete forever?');
+  assert.match(alert[1], /cannot be undone/);
+  assert.equal(alert[2].find(button => button.text === 'Cancel').style, 'cancel');
+  const confirm = alert[2].find(button => button.text === 'Delete forever');
+  assert.equal(confirm.style, 'destructive');
+  confirm.onPress();
+  assert.deepEqual(app.trashCalls.at(-1), ['delete', trashedNote.id]);
+
+  const emptyApp = workspace();
+  action(emptyApp.render(), 'Trash').props.onPress();
+  const empty = list(emptyApp.render()).props.ListEmptyComponent;
+  assert.match(text(empty), /Trash is empty/);
+  assert.match(text(empty), /restore or permanently delete/);
+  assert.equal(elements(empty).some(element => element.props.label), false);
+});
+
+test('opening Trash preserves unsaved edits until discard is confirmed', () => {
+  const app = workspace();
+  editWorkNote(app);
+  app.controller.dispatch({ type: 'change', field: 'text', value: 'Unsaved work' });
+  action(app.render(), 'Trash').props.onPress();
+  assert.equal(app.alerts[0][0], 'Discard unsaved changes?');
+  assert.equal(app.controller.getSnapshot().state.draft.text, 'Unsaved work');
+  assert.equal(elements(app.render()).some(element => element.type === 'FlatList'), false);
+  app.alerts[0][2].find(button => button.text === 'Discard changes').onPress();
+  assert.equal(action(app.render(), 'Trash').props.active, true);
   assert.equal(app.controller.getSnapshot().state.editingId, null);
   assert.equal(app.controller.getSnapshot().state.notes, savedNotes);
 });
