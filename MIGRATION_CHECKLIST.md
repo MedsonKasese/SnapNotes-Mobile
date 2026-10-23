@@ -126,6 +126,8 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 - [ ] Preserve folder membership through restart and future sync.
 - [ ] Prevent accidental data loss when moving or deleting folders.
 
+- [ ] Customize folder icons and colors (PR #21 adds PWA's nine icons and six colors plus None, with persistent Android picker; automated/device verification pending).
+
 ## 10. Private Notes and security
 
 - [ ] Audit PWA Private Notes entry, unlock, move, and lock behaviour.
@@ -269,7 +271,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Storage reliability | Implemented; regression testing remains | Serialization, cleanup, and recovery work merged |
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
-| Categories and folders | **Categories user verified; folders in PR #20 pending testing** | PR #13 merged; user verified category display and assignment on Android. Folders remain future work. |
+| Categories and folders | **Categories user verified; folders in PR #20 pending testing** | PR #13 merged; user verified category display and assignment on Android. Folders implemented and user verified in merged PR #20; appearance customization is pending PR #21 testing. |
 | Formatting and checklists | User reports rich editor tested and working on Android; additional regression testing remains | Six PWA-order icons, rich emphasis/lists/safe links and checkboxes; optional sanitized HTML with backward-compatible plain notes. Checkbox selection preserves text; checked styling and inline persistence remain. Typecheck, lint, automated tests, Expo compatibility and Android/iOS JavaScript exports pass. Native visual/keyboard/selection/font-scaling/accessibility QA and authenticated DeepCode/Snyk scanning remain owner gates; not release-ready or merged. |
 | Duplicate notes | **User verified and merged PR #19** | Duplicating notes works correctly on Android. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
