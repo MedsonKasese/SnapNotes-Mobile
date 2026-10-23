@@ -10,6 +10,8 @@ export type RichContent = { text: string; html: string };
 export type RichNoteEditorHandle = {
   command(action: FormattingAction, url?: string): void;
   rememberSelection(): void;
+  undo(): void;
+  redo(): void;
   getContent(): Promise<RichContent>;
 };
 type Props = {
@@ -71,6 +73,8 @@ export const RichNoteEditor = forwardRef<RichNoteEditorHandle, Props>(function R
       if (ready.current && latest.current.editable) send({ type: 'command', command: action, url });
     },
     rememberSelection() { if (ready.current) send({ type: 'remember' }); },
+    undo() { if (ready.current && latest.current.editable) send({ type: 'command', command: 'undo' }); },
+    redo() { if (ready.current && latest.current.editable) send({ type: 'command', command: 'redo' }); },
     getContent() {
       if (!ready.current) return Promise.reject(new Error('The note editor is not ready. Please retry before saving.'));
       return new Promise<RichContent>((resolve, reject) => {
