@@ -10,6 +10,7 @@ import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
+import { DRAFT_LIBRARY_KEY, newDraftId, parseDraftLibrary, removeDraft, upsertDraft, type SavedDraft } from '../draftLibrary';
 import { FOLDERS_KEY, FOLDER_ICON_NAMES, FOLDER_COLOR_VALUES, normalizeFolderIcon, normalizeFolderColor, type FolderIcon, type FolderColor, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
@@ -20,7 +21,7 @@ import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
-type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder';
+type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts';
 type NoteAction = 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 type FolderAction = 'rename' | 'customize' | 'delete';
@@ -127,6 +128,13 @@ export function NotesWorkspace() {
   const [actionsViewport, setActionsViewport] = useState<MenuRect | null>(null);
   const [actionsMenuHeight, setActionsMenuHeight] = useState(0);
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>([]);
+  const [draftLibraryReady, setDraftLibraryReady] = useState(false);
+  const [draftLibraryError, setDraftLibraryError] = useState<string | null>(null);
+  const draftLibraryRef = useRef<SavedDraft[]>([]);
+  const draftLibraryBusy = useRef(false);
+  const [draftLibrarySaving, setDraftLibrarySaving] = useState(false);
+  const [openedDraftId, setOpenedDraftId] = useState<string | null>(null);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [formattingState, setFormattingState] = useState<FormattingState>({});
@@ -492,6 +500,87 @@ export function NotesWorkspace() {
     if (id) void controller.moveNoteToFolder(id, folderId);
   }
 
+  useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(DRAFT_LIBRARY_KEY).then(raw => {
+      const drafts = parseDraftLibrary(raw);
+      if (active) { draftLibraryRef.current = drafts; setSavedDrafts(drafts); setDraftLibraryReady(true); setDraftLibraryError(null); }
+    }).catch(() => {
+      if (active) { setDraftLibraryReady(false); setDraftLibraryError('Could not read saved drafts. Existing drafts have not been changed.'); }
+    });
+    return () => { active = false; };
+  }, []);
+
+  async function writeDraftLibrary(next: SavedDraft[]): Promise<boolean> {
+    if (!draftLibraryReady || draftLibraryBusy.current) return false;
+    draftLibraryBusy.current = true;
+    setDraftLibrarySaving(true);
+    try {
+      await AsyncStorage.setItem(DRAFT_LIBRARY_KEY, JSON.stringify(next));
+      draftLibraryRef.current = next;
+      setSavedDrafts(next);
+      setDraftLibraryError(null);
+      return true;
+    } catch {
+      setDraftLibraryError('Could not save drafts. Your previous drafts remain unchanged.');
+      return false;
+    } finally {
+      draftLibraryBusy.current = false;
+      setDraftLibrarySaving(false);
+    }
+  }
+
+  function selectDrafts() {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      closeDrawer();
+      setView('drafts');
+    });
+  }
+
+  async function saveToDrafts() {
+    if (!draftLibraryReady || draftLibraryBusy.current || saving) return;
+    const session = editorSession.current;
+    setFlushing(true);
+    try {
+      const content = await bodyEditor.current?.getContent();
+      if (!content || session !== editorSession.current) throw Error('Editor is not ready. Please try again.');
+      const current = controller.getSnapshot().state;
+      const title = current.draft.title;
+      if (!title.trim() && !content.text.trim()) { Alert.alert('Empty draft', 'Write something before saving a draft.'); return; }
+      const now = new Date().toISOString();
+      const draft: SavedDraft = {
+        id: openedDraftId ?? newDraftId(draftLibraryRef.current, now),
+        title, text: content.text, html: content.html,
+        category: normalizeCategory(current.draft.category), editingId: current.editingId, savedAt: now,
+      };
+      if (await writeDraftLibrary(upsertDraft(draftLibraryRef.current, draft))) {
+        setOpenedDraftId(null);
+        dispatch({ type: 'reset' });
+        setView('drafts');
+      }
+    } catch (error) {
+      Alert.alert('Could not save draft', error instanceof Error ? error.message : 'Please try again.');
+    } finally { setFlushing(false); }
+  }
+
+  function openSavedDraft(draft: SavedDraft) {
+    confirmDiscard(() => {
+      const editingId = draft.editingId && state.notes.some(note => note.id === draft.editingId && note.deletedAt === null) ? draft.editingId : null;
+      dispatch({ type: 'restore-draft', draft: { title: draft.title, text: draft.text, ...(draft.html === undefined ? {} : { html: draft.html }), category: normalizeCategory(draft.category) }, editingId });
+      setOpenedDraftId(draft.id);
+      setView('editor');
+    });
+  }
+
+  function confirmDeleteDraft(draft: SavedDraft) {
+    Alert.alert('Delete draft?', `Delete "${draft.title || 'Untitled draft'}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete draft', style: 'destructive', onPress: () => { void writeDraftLibrary(removeDraft(draftLibraryRef.current, draft.id)); } },
+    ]);
+  }
+
   function selectArchive() {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
@@ -552,6 +641,7 @@ export function NotesWorkspace() {
 
   function openNewNote() {
     confirmDiscard(() => {
+      setOpenedDraftId(null);
       dispatch({ type: 'reset' });
       closeDrawer();
       setView('editor');
@@ -565,6 +655,7 @@ export function NotesWorkspace() {
       return;
     }
     confirmDiscard(() => {
+      setOpenedDraftId(null);
       dispatch({ type: 'edit', id });
       setView('editor');
     });
@@ -636,7 +727,7 @@ export function NotesWorkspace() {
       dismissDrawer();
       return true;
     }
-    if (view === 'editor' || view === 'archive' || view === 'trash' || view === 'folder') {
+    if (view === 'editor' || view === 'archive' || view === 'trash' || view === 'folder' || view === 'drafts') {
       openLibrary();
       return true;
     }
@@ -850,12 +941,28 @@ export function NotesWorkspace() {
               {state.notice !== null && <Text accessibilityLiveRegion="polite" style={styles.notice}>{state.notice}</Text>}
               <View style={styles.actions}>
                 <Action disabled={saving || !editorReady} label={saving ? 'Saving…' : state.editingId === null ? 'Save note' : 'Save changes'} onPress={() => { void saveNote(); }} />
+                <Action disabled={saving || draftLibrarySaving || !draftLibraryReady} label="Save to Drafts" onPress={() => { void saveToDrafts(); }} secondary />
                 {(state.editingId !== null || dirty) && <Action disabled={saving} label="Cancel" onPress={openLibrary} secondary />}
                 {state.editingId !== null && <Action disabled={saving} label="New note" onPress={openNewNote} secondary />}
               </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+      ) : view === 'drafts' ? (
+        <View style={styles.flex}>
+          <View style={styles.libraryHeading}><View><Text style={styles.eyebrow}>UNFINISHED WORK</Text><Text accessibilityRole="header" style={styles.screenTitle}>Drafts</Text></View><Action label="+ New note" onPress={openNewNote} /></View>
+          <Text style={styles.libraryHint}>Saved on this device only. Drafts are not synced or backed up.</Text>
+          {draftLibraryError !== null && <Text accessibilityRole="alert" style={styles.error}>{draftLibraryError}</Text>}
+          {!draftLibraryReady ? <Text style={styles.libraryHint}>Drafts unavailable until storage can be read.</Text> : <ScrollView contentContainerStyle={styles.editorContent}>
+            {savedDrafts.length === 0 && <Text style={styles.libraryHint}>No saved drafts yet. Open the editor and tap Save to Drafts.</Text>}
+            {savedDrafts.map(draft => <View key={draft.id} style={styles.editor}>
+              <Text style={styles.label} numberOfLines={2}>{draft.title || 'Untitled draft'}</Text>
+              <Text numberOfLines={3}>{draft.text}</Text>
+              <Text style={styles.hint}>Saved {new Date(draft.savedAt).toLocaleString()}</Text>
+              <View style={styles.folderControls}><Action label="Open draft" disabled={draftLibrarySaving} onPress={() => openSavedDraft(draft)} /><Action label="Delete" destructive disabled={draftLibrarySaving} onPress={() => confirmDeleteDraft(draft)} /></View>
+            </View>)}
+          </ScrollView>}
+        </View>
       ) : (
         <View style={styles.flex}>
           <View style={styles.libraryHeading}>
@@ -1087,6 +1194,7 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
+              <MenuRow label="Drafts" icon="file-text-o" detail={`${savedDrafts.length} drafts`} active={view === 'drafts'} onPress={selectDrafts} />
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
                <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
