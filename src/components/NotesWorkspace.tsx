@@ -973,6 +973,7 @@ export function NotesWorkspace() {
                 <Text style={styles.label}>Note</Text>
                 <FormattingToolbar disabled={saving || !editorReady} active={formattingState} onAction={formatNote} />
               </View>
+              <View style={styles.folderControls}><Action label="↶ Undo typing" secondary disabled={saving || !editorReady} onPress={() => bodyEditor.current?.undo()} /><Action label="↷ Redo typing" secondary disabled={saving || !editorReady} onPress={() => bodyEditor.current?.redo()} /></View>
               <RichNoteEditor
                 key={state.editingId ?? 'new-note'}
                 ref={bodyEditor}
@@ -1018,6 +1019,7 @@ export function NotesWorkspace() {
         </View>
       ) : (
         <View style={styles.flex}>
+          <View style={styles.folderControls}><Action label="↶ Undo saved edit" secondary disabled={saving || !controller.canUndoSaved()} onPress={() => { void controller.travelSavedHistory('undo'); }} /><Action label="↷ Redo saved edit" secondary disabled={saving || !controller.canRedoSaved()} onPress={() => { void controller.travelSavedHistory('redo'); }} /></View>
           <View style={styles.libraryHeading}>
             <View>
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
