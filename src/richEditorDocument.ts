@@ -99,7 +99,7 @@ p,div{margin:0}ul,ol{margin:0;padding-left:26px}a{color:#347b0a;text-decoration:
         var a=document.createElement('a');a.setAttribute('href',url);a.textContent=m.label||url;
         document.execCommand('insertHTML',false,a.outerHTML);
       }else document.execCommand('createLink',false,url);
-    }else if(['bold','italic','insertUnorderedList','insertOrderedList'].indexOf(m.command)!==-1){
+    }else if(['bold','italic','insertUnorderedList','insertOrderedList','undo','redo'].indexOf(m.command)!==-1){
       document.execCommand(m.command,false);
     }
     remember();content();
