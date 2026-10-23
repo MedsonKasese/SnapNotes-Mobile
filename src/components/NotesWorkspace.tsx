@@ -10,7 +10,7 @@ import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
-import { FOLDERS_KEY, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
+import { FOLDERS_KEY, FOLDER_ICON_NAMES, FOLDER_COLOR_VALUES, normalizeFolderIcon, normalizeFolderColor, type FolderIcon, type FolderColor, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
@@ -49,9 +49,9 @@ function Action({ label, onPress, secondary = false, destructive = false, disabl
 
 type FontAwesomeName = ComponentProps<typeof FontAwesome>['name'];
 
-function MenuRow({ label, detail, icon, onPress, active = false }: {
+function MenuRow({ label, detail, icon, onPress, active = false, iconColor }: {
   icon: FontAwesomeName;
-  label: string; detail: string; onPress: () => void; active?: boolean;
+  label: string; detail: string; onPress: () => void; active?: boolean; iconColor?: string;
 }) {
   return (
     <Pressable
@@ -60,7 +60,7 @@ function MenuRow({ label, detail, icon, onPress, active = false }: {
       onPress={onPress}
       style={({ pressed }) => [styles.menuRow, active && styles.menuRowActive, pressed && styles.pressed]}
     >
-      <FontAwesome name={icon} size={18} color={active ? '#3b7f16' : '#65775c'} accessible={false} />
+      <FontAwesome name={icon} size={18} color={iconColor ?? (active ? '#3b7f16' : '#65775c')} accessible={false} />
       <Text numberOfLines={1} style={[styles.menuRowTitle, active && styles.menuRowTitleActive]}>{label}</Text>
       {/^\d/.test(detail) ? <View style={styles.menuCountBadge}><Text style={styles.menuCountText}>{detail.split(' ')[0]}</Text></View> : <FontAwesome name="chevron-right" size={12} color="#6a7764" accessible={false} />}
     </Pressable>
@@ -110,6 +110,9 @@ export function NotesWorkspace() {
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename'; id?: string } | null>(null);
   const [folderName, setFolderName] = useState('');
+  const [appearanceFolderId, setAppearanceFolderId] = useState<string | null>(null);
+  const [appearanceIcon, setAppearanceIcon] = useState<FolderIcon>('folder');
+  const [appearanceColor, setAppearanceColor] = useState<FolderColor>('');
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
@@ -348,6 +351,31 @@ export function NotesWorkspace() {
     setDrawerOpen(false);
     setFolderName(folder?.name ?? '');
     setFolderDialog({ mode, id: folder?.id });
+  }
+
+  function openFolderAppearance(folder: Folder) {
+    if (!foldersReady || foldersSaving) return;
+    setDrawerOpen(false);
+    setAppearanceFolderId(folder.id);
+    setAppearanceIcon(normalizeFolderIcon(folder.icon));
+    setAppearanceColor(normalizeFolderColor(folder.color));
+  }
+
+  async function saveFolderAppearance() {
+    if (!appearanceFolderId || !foldersReady || folderMutationInFlight.current) return;
+    const current = foldersRef.current;
+    if (!current.some(folder => folder.id === appearanceFolderId)) { setAppearanceFolderId(null); return; }
+    folderMutationInFlight.current = true;
+    setFoldersSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const next = current.map(folder => folder.id === appearanceFolderId
+        ? { ...folder, icon: appearanceIcon, color: appearanceColor, updatedAt: now } : folder);
+      if (await persistFolders(next, 'Could not save folder appearance. Please try again.')) setAppearanceFolderId(null);
+    } finally {
+      folderMutationInFlight.current = false;
+      setFoldersSaving(false);
+    }
   }
 
   async function submitFolder() {
@@ -904,6 +932,31 @@ export function NotesWorkspace() {
         </SafeAreaProvider>
       </Modal>
 
+      <Modal visible={appearanceFolderId !== null} transparent animationType="fade" onRequestClose={() => { if (!foldersSaving) setAppearanceFolderId(null); }}>
+        <View style={styles.folderModalLayer}><ScrollView style={styles.folderModalCard} keyboardShouldPersistTaps="handled" accessibilityViewIsModal>
+          <Text accessibilityRole="header" style={styles.label}>Customize folder</Text>
+          <Text style={styles.label}>Icon</Text>
+          <View style={styles.folderAppearanceChoices}>
+            {FOLDER_ICON_NAMES.map(icon => <Pressable key={icon} accessibilityRole="button"
+              accessibilityLabel={icon + ' folder icon'} accessibilityState={{ selected: appearanceIcon === icon }}
+              disabled={foldersSaving} onPress={() => setAppearanceIcon(icon)}
+              style={[styles.folderAppearanceOption, appearanceIcon === icon && styles.folderAppearanceSelected]}>
+              <Text style={styles.folderControlText}>{icon}</Text>
+            </Pressable>)}
+          </View>
+          <Text style={styles.label}>Color</Text>
+          <View style={styles.folderAppearanceChoices}>
+            {(['', ...Object.keys(FOLDER_COLOR_VALUES)] as FolderColor[]).map(color => <Pressable key={color || 'none'} accessibilityRole="button"
+              accessibilityLabel={(color || 'None') + ' folder color'} accessibilityState={{ selected: appearanceColor === color }}
+              disabled={foldersSaving} onPress={() => setAppearanceColor(color)}
+              style={[styles.folderAppearanceOption, appearanceColor === color && styles.folderAppearanceSelected]}>
+              <Text style={[styles.folderControlText, color ? { color: FOLDER_COLOR_VALUES[color] } : undefined]}>{color || 'None'}</Text>
+            </Pressable>)}
+          </View>
+          {folderError !== null && <Text accessibilityRole="alert" style={styles.error}>{folderError}</Text>}
+          <View style={styles.folderControls}><Action label="Cancel" secondary disabled={foldersSaving} onPress={() => setAppearanceFolderId(null)} /><Action label="Save appearance" disabled={foldersSaving} onPress={() => { void saveFolderAppearance(); }} /></View>
+        </ScrollView></View>
+      </Modal>
       <Modal visible={folderDialog !== null} transparent animationType="fade" onRequestClose={() => { if (!folderMutationInFlight.current) setFolderDialog(null); }}>
         <KeyboardAvoidingView style={styles.folderModalLayer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.folderModalCard} accessibilityViewIsModal>
           <Text accessibilityRole="header" style={styles.label}>{folderDialog?.mode === 'rename' ? 'Rename folder' : 'New folder'}</Text>
@@ -961,7 +1014,7 @@ export function NotesWorkspace() {
                 </Pressable>
               </View>
               {(foldersExpanded ? folders : folders.slice(0, 3)).map(folder =>
-                <MenuRow key={folder.id} label={folder.name} icon="folder-o"
+                <MenuRow key={folder.id} label={folder.name} icon={(({ folder: 'folder-o', book: 'book', flask: 'flask', code: 'code', lightbulb: 'lightbulb-o', briefcase: 'briefcase', heart: 'heart', star: 'star', cloud: 'cloud' } as const)[folder.icon])} iconColor={folder.color ? FOLDER_COLOR_VALUES[folder.color] : undefined}
                   detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`}
                   active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
               {folders.length > 3 && <Pressable accessibilityRole="button"
@@ -972,7 +1025,7 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
-              {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
+              {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={foldersSaving} onPress={() => { const folder = folders.find(item => item.id === activeFolderId); if (folder) openFolderAppearance(folder); }} style={styles.folderControl}><Text style={styles.folderControlText}>Customize folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
                <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
@@ -1135,6 +1188,9 @@ const styles = StyleSheet.create({
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
   drawerNavigation: { paddingTop: 15, gap: 7 },
+  folderAppearanceChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingVertical: 8 },
+  folderAppearanceOption: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 9, borderWidth: 1, borderColor: '#dce6d4' },
+  folderAppearanceSelected: { borderColor: '#3b7f16', backgroundColor: '#eff7e9' },
   folderSectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 12, paddingTop: 10 },
   folderAddButton: { minHeight: 40, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#eff7e9' },
   folderAddText: { color: '#3b7f16', fontSize: 12, fontWeight: '800' },
