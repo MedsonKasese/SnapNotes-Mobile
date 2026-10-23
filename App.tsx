@@ -12,18 +12,11 @@ export default function App() {
     if (!__DEV__) return;
     let active = true;
     (async () => {
-      const provider = globalThis.crypto;
-      const random = typeof provider?.getRandomValues === 'function';
-      const subtle = Boolean(provider?.subtle);
-      if (!random || !subtle) {
-        if (active) setCryptoCheck(`Private crypto: unavailable (random: ${random}, subtle: ${subtle})`);
-        return;
-      }
       try {
-        const salt = generatePrivateSalt(provider);
-        const key = await derivePrivateKey('development-only-password', salt, provider);
-        const encrypted = await encryptPrivatePayload({ test: 'android-crypto-check' }, key, salt, provider);
-        const decoded = await decryptPrivatePayload(encrypted, key, provider) as { test?: string };
+        const salt = generatePrivateSalt();
+        const key = await derivePrivateKey('development-only-password', salt);
+        const encrypted = await encryptPrivatePayload({ test: 'android-crypto-check' }, key, salt);
+        const decoded = await decryptPrivatePayload(encrypted, key) as { test?: string };
         if (active) setCryptoCheck(decoded.test === 'android-crypto-check' ? 'Private crypto: PASS on this device' : 'Private crypto: FAIL (incorrect decrypted result)');
       } catch (error) {
         if (active) setCryptoCheck(`Private crypto: FAIL (${error instanceof Error ? error.name : 'unknown error'})`);
