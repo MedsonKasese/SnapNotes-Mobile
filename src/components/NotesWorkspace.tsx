@@ -14,6 +14,7 @@ import { searchNotes } from '../noteSearch';
 import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
+type NoteAction = 'pin' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -98,6 +99,20 @@ export function NotesWorkspace() {
   const sourceNotes = view === 'trash' ? trashNotes : view === 'archive' ? archiveNotes : categoryNotes;
   const visibleNotes = sortNotesPinnedFirst(searchNotes(sourceNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
+
+  const selected = state.notes.find(note => note.id === actionsNoteId);
+  const inTrash = selected !== undefined && selected.deletedAt !== null;
+  const inArchive = selected?.archived && !inTrash;
+  const options: { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction }[] = !selected ? [] : inTrash
+    ? [
+        { label: 'Restore note', icon: 'undo', action: 'restore-trash' },
+        { label: 'Delete forever', icon: 'trash', destructive: true, action: 'delete' },
+      ]
+    : [
+        ...(!inArchive ? [{ label: selected.pinned ? 'Unpin note' : 'Pin note', icon: 'thumb-tack' as FontAwesomeName, action: 'pin' as NoteAction }] : []),
+        { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
+        { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
+      ];
 
   const restoreEditorDraft = useCallback(async () => {
     if (controller.getSnapshot().status !== 'ready') return;
@@ -282,6 +297,7 @@ export function NotesWorkspace() {
   }
 
   function editNote(id: string) {
+    if (controller.getSnapshot().status !== 'ready') return;
     if (state.editingId === id) {
       setView('editor');
       return;
@@ -300,9 +316,21 @@ export function NotesWorkspace() {
     setActionsNoteId(null);
   }
 
-  function runNoteAction(action: () => void) {
+  function handleNoteAction(id: string, action: NoteAction) {
+    const snapshot = controller.getSnapshot();
+    if (snapshot.status !== 'ready') return;
+    const selected = snapshot.state.notes.find(note => note.id === id);
     closeNoteActions();
-    action();
+    if (!selected) return;
+    const now = new Date().toISOString();
+    switch (action) {
+      case 'pin': void controller.togglePin(id, now); break;
+      case 'archive': void controller.setArchived(id, true, now); break;
+      case 'restore-archive': void controller.setArchived(id, false, now); break;
+      case 'trash': confirmTrash(id, selected.title); break;
+      case 'restore-trash': void controller.restoreFromTrash(id, now); break;
+      case 'delete': confirmPermanentDelete(id, selected.title); break;
+    }
   }
 
   function handleBack() {
@@ -527,7 +555,9 @@ export function NotesWorkspace() {
               </View>
             }
             renderItem={({ item }) => (
-              <Pressable style={styles.card} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
+              // Keep nested checkboxes/menu independently reachable by screen readers.
+              // The actions sheet provides their explicit Open note control.
+              <Pressable style={styles.card} accessible={false} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
                 <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
@@ -581,33 +611,28 @@ export function NotesWorkspace() {
           <Pressable style={styles.actionsBackdrop} accessibilityRole="button" accessibilityLabel="Close note actions" onPress={closeNoteActions} />
           <View style={styles.actionsSheet} accessibilityViewIsModal>
             <Text accessibilityRole="header" style={styles.actionsSheetTitle}>Note actions</Text>
-            {(() => {
-              const selected = state.notes.find(note => note.id === actionsNoteId);
-              if (!selected) return null;
-              const title = selected.title || 'Untitled note';
-              const inTrash = selected.deletedAt !== null;
-              const inArchive = selected.archived && !inTrash;
-              const options: { label: string; icon: FontAwesomeName; destructive?: boolean; action: () => void }[] = inTrash
-                ? [
-                    { label: 'Restore note', icon: 'undo', action: () => { void controller.restoreFromTrash(selected.id, new Date().toISOString()); } },
-                    { label: 'Delete forever', icon: 'trash', destructive: true, action: () => confirmPermanentDelete(selected.id, title) },
-                  ]
-                : [
-                    { label: 'Open note', icon: 'file-text-o', action: () => editNote(selected.id) },
-                    ...(!inArchive ? [{ label: selected.pinned ? 'Unpin note' : 'Pin note', icon: 'thumb-tack' as FontAwesomeName, action: () => { void controller.togglePin(selected.id, new Date().toISOString()); } }] : []),
-                    { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: () => { void controller.setArchived(selected.id, !inArchive, new Date().toISOString()); } },
-                    { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: () => confirmTrash(selected.id, title) },
-                  ];
-              return options.map(option => (
-                <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + title}
-                  disabled={saving} accessibilityState={{ disabled: saving }}
-                  onPress={() => runNoteAction(option.action)}
-                  style={({ pressed }) => [styles.actionsSheetRow, pressed && styles.pressed]}>
-                  <FontAwesome name={option.icon} size={19} color={option.destructive ? '#b3261e' : '#52634b'} accessible={false} />
-                  <Text style={[styles.actionsSheetRowText, option.destructive && styles.actionsSheetDanger]}>{option.label}</Text>
-                </Pressable>
-              ));
-            })()}
+            {selected && selected.deletedAt === null && (
+              <Pressable accessibilityRole="button" accessibilityLabel={'Open note: ' + (selected.title || 'Untitled note')}
+                disabled={saving} accessibilityState={{ disabled: saving }}
+                onPress={() => {
+                  if (controller.getSnapshot().status !== 'ready') return;
+                  closeNoteActions();
+                  editNote(selected.id);
+                }}
+                style={({ pressed }) => [styles.actionsSheetRow, pressed && styles.pressed]}>
+                <FontAwesome name="file-text-o" size={19} color="#52634b" accessible={false} />
+                <Text style={styles.actionsSheetRowText}>Open note</Text>
+              </Pressable>
+            )}
+            {selected && options.map(option => (
+              <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + (selected.title || 'Untitled note')}
+                disabled={saving} accessibilityState={{ disabled: saving }}
+                onPress={() => handleNoteAction(selected.id, option.action)}
+                style={({ pressed }) => [styles.actionsSheetRow, pressed && styles.pressed]}>
+                <FontAwesome name={option.icon} size={19} color={option.destructive ? '#b3261e' : '#52634b'} accessible={false} />
+                <Text style={[styles.actionsSheetRowText, option.destructive && styles.actionsSheetDanger]}>{option.label}</Text>
+              </Pressable>
+            ))}
             <Pressable accessibilityRole="button" onPress={closeNoteActions} style={styles.actionsSheetCancel}><Text style={styles.actionsSheetCancelText}>Cancel</Text></Pressable>
           </View>
         </View>
@@ -753,7 +778,7 @@ const styles = StyleSheet.create({
   noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
   noteMenuTrigger: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
   actionsModalLayer: { flex: 1, justifyContent: 'flex-end' },
-  actionsBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 28, 12, 0.45)' },
+  actionsBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.45)' },
   actionsSheet: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, backgroundColor: '#ffffff', borderTopLeftRadius: 22, borderTopRightRadius: 22, gap: 3 },
   actionsSheetTitle: { fontSize: 18, fontWeight: '800', color: '#20351d', marginBottom: 12 },
   actionsSheetRow: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 50, paddingHorizontal: 12, borderRadius: 10 },

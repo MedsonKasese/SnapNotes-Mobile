@@ -14,6 +14,7 @@ const source = readFileSync(sourcePath, 'utf8');
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
+const stateNames = [...source.matchAll(/const \[(\w+)[^\]]*\] = useState\b/g)].map(match => match[1]);
 const DRAFT_KEY = '@snapnotes-mobile/editor-draft';
 const savedNotes = [{
   id: 'saved-1', title: 'Existing note', text: 'Existing body', category: 'work',
@@ -45,6 +46,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
   const listeners = new Set();
   const dispatchCalls = [];
   let cursor = 0;
+  let stateCursor = 0;
+  const stateSlots = new Map();
   let nextTimer = 1;
   const controller = {
     status: 'ready',
@@ -104,6 +107,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
   const react = {
     useState(initial) {
       const index = cursor++;
+      stateSlots.set(stateNames[stateCursor++], index);
       if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
       return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
     },
@@ -161,6 +165,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
 
   function render() {
     cursor = 0;
+    stateCursor = 0;
     const tree = exports.NotesWorkspace();
     for (const slot of effectSlots) {
       if (slot?.pending) {
@@ -184,8 +189,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
   }
   return {
     render, controller, storage, alerts, timers, slots, updateCalls, dispatchCalls,
-    get draftHydrated() { return slots[6]; },
-    get draftStorageError() { return slots[7]; },
+    get draftHydrated() { return slots[stateSlots.get('draftHydrated')]; },
+    get draftStorageError() { return slots[stateSlots.get('draftStorageError')]; },
     flushMicrotasks, advanceTimers,
   };
 }
@@ -356,7 +361,7 @@ test('editing an existing saved note while recovery is pending takes ownership',
   const tree = app.render();
   const list = find(tree, element => element.type === 'FlatList');
   const card = list.props.renderItem({ item: savedNotes[0] });
-  labeled(card, 'Edit Existing note').props.onPress();
+  labeled(card, 'Open Existing note').props.onPress();
   pendingRead.resolve(validRecord());
   await app.flushMicrotasks();
   const state = app.controller.getSnapshot().state;
@@ -553,4 +558,22 @@ test('an unopposed rejected read retains the old record, reports an error, then 
   assert.equal(app.draftStorageError, null);
   await persistCurrentDraft(app);
   assert.equal(JSON.parse(app.storage.sets.at(-1)).title, 'After read error');
+});
+
+test('a card tap during checklist persistence does not open a blank editor or supersede recovery', async () => {
+  const { app, pendingRead, checklistSave } = await beginChecklistRace();
+  const item = app.controller.getSnapshot().state.notes[0];
+  const list = find(app.render(), element => element.type === 'FlatList');
+  const card = list.props.renderItem({ item });
+  labeled(card, 'Open Checklist').props.onPress();
+  assert.equal(app.controller.getSnapshot().state.editingId, null);
+  assert.ok(elements(app.render()).some(element => element.type === 'FlatList'));
+  assert.equal(app.dispatchCalls.some(action => action.type === 'edit'), false);
+
+  pendingRead.resolve(validRecord());
+  await app.flushMicrotasks();
+  checklistSave.resolve();
+  await app.flushMicrotasks();
+  assert.equal(app.controller.getSnapshot().state.draft.title, 'Recovered title');
+  assert.equal(app.controller.getSnapshot().state.notice, 'Recovered unsaved draft from this device.');
 });
