@@ -26,6 +26,6 @@ test('PWA Web Crypto password derivation and AES-GCM record round trip, includin
   assert.throws(() => validatePrivateCipherRecord({ ...first, iv: 'invalid' }));
 });
 test('fails closed when secure Web Crypto is unavailable', async () => {
-  assert.throws(() => generatePrivateSalt(undefined === null ? crypto : null), /unavailable/);
+  assert.throws(() => generatePrivateSalt(null), /unavailable/);
   await assert.rejects(derivePrivateKey('password', new Uint8Array(16), null), /unavailable/);
 });
