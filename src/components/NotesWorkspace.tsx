@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ComponentRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import {
   Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
+import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
+type NoteAction = 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
+type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -58,6 +62,32 @@ function MenuRow({ label, detail, icon, onPress, active = false }: {
   );
 }
 
+function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAction }: {
+  title: string; canOpen: boolean; saving: boolean; options: NoteActionOption[];
+  onOpen: () => void; onAction: (action: NoteAction) => void;
+}) {
+  return (
+    <ScrollView style={styles.actionsMenuScroll} keyboardShouldPersistTaps="handled">
+      {canOpen && (
+        <Pressable accessibilityRole="button" accessibilityLabel={'Open note: ' + title}
+          disabled={saving} accessibilityState={{ disabled: saving }} onPress={onOpen}
+          style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+          <FontAwesome name="file-text-o" size={19} color="#52634b" style={styles.actionsMenuIcon} accessible={false} />
+          <Text style={styles.actionsMenuText}>Open note</Text>
+        </Pressable>
+      )}
+      {options.map(option => (
+        <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + title}
+          disabled={saving} accessibilityState={{ disabled: saving }} onPress={() => onAction(option.action)}
+          style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+          <FontAwesome name={option.icon} size={19} color={option.destructive ? '#b3261e' : '#52634b'} style={styles.actionsMenuIcon} accessible={false} />
+          <Text style={[styles.actionsMenuText, option.destructive && styles.actionsMenuDanger]}>{option.label}</Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+
 export function NotesWorkspace() {
   const [controller] = useState(() => createNotesController(deviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,8 +95,15 @@ export function NotesWorkspace() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
+  const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
+  const [actionsViewport, setActionsViewport] = useState<MenuRect | null>(null);
+  const [actionsMenuHeight, setActionsMenuHeight] = useState(0);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
+  const actionTriggers = useRef(new Map<string, ComponentRef<typeof View>>());
+  const actionsLayer = useRef<ComponentRef<typeof View> | null>(null);
+  const actionsRequest = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -97,6 +134,25 @@ export function NotesWorkspace() {
   const sourceNotes = view === 'trash' ? trashNotes : view === 'archive' ? archiveNotes : categoryNotes;
   const visibleNotes = sortNotesPinnedFirst(searchNotes(sourceNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
+
+  const selected = state.notes.find(note => note.id === actionsNoteId);
+  const inTrash = selected !== undefined && selected.deletedAt !== null;
+  const inArchive = selected?.archived && !inTrash;
+  const options: NoteActionOption[] = !selected ? [] : inTrash
+    ? [
+        { label: 'Restore note', icon: 'undo', action: 'restore-trash' },
+        { label: 'Delete forever', icon: 'trash', destructive: true, action: 'delete' },
+      ]
+    : [
+        { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
+        { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
+      ];
+
+  const actionsMenuLayout = actionsAnchor && actionsViewport
+    ? getNoteActionsMenuLayout(actionsAnchor, actionsViewport, actionsMenuHeight)
+    : null;
+  const actionsMenuReady = actionsMenuLayout !== null && actionsMenuLayout.width > 0 &&
+    actionsMenuLayout.maxHeight > 0 && actionsMenuHeight > 0;
 
   const restoreEditorDraft = useCallback(async () => {
     if (controller.getSnapshot().status !== 'ready') return;
@@ -281,6 +337,7 @@ export function NotesWorkspace() {
   }
 
   function editNote(id: string) {
+    if (controller.getSnapshot().status !== 'ready') return;
     if (state.editingId === id) {
       setView('editor');
       return;
@@ -291,7 +348,66 @@ export function NotesWorkspace() {
     });
   }
 
+  function measureActionsMenu(id: string | null) {
+    if (id === null || actionsRequest.current.id !== id) return;
+    const trigger = actionTriggers.current.get(id);
+    const layer = actionsLayer.current;
+    if (!trigger || !layer) return;
+    const revision = ++actionsRequest.current.revision;
+    // Both rectangles use native window coordinates. The measured safe-area
+    // layer origin is subtracted by the placement helper, not guessed from bars.
+    layer.measureInWindow((x, y, width, height) => {
+      if (revision !== actionsRequest.current.revision || width <= 0 || height <= 0 ||
+        ![x, y, width, height].every(Number.isFinite)) return;
+      trigger.measureInWindow((anchorX, anchorY, anchorWidth, anchorHeight) => {
+        if (revision !== actionsRequest.current.revision || anchorWidth <= 0 || anchorHeight <= 0 ||
+          ![anchorX, anchorY, anchorWidth, anchorHeight].every(Number.isFinite)) return;
+        setActionsViewport({ x, y, width, height });
+        setActionsAnchor({ x: anchorX, y: anchorY, width: anchorWidth, height: anchorHeight });
+      });
+    });
+  }
+
+  function showNoteActions(id: string) {
+    actionsRequest.current = { id, revision: actionsRequest.current.revision + 1 };
+    setActionsAnchor(null);
+    setActionsViewport(null);
+    setActionsMenuHeight(0);
+    Keyboard.dismiss();
+    setActionsNoteId(id);
+    measureActionsMenu(id);
+  }
+
+  function closeNoteActions() {
+    // Late native measurements must never move or revive a dismissed menu.
+    actionsRequest.current = { id: null, revision: actionsRequest.current.revision + 1 };
+    setActionsNoteId(null);
+    setActionsAnchor(null);
+    setActionsViewport(null);
+    setActionsMenuHeight(0);
+  }
+
+  function handleNoteAction(id: string, action: NoteAction) {
+    const snapshot = controller.getSnapshot();
+    if (snapshot.status !== 'ready') return;
+    const selected = snapshot.state.notes.find(note => note.id === id);
+    closeNoteActions();
+    if (!selected) return;
+    const now = new Date().toISOString();
+    switch (action) {
+      case 'archive': void controller.setArchived(id, true, now); break;
+      case 'restore-archive': void controller.setArchived(id, false, now); break;
+      case 'trash': confirmTrash(id, selected.title); break;
+      case 'restore-trash': void controller.restoreFromTrash(id, now); break;
+      case 'delete': confirmPermanentDelete(id, selected.title); break;
+    }
+  }
+
   function handleBack() {
+    if (actionsNoteId !== null) {
+      closeNoteActions();
+      return true;
+    }
     if (drawerOpen) {
       setDrawerOpen(false);
       return true;
@@ -509,7 +625,9 @@ export function NotesWorkspace() {
               </View>
             }
             renderItem={({ item }) => (
-              <View style={styles.card}>
+              // Keep nested checkboxes/menu independently reachable by screen readers.
+              // The contextual menu provides their explicit Open note control.
+              <Pressable style={styles.card} accessible={false} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
                 <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
@@ -536,76 +654,67 @@ export function NotesWorkspace() {
                 )}
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
-                    <Text style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
-                    <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
+                    <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
+                    <Text numberOfLines={1} style={styles.noteTime}>Updated {new Date(item.updatedAt).toLocaleDateString()} · {new Date(item.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</Text>
                   </View>
                   <View style={styles.noteFooterActions}>
-                    {view === 'library' && (
-                    <Pressable
-                      disabled={saving}
+                    {view === 'library' && <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={(item.pinned ? 'Unpin ' : 'Pin ') + (item.title || 'Untitled note')}
-                      accessibilityState={{ disabled: saving, selected: item.pinned }}
-                      onPress={() => { void controller.togglePin(item.id, new Date().toISOString()); }}
-                      style={({ pressed }) => [styles.pinButton, item.pinned && styles.pinButtonActive, pressed && styles.pressed]}
-                    >
-                      <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#52634b'} accessible={false} />
-                    </Pressable>
-                    )}
-                    {view === 'library' && (
-                      <Pressable
-                        disabled={saving}
-                        accessibilityRole="button"
-                        accessibilityLabel={'Archive ' + (item.title || 'Untitled note')}
-                        accessibilityState={{ disabled: saving }}
-                        onPress={() => { void controller.setArchived(item.id, true, new Date().toISOString()); }}
-                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
-                      >
-                        <FontAwesome name="archive" size={18} color="#52634b" accessible={false} />
-                      </Pressable>
-                    )}
-                    {view === 'trash' && (
-                      <>
-                        <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Restore ' + (item.title || 'Untitled note')} onPress={() => { void controller.restoreFromTrash(item.id, new Date().toISOString()); }} style={styles.archiveButton}>
-                          <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
-                        </Pressable>
-                        <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Delete forever ' + (item.title || 'Untitled note')} onPress={() => confirmPermanentDelete(item.id, item.title)} style={styles.archiveButton}>
-                          <FontAwesome name="trash" size={18} color="#b3261e" accessible={false} />
-                        </Pressable>
-                      </>
-                    )}
-                    {view === 'archive' && (
-                      <Pressable
-                        disabled={saving}
-                        accessibilityRole="button"
-                        accessibilityLabel={'Restore ' + (item.title || 'Untitled note')}
-                        accessibilityState={{ disabled: saving }}
-                        onPress={() => { void controller.setArchived(item.id, false, new Date().toISOString()); }}
-                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
-                      >
-                        <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
-                      </Pressable>
-                    )}
-                    {view !== 'trash' && <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Move to Trash ' + (item.title || 'Untitled note')} onPress={() => confirmTrash(item.id, item.title)} style={styles.archiveButton}>
-                      <FontAwesome name="trash-o" size={18} color="#8a5146" accessible={false} />
-                    </Pressable>}
-                    {view !== 'trash' && <Pressable
+                      accessibilityState={{ selected: item.pinned, disabled: saving }}
                       disabled={saving}
-                      accessibilityState={{ disabled: saving }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
-                      onPress={() => editNote(item.id)}
-                      style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
+                      onPress={() => { void controller.togglePin(item.id, new Date().toISOString()); }}
+                      style={({ pressed }) => [styles.pinButton, pressed && styles.pressed]}
                     >
-                      <Text style={styles.editButtonText}>Open note ›</Text>
+                      <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#8c9988'} accessible={false} />
                     </Pressable>}
+                    <Pressable
+                      ref={node => {
+                        if (node) actionTriggers.current.set(item.id, node);
+                        else actionTriggers.current.delete(item.id);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={'Note actions for ' + (item.title || 'Untitled note')}
+                      accessibilityState={{ expanded: actionsNoteId === item.id }}
+                      onPress={() => showNoteActions(item.id)}
+                      style={({ pressed }) => [styles.noteMenuTrigger, pressed && styles.pressed]}
+                    >
+                      <FontAwesome name="ellipsis-v" size={19} color="#687567" accessible={false} />
+                    </Pressable>
                   </View>
                 </View>
-              </View>
+              </Pressable>
             )}
           />
         </View>
       )}
+
+      <Modal visible={actionsNoteId !== null} transparent animationType="fade"
+        onShow={() => measureActionsMenu(actionsNoteId)} onRequestClose={closeNoteActions}>
+        <SafeAreaProvider>
+          <SafeAreaView style={styles.flex}>
+            <View ref={actionsLayer} style={styles.actionsModalLayer} testID="note-actions-layer"
+              onLayout={() => measureActionsMenu(actionsNoteId)}>
+              <Pressable style={styles.actionsBackdrop} accessibilityRole="button" accessibilityLabel="Close note actions" onPress={closeNoteActions} />
+              <View testID="note-actions-menu" accessibilityLabel="Note actions" accessibilityViewIsModal
+                onAccessibilityEscape={closeNoteActions}
+                accessibilityElementsHidden={!actionsMenuReady} importantForAccessibility={actionsMenuReady ? 'auto' : 'no-hide-descendants'}
+                pointerEvents={actionsMenuReady ? 'auto' : 'none'}
+                onLayout={event => setActionsMenuHeight(event.nativeEvent.layout.height)}
+                style={[styles.actionsMenu, actionsMenuLayout, !actionsMenuReady && styles.actionsMenuMeasuring]}>
+                {selected && <NoteActionsMenuContent title={selected.title || 'Untitled note'} canOpen={selected.deletedAt === null}
+                  saving={saving} options={options}
+                  onOpen={() => {
+                    if (controller.getSnapshot().status !== 'ready') return;
+                    closeNoteActions();
+                    editNote(selected.id);
+                  }}
+                  onAction={action => handleNoteAction(selected.id, action)} />}
+              </View>
+            </View>
+          </SafeAreaView>
+        </SafeAreaProvider>
+      </Modal>
 
       <Modal
         visible={drawerOpen}
@@ -743,14 +852,26 @@ const styles = StyleSheet.create({
   noteAccent: { width: 4, alignSelf: 'stretch', minHeight: 22, borderRadius: 4, backgroundColor: '#48a111' },
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
-  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
-  noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
-  pinButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
+  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
+  noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
+  noteMenuTrigger: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  actionsModalLayer: { flex: 1 },
+  actionsBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.08)' },
+  actionsMenu: { position: 'absolute', width: 216, maxWidth: '100%', paddingVertical: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#dce4d7', borderRadius: 14, shadowColor: '#172712', shadowOpacity: 0.16, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  actionsMenuMeasuring: { opacity: 0 },
+  actionsMenuScroll: { flexGrow: 0, flexShrink: 1 },
+  actionsMenuRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  actionsMenuRowPressed: { backgroundColor: '#eff4eb' },
+  actionsMenuIcon: { width: 20, flexShrink: 0, textAlign: 'center' },
+  actionsMenuText: { flex: 1, flexShrink: 1, minWidth: 0, color: '#293d23', fontSize: 15, fontWeight: '600' },
+  actionsMenuDanger: { color: '#b3261e' },
+  pinButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
   archiveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
 
-  noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
-  noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
+  noteMeta: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  noteCategoryBadge: { color: '#687b69', fontSize: 11, fontWeight: '700', backgroundColor: '#eef3ef', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, overflow: 'hidden', flexShrink: 0 },
+  noteTime: { color: '#7a857c', fontSize: 11, flexShrink: 1 },
   editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
   editButtonText: { color: '#3b7f16', fontSize: 13, fontWeight: '800' },
   drawerLayer: { flex: 1, flexDirection: 'row' },

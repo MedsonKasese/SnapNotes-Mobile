@@ -24,9 +24,11 @@ test('navigation exposes only implemented destinations and explains upcoming mig
   assert.doesNotMatch(source, /data-category=/);
 });
 
-test('drawer backdrop fills the screen using the supported React Native API', () => {
+test('drawer and actions backdrops fill the screen using the supported React Native API', () => {
   assert.match(source, /style={styles\.drawerBackdrop}/);
   assert.match(source, /drawerBackdrop: \{ \.\.\.StyleSheet\.absoluteFill,/);
+  assert.match(source, /style={styles\.actionsBackdrop}/);
+  assert.match(source, /actionsBackdrop: \{ \.\.\.StyleSheet\.absoluteFill,/);
   assert.doesNotMatch(source, /StyleSheet\.absoluteFillObject/);
 });
 

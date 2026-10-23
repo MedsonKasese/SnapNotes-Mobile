@@ -107,6 +107,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 ## 8. Note management
 
 - [x] Pin and unpin notes, matching PWA behaviour. (PR #14 merged; user verified the pin icon, pinned-first sorting, persistence, and clean card layout against the PWA.)
+- [ ] Compact anchored note-actions popup and tap-card-to-open behavior (PR #18 implemented; automated checks pass, Android and screen-reader verification pending). Use the reference menu design without adding new actions; preserve inline checklist interaction, the standalone pin button, and Trash-only actions. Verify popup placement near screen edges and with large text.
 - [ ] Duplicate notes if supported by the PWA.
 - [ ] Archive and restore notes. (PR #15 implements the initial archive library, persisted archive state, and restore action; testing required.)
 - [ ] Move notes to Trash and restore them.
@@ -314,3 +315,9 @@ Before merging PR #10:
 
 
 | 2026-10-21 | PR #15 (in progress) | Adds persisted archive state, Archived drawer destination, archive action, and restore action; legacy notes default to active | Automated checks not run in the developer's local Termux environment | **Android / Expo Go testing required** | Verify archive removes a note from All/category counts, archived notes appear only in Archived, restore returns them to the library, state survives restart, search works in both views, and failed writes roll back safely. |
+
+### PR #18 compact menu follow-up
+
+The note actions now open in a compact, rounded popup with the original action icons anchored to the tapped three-dot button instead of a full-width bottom sheet. This borrows only the supplied reference design: no duplicate, share, history, private-note, or folder actions were added. Existing library/archive/trash actions, confirmations, and the standalone pin button are preserved. Measured safe-area placement flips/clamps near screen edges and scrolls when large text exceeds the available height; stale native measurements cannot revive a dismissed menu.
+
+Typecheck, lint, all **182 tests**, Expo dependency compatibility, and Android/iOS JavaScript exports pass locally. Independent code review found no blocking defect; an authenticated DeepCode/Snyk scan was unavailable. **Keep PR #18 draft and unmerged for the owner's review.** Expo Go visual/touch, system-bar/safe-area, large-text, and TalkBack/VoiceOver verification remain required before marking this feature complete.
