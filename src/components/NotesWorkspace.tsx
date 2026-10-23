@@ -16,7 +16,7 @@ import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
-type NoteAction = 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
+type NoteAction = 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
@@ -144,6 +144,7 @@ export function NotesWorkspace() {
         { label: 'Delete forever', icon: 'trash', destructive: true, action: 'delete' },
       ]
     : [
+        { label: 'Duplicate note', icon: 'clone', action: 'duplicate' },
         { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
         { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
       ];
@@ -395,6 +396,7 @@ export function NotesWorkspace() {
     if (!selected) return;
     const now = new Date().toISOString();
     switch (action) {
+      case 'duplicate': void controller.duplicateNote(id, now); break;
       case 'archive': void controller.setArchived(id, true, now); break;
       case 'restore-archive': void controller.setArchived(id, false, now); break;
       case 'trash': confirmTrash(id, selected.title); break;
