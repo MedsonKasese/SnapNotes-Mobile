@@ -26,6 +26,13 @@ export function createNotesController(storage: NotesStorage) {
   let snapshot: NotesSnapshot = { state: initialNotesState(), status: 'loading', storageError: null };
   const listeners = new Set<() => void>();
   let loading: Promise<void> | null = null;
+  // Session-only history for successful edits to existing notes; never undo an uncommitted write.
+  type SavedChange = { id: string; before: Note; after: Note };
+  const undoStack: SavedChange[] = [];
+  const redoStack: SavedChange[] = [];
+  const HISTORY_LIMIT = 30;
+  const canUndoSaved = () => snapshot.status === 'ready' && undoStack.length > 0;
+  const canRedoSaved = () => snapshot.status === 'ready' && redoStack.length > 0;
 
   function publish(next: NotesSnapshot) {
     snapshot = next;
@@ -298,9 +305,45 @@ export function createNotesController(storage: NotesStorage) {
     publish({ state: previous, status: 'saving', storageError: null });
     try {
       await storage.save(next.notes);
+      if (previous.editingId !== null) {
+        const before = previous.notes.find(note => note.id === previous.editingId);
+        const after = next.notes.find(note => note.id === previous.editingId);
+        if (before && after && JSON.stringify(before) !== JSON.stringify(after)) {
+          undoStack.push({ id: before.id, before: { ...before }, after: { ...after } });
+          if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+          redoStack.length = 0;
+        }
+      }
       publish({ state: { ...next, notice: previous.editingId === null ? 'Note saved on this device.' : 'Changes saved on this device.' }, status: 'ready', storageError: null });
     } catch {
       publish({ state: previous, status: 'ready', storageError: 'Could not save on this device. Your draft is still here. Try Save again before closing the app.' });
+    }
+  }
+
+  async function travelSavedHistory(direction: 'undo' | 'redo') {
+    if (snapshot.status !== 'ready') return;
+    const from = direction === 'undo' ? undoStack : redoStack;
+    const to = direction === 'undo' ? redoStack : undoStack;
+    const change = from[from.length - 1];
+    if (!change) return;
+    const previous = snapshot.state;
+    const expected = direction === 'undo' ? change.after : change.before;
+    const replacement = direction === 'undo' ? change.before : change.after;
+    const current = previous.notes.find(note => note.id === change.id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(expected) || current.deletedAt !== null) {
+      from.pop();
+      publish({ ...snapshot, state: { ...previous, error: 'This note changed since the history entry. Undo/Redo was cancelled to protect your current note.' } });
+      return;
+    }
+    const notes = previous.notes.map(note => note.id === change.id ? { ...replacement } : note);
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      from.pop();
+      to.push(change);
+      publish({ state: { ...previous, notes, error: null, notice: direction === 'undo' ? 'Saved change undone.' : 'Saved change redone.' }, status: 'ready', storageError: null });
+    } catch {
+      publish({ state: previous, status: 'ready', storageError: 'Could not write Undo/Redo to device storage. Your saved note is unchanged.' });
     }
   }
 
@@ -310,6 +353,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
+    load, dispatch, save, canUndoSaved, canRedoSaved, travelSavedHistory, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }
