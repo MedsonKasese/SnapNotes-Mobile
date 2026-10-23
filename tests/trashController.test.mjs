@@ -1,9 +1,12 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createNotesController } from '../src/notesController.ts';
 
 const NOW = '2026-10-19T18:00:00.000Z';
 const LATER = '2026-10-20T12:34:56.789Z';
+// Loading now expires old Trash, so fixtures must not age with the real clock.
+beforeEach(t => { t.mock.method(Date, 'now', () => Date.parse(NOW)); });
+
 const note = (id, changes = {}) => ({
   id,
   title: 'A complete note',

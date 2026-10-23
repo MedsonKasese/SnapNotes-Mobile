@@ -24,17 +24,19 @@ test('pin and unpin persist across restarts while preserving content and creatio
   await first.save(NOW);
   const original = first.getSnapshot().state.notes[0];
   await first.togglePin(original.id, LATER);
-  assert.deepEqual(first.getSnapshot().state.notes[0], { ...original, pinned: true, updatedAt: LATER });
+  assert.deepEqual(first.getSnapshot().state.notes[0], { ...original, pinned: true });
   assert.equal(first.getSnapshot().state.notice, 'Note pinned.');
+  assert.equal(first.getSnapshot().state.notes[0].updatedAt, original.updatedAt, 'pinning must not change last edit time');
 
   const second = createNotesController(createNotesStorage(backend));
   await second.load();
   assert.deepEqual(second.getSnapshot().state.notes, first.getSnapshot().state.notes);
   await second.togglePin(original.id, NOW);
   assert.equal(second.getSnapshot().state.notice, 'Note unpinned.');
+  assert.equal(second.getSnapshot().state.notes[0].updatedAt, original.updatedAt, 'unpinning must not change last edit time');
   const third = createNotesController(createNotesStorage(backend));
   await third.load();
-  assert.deepEqual(third.getSnapshot().state.notes, [{ ...original, pinned: false, updatedAt: NOW }]);
+  assert.deepEqual(third.getSnapshot().state.notes, [{ ...original, pinned: false }]);
 });
 
 test('pin acknowledgement waits for storage and blocks competing writes and draft edits', async () => {
@@ -52,7 +54,7 @@ test('pin acknowledgement waits for storage and blocks competing writes and draf
   const pending = controller.togglePin(note.id, LATER);
   assert.equal(controller.getSnapshot().status, 'saving');
   assert.equal(controller.getSnapshot().state, previous);
-  assert.deepEqual(saved, [{ ...note, pinned: true, updatedAt: LATER }, other]);
+  assert.deepEqual(saved, [{ ...note, pinned: true }, other]);
   assert.equal(saved[1], other);
   draft(controller, 'Blocked edit');
   await controller.togglePin(note.id, LATER);

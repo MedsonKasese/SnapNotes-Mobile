@@ -1,6 +1,15 @@
 import { initialNotesState, notesReducer } from './notes.ts';
 import type { Note, NotesAction, NotesState } from './notes.ts';
 
+export const TRASH_RETENTION_DAYS = 15;
+const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+export function isExpiredTrash(note: Note, now: number): boolean {
+  if (note.deletedAt === null) return false;
+  const timestamp = Date.parse(note.deletedAt);
+  return Number.isFinite(timestamp) && timestamp + TRASH_RETENTION_MS <= now;
+}
+
 export type NotesStorage = {
   load(): Promise<Note[]>;
   save(notes: Note[]): Promise<void>;
@@ -30,7 +39,19 @@ export function createNotesController(storage: NotesStorage) {
     loading = (async () => {
       try {
         const notes = await storage.load();
-        publish({ state: { ...initialNotesState(), notes }, status: 'ready', storageError: null });
+        const now = Date.now();
+        const retained = notes.filter(note => !isExpiredTrash(note, now));
+        if (retained.length !== notes.length) {
+          try {
+            await storage.save(retained);
+            publish({ state: { ...initialNotesState(), notes: retained }, status: 'ready', storageError: null });
+          } catch {
+            // Keep expired records visible and recoverable if cleanup could not be persisted.
+            publish({ state: { ...initialNotesState(), notes }, status: 'ready', storageError: 'Expired Trash could not be cleared on this device. Your notes have not been changed.' });
+          }
+        } else {
+          publish({ state: { ...initialNotesState(), notes }, status: 'ready', storageError: null });
+        }
       } catch {
         publish({ ...snapshot, status: 'load-error', storageError: 'Could not load notes from this device. Existing storage has not been changed. Retry to load your notes.' });
       } finally {
@@ -84,7 +105,7 @@ export function createNotesController(storage: NotesStorage) {
 
     const pinned = !target.pinned;
     const notes = previous.notes.map(note => note.id === id
-      ? { ...note, pinned, updatedAt: now }
+      ? { ...note, pinned }
       : note);
     publish({ ...snapshot, status: 'saving', storageError: null });
     try {
@@ -178,6 +199,20 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  async function emptyTrash() {
+    if (snapshot.status !== 'ready') return;
+    const previous = snapshot.state;
+    if (!previous.notes.some(note => note.deletedAt !== null)) return;
+    const notes = previous.notes.filter(note => note.deletedAt === null);
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      publish({ state: { ...previous, notes, error: null, notice: 'Trash emptied.' }, status: 'ready', storageError: null });
+    } catch {
+      publish({ state: previous, status: 'ready', storageError: 'Could not empty Trash. Your trashed notes are still here.' });
+    }
+  }
+
   async function save(now: string) {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
@@ -206,6 +241,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete,
+    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, emptyTrash,
   };
 }

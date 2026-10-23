@@ -19,8 +19,8 @@ const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
 const EDITOR_DRAFT_VERSION = 1;
 
-function Action({ label, onPress, secondary = false, disabled = false }: {
-  label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
+function Action({ label, onPress, secondary = false, destructive = false, disabled = false }: {
+  label: string; onPress: () => void; secondary?: boolean; destructive?: boolean; disabled?: boolean;
 }) {
   return (
     <Pressable
@@ -29,11 +29,11 @@ function Action({ label, onPress, secondary = false, disabled = false }: {
       disabled={disabled}
       accessibilityState={{ disabled }}
       style={({ pressed }) => [
-        styles.button, secondary && styles.secondaryButton,
+        styles.button, secondary && styles.secondaryButton, destructive && styles.destructiveButton,
         (pressed || disabled) && styles.pressed,
       ]}
     >
-      <Text style={[styles.buttonText, secondary && styles.secondaryText]}>{label}</Text>
+      <Text style={[styles.buttonText, secondary && styles.secondaryText, destructive && styles.destructiveButtonText]}>{label}</Text>
     </Pressable>
   );
 }
@@ -52,11 +52,8 @@ function MenuRow({ label, detail, icon, onPress, active = false }: {
       style={({ pressed }) => [styles.menuRow, active && styles.menuRowActive, pressed && styles.pressed]}
     >
       <FontAwesome name={icon} size={18} color={active ? '#3b7f16' : '#65775c'} accessible={false} />
-      <View style={styles.menuRowCopy}>
-        <Text style={[styles.menuRowTitle, active && styles.menuRowTitleActive]}>{label}</Text>
-        <Text style={styles.menuRowDetail}>{detail}</Text>
-      </View>
-      <Text style={styles.menuChevron} accessibilityElementsHidden>›</Text>
+      <Text numberOfLines={1} style={[styles.menuRowTitle, active && styles.menuRowTitleActive]}>{label}</Text>
+      {/^\d/.test(detail) ? <View style={styles.menuCountBadge}><Text style={styles.menuCountText}>{detail.split(' ')[0]}</Text></View> : <FontAwesome name="chevron-right" size={12} color="#6a7764" accessible={false} />}
     </Pressable>
   );
 }
@@ -240,6 +237,13 @@ export function NotesWorkspace() {
     Alert.alert('Move to Trash?', 'Move "' + (title || 'Untitled note') + '" to Trash?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Move to Trash', style: 'destructive', onPress: () => { void controller.moveToTrash(id, new Date().toISOString()); } },
+    ]);
+  }
+  function confirmEmptyTrash() {
+    if (trashNotes.length === 0 || saving) return;
+    Alert.alert('Empty Trash?', `Permanently delete all ${trashNotes.length} trashed ${trashNotes.length === 1 ? 'note' : 'notes'}? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Empty Trash', style: 'destructive', onPress: () => { void controller.emptyTrash(); } },
     ]);
   }
   function confirmPermanentDelete(id: string, title: string) {
@@ -483,9 +487,9 @@ export function NotesWorkspace() {
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
               <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'trash' ? 'Trash' : view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
-            <Action label="+ New note" onPress={openNewNote} />
+            {view === 'trash' ? <Action label="Empty Trash" destructive onPress={confirmEmptyTrash} disabled={saving || trashNotes.length === 0} /> : <Action label="+ New note" onPress={openNewNote} />}
           </View>
-          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore or permanently delete them here.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore within 15 days or they are permanently deleted.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
           {view === 'library' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
           </ScrollView>}
@@ -518,10 +522,10 @@ export function NotesWorkspace() {
                       const checked = checklist[2] === '☑';
                       return (
                         <Pressable key={index} accessibilityRole="checkbox"
-                          accessibilityState={{ checked, disabled: saving }}
+                          accessibilityState={{ checked, disabled: saving || view === 'trash' }}
                           accessibilityLabel={checklist[4] || 'Checklist item'}
                           onPress={() => toggleChecklistItem(item.id, index)}
-                          disabled={saving}
+                          disabled={saving || view === 'trash'}
                           style={styles.checklistRow}>
                           <Text style={styles.checkboxGlyph}>{checked ? '☑' : '☐'}</Text>
                           <ChecklistLabel text={checklist[4]} checked={checked} />
@@ -726,6 +730,8 @@ const styles = StyleSheet.create({
   hint: { color: '#687763', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 },
   button: { backgroundColor: '#48a111', borderRadius: 11, paddingHorizontal: 15, paddingVertical: 12, minHeight: 46, justifyContent: 'center', alignItems: 'center' },
+  destructiveButton: { backgroundColor: '#b3261e' },
+  destructiveButtonText: { color: '#ffffff' },
   secondaryButton: { backgroundColor: '#f0f5eb', borderWidth: 1, borderColor: '#dce6d4' },
   buttonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
   secondaryText: { color: '#3b6f25' },
@@ -756,11 +762,12 @@ const styles = StyleSheet.create({
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
   drawerNavigation: { paddingTop: 15, gap: 7 },
-  menuRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 62, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingHorizontal: 13, paddingVertical: 8, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
   menuRowActive: { backgroundColor: '#eff7e9', borderColor: '#e0efd5' },
 
-  menuRowCopy: { flex: 1, gap: 3 },
-  menuRowTitle: { color: '#293d23', fontSize: 15, fontWeight: '700' },
+  menuCountBadge: { marginLeft: 'auto', minWidth: 32, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, alignItems: 'center', backgroundColor: '#edf3eb' },
+  menuCountText: { color: '#61705b', fontSize: 12, fontWeight: '700' },
+  menuRowTitle: { flex: 1, color: '#293d23', fontSize: 15, fontWeight: '700' },
   menuRowTitleActive: { color: '#3b7f16' },
   menuRowDetail: { color: '#6a7764', fontSize: 12 },
   menuChevron: { color: '#6a7764', fontSize: 25 },
