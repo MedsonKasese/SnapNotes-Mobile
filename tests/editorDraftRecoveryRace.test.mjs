@@ -9,6 +9,7 @@ import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
 import * as folders from '../src/folders.ts';
+import * as draftLibrary from '../src/draftLibrary.ts';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -45,7 +46,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
   const slots = [];
   const effectSlots = [];
   const timers = new Map();
-  const storage = { value: null, folderValue: null, reads: [...reads], getCalls: 0, sets: [], removes: [] };
+  const storage = { value: null, folderValue: null, libraryValue: null, reads: [...reads], getCalls: 0, sets: [], removes: [] };
   const listeners = new Set();
   const dispatchCalls = [];
   const editorCommands = [];
@@ -112,6 +113,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
   const AsyncStorage = {
     getItem(key) {
       if (key === folders.FOLDERS_KEY) return Promise.resolve(storage.folderValue);
+      if (key === draftLibrary.DRAFT_LIBRARY_KEY) return Promise.resolve(storage.libraryValue ?? null);
       assert.equal(key, DRAFT_KEY);
       storage.getCalls += 1;
       const read = storage.reads.shift();
@@ -187,6 +189,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };
       if (name === '../folders') return folders;
+      if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };
       if (name === '../noteSearch') return { searchNotes };
       if (name === '../noteFormatting') return { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml,

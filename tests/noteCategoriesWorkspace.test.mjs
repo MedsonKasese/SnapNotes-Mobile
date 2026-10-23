@@ -9,6 +9,7 @@ import { createNotesController } from '../src/notesController.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as folders from '../src/folders.ts';
+import * as draftLibrary from '../src/draftLibrary.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -92,6 +93,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };
       if (name === '../folders') return folders;
+      if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return {};
       if (name === '../noteSearch') return { searchNotes };
       if (name === './ChecklistLabel') return { ChecklistLabel: 'ChecklistLabel' };
@@ -210,8 +212,8 @@ test('empty categories explain the filter instead of claiming there are no saved
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
   const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'trash', 'plus']);
-  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Trash', 'New note']);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'file-text-o', 'archive', 'trash', 'plus']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Drafts', 'Archived', 'Trash', 'New note']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');
