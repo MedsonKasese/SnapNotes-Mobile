@@ -1,3 +1,8 @@
+import * as ExpoCrypto from 'expo-crypto';
+import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { gcm } from '@noble/ciphers/aes.js';
+
 // Compatible with the PWA's private-notes.js version 1 encrypted payload.
 // This module fails closed if a secure Web Crypto implementation is unavailable.
 // Do not persist decrypted private-note content in normal notes or recovery storage.
@@ -14,12 +19,7 @@ export type PrivateCipherRecord = {
   ciphertext: string;
 };
 type CryptoLike = Pick<Crypto, 'getRandomValues' | 'subtle'>;
-function requireCrypto(cryptoProvider: CryptoLike | undefined): CryptoLike {
-  if (!cryptoProvider || typeof cryptoProvider.getRandomValues !== 'function' || !cryptoProvider.subtle) {
-    throw new Error('Secure private-note encryption is unavailable on this device. No private data was written.');
-  }
-  return cryptoProvider;
-}
+type PrivateKey = CryptoKey | Uint8Array;
 function bytesToBase64(bytes: Uint8Array): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let result = '';
@@ -56,38 +56,48 @@ export function validatePrivateCipherRecord(value: unknown): PrivateCipherRecord
     base64ToBytes(data.ciphertext).length < 17) throw Error('Unsupported or invalid private note format.');
   return data as PrivateCipherRecord;
 }
-export function generatePrivateSalt(cryptoProvider: CryptoLike | undefined = globalThis.crypto): Uint8Array {
-  const provider = requireCrypto(cryptoProvider);
-  return provider.getRandomValues(new Uint8Array(16));
+export function generatePrivateSalt(cryptoProvider?: CryptoLike | null): Uint8Array {
+  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
+  return cryptoProvider ? cryptoProvider.getRandomValues(new Uint8Array(16)) : ExpoCrypto.getRandomBytes(16);
 }
-export async function derivePrivateKey(password: string, salt: Uint8Array, cryptoProvider: CryptoLike | undefined = globalThis.crypto): Promise<CryptoKey> {
-  const provider = requireCrypto(cryptoProvider);
+export async function derivePrivateKey(password: string, salt: Uint8Array, cryptoProvider?: CryptoLike | null): Promise<PrivateKey> {
+  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
   if (typeof password !== 'string' || !password) throw Error('Private Notes password is required.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
-  const material = await provider.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
-  return provider.subtle.deriveKey(
-    { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
-    material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const encoded = new TextEncoder().encode(password);
+  if (cryptoProvider) {
+    const material = await cryptoProvider.subtle.importKey('raw', encoded, 'PBKDF2', false, ['deriveKey']);
+    return cryptoProvider.subtle.deriveKey(
+      { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
+      material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  return pbkdf2Async(sha256, encoded, salt, { c: PRIVATE_KDF_ITERATIONS, dkLen: 32, asyncTick: 20 });
 }
 export async function encryptPrivatePayload(
-  payload: unknown, key: CryptoKey, salt: Uint8Array, cryptoProvider: CryptoLike | undefined = globalThis.crypto,
+  payload: unknown, key: PrivateKey, salt: Uint8Array, cryptoProvider?: CryptoLike | null,
 ): Promise<PrivateCipherRecord> {
-  const provider = requireCrypto(cryptoProvider);
+  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
-  const iv = provider.getRandomValues(new Uint8Array(12));
+  const iv = cryptoProvider ? cryptoProvider.getRandomValues(new Uint8Array(12)) : ExpoCrypto.getRandomBytes(12);
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
-  const encrypted = await provider.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, plaintext as BufferSource);
+  let ciphertext: Uint8Array;
+  if (key instanceof Uint8Array) ciphertext = gcm(key, iv).encrypt(plaintext);
+  else if (cryptoProvider) ciphertext = new Uint8Array(await cryptoProvider.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, plaintext as BufferSource));
+  else throw Error('Invalid private encryption key.');
   return { version: 1, algorithm: 'AES-GCM', kdf: 'PBKDF2-SHA-256', iterations: PRIVATE_KDF_ITERATIONS,
-    salt: bytesToBase64(salt), iv: bytesToBase64(iv), ciphertext: bytesToBase64(new Uint8Array(encrypted)) };
+    salt: bytesToBase64(salt), iv: bytesToBase64(iv), ciphertext: bytesToBase64(ciphertext) };
 }
 export async function decryptPrivatePayload(
-  value: unknown, key: CryptoKey, cryptoProvider: CryptoLike | undefined = globalThis.crypto,
+  value: unknown, key: PrivateKey, cryptoProvider?: CryptoLike | null,
 ): Promise<unknown> {
-  const provider = requireCrypto(cryptoProvider);
+  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
   const record = validatePrivateCipherRecord(value);
-  const plaintext = await provider.subtle.decrypt(
-    { name: 'AES-GCM', iv: base64ToBytes(record.iv) as BufferSource },
-    key, base64ToBytes(record.ciphertext) as BufferSource);
+  const iv = base64ToBytes(record.iv), ciphertext = base64ToBytes(record.ciphertext);
+  let plaintext: Uint8Array;
+  if (key instanceof Uint8Array) plaintext = gcm(key, iv).decrypt(ciphertext);
+  else if (cryptoProvider) plaintext = new Uint8Array(await cryptoProvider.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv as BufferSource }, key, ciphertext as BufferSource));
+  else throw Error('Invalid private encryption key.');
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 export function privateSaltFromRecord(value: unknown): Uint8Array {
