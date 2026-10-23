@@ -135,9 +135,10 @@ function find(tree, predicate) {
 }
 const action = (app, label) => find(app.render(), item => item.props.label === label);
 const button = (app, label) => find(app.render(), item => item.type === 'Pressable' && text(item) === label);
+const labeled = (app, label) => find(app.render(), item => item.props.accessibilityLabel === label);
 const input = app => find(app.render(), item => item.props.accessibilityLabel === 'Folder name');
 function newFolder(app, name) {
-  button(app, '+ New folder').props.onPress();
+  labeled(app, 'Create new folder').props.onPress();
   input(app).props.onChangeText(name);
   return action(app, 'Save folder');
 }
@@ -214,7 +215,7 @@ test('deletion blocks stale moves across both writes and preserves every note an
   assert.equal(app.folderWrites.length, 1);
   staleMove();
   assert.equal(app.noteWrites.length, 1, 'a stale move must not refile notes during the folder write');
-  assert.equal(button(app, '+ New folder').props.disabled, true);
+  assert.equal(labeled(app, 'Create new folder').props.disabled, true);
   folderWrite.resolve();
   await app.flush();
   staleMove();
@@ -251,7 +252,7 @@ test('a delayed delete confirmation preserves folders created after the prompt o
 
 test('unreadable folders fail closed and show an accessible error without overwriting storage', async () => {
   const app = await workspace({ rawFolders: '{broken' });
-  assert.equal(button(app, '+ New folder').props.disabled, true);
+  assert.equal(labeled(app, 'Create new folder').props.disabled, true);
   const errors = elements(app.render()).filter(item => item.props.accessibilityRole === 'alert');
   assert.ok(errors.some(item => /Folders could not be loaded/.test(text(item))));
   assert.equal(app.folderWrites.length, 0);
@@ -264,7 +265,45 @@ test('folder navigation filters active notes and remains scrollable with the max
   action(app, folder.name).props.onPress();
   const list = find(app.render(), item => item.type === 'FlatList');
   assert.deepEqual(list.props.data.map(item => item.id), [note.id]);
+  const folderRows = () => elements(app.render()).filter(item => item.props.icon === 'folder-o' && item.props.label);
+  assert.equal(folderRows().length, 3, 'the collapsed drawer previews exactly three folders');
+  const expand = labeled(app, 'View all folders, 20');
+  assert.equal(expand.props.accessibilityState.expanded, false);
+  expand.props.onPress();
   const scroller = find(app.render(), item => item.type === 'ScrollView' && elements(item).some(child => child.props.label === 'Trash'));
+  assert.equal(folderRows().length, folders.MAX_FOLDERS);
   assert.ok(elements(scroller).some(item => item.props.label === 'Folder 20'));
-  assert.equal(button(app, '+ New folder').props.disabled, true);
+  assert.ok(elements(scroller).some(item => item.props.label === 'Archived'));
+  assert.equal(labeled(app, 'Create new folder').props.disabled, true);
+  assert.equal(labeled(app, 'Create new folder').props.accessibilityState.disabled, true);
+  const collapse = labeled(app, 'Show fewer folders');
+  assert.equal(collapse.props.accessibilityState.expanded, true);
+  collapse.props.onPress();
+  assert.equal(folderRows().length, 3);
+  assert.equal(labeled(app, 'View all folders, 20').props.accessibilityState.expanded, false);
+});
+
+test('Show fewer collapses after selecting a folder beyond the preview without changing its notes', async () => {
+  const initialFolders = Array.from({ length: 5 }, (_, index) => ({ ...folder, id: 'folder-' + (index + 1), name: 'Folder ' + (index + 1) }));
+  const selectedNote = { ...note, folderId: 'folder-5' };
+  const app = await workspace({ initialFolders, initialNotes: [selectedNote] });
+  labeled(app, 'View all folders, 5').props.onPress();
+  action(app, 'Folder 5').props.onPress();
+  const folderRows = () => elements(app.render()).filter(item => item.props.icon === 'folder-o' && item.props.label);
+  assert.equal(folderRows().length, 5);
+  labeled(app, 'Show fewer folders').props.onPress();
+  assert.equal(folderRows().length, 3);
+  assert.equal(labeled(app, 'View all folders, 5').props.accessibilityState.expanded, false);
+  assert.deepEqual(find(app.render(), item => item.type === 'FlatList').props.data, [selectedNote]);
+  labeled(app, 'View all folders, 5').props.onPress();
+  assert.equal(folderRows().length, 5);
+  assert.equal(action(app, 'Folder 5').props.active, true);
+  assert.equal(app.folderWrites.length, 0);
+  assert.equal(app.noteWrites.length, 0);
+});
+
+test('three or fewer folders do not show a redundant expand control', async () => {
+  const app = await workspace();
+  assert.equal(elements(app.render()).some(item => /^(View all folders,|Show fewer folders)/.test(item.props.accessibilityLabel ?? '')), false);
+  assert.equal(labeled(app, 'Create new folder').props.disabled, false);
 });

@@ -960,18 +960,17 @@ export function NotesWorkspace() {
                   <Text style={styles.folderAddText}>+ New Folder</Text>
                 </Pressable>
               </View>
-              {(foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3)
-                ? folders : folders.slice(0, 3)).map(folder =>
+              {(foldersExpanded ? folders : folders.slice(0, 3)).map(folder =>
                 <MenuRow key={folder.id} label={folder.name} icon="folder-o"
                   detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`}
                   active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
               {folders.length > 3 && <Pressable accessibilityRole="button"
-                accessibilityLabel={foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) ? 'Show fewer folders' : `View all folders, ${folders.length}`}
-                accessibilityState={{ expanded: foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) }}
-                onPress={() => setFoldersExpanded(value => !(value || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3)))}
+                accessibilityLabel={foldersExpanded ? 'Show fewer folders' : `View all folders, ${folders.length}`}
+                accessibilityState={{ expanded: foldersExpanded }}
+                onPress={() => setFoldersExpanded(value => !value)}
                 style={({ pressed }) => [styles.folderExpandButton, pressed && styles.pressed]}>
-                <Text style={styles.folderExpandText}>{foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
-                <FontAwesome name={foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
+                <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
+                <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
               {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
