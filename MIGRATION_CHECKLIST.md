@@ -108,7 +108,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 - [x] Pin and unpin notes, matching PWA behaviour. (PR #14 merged; user verified the pin icon, pinned-first sorting, persistence, and clean card layout against the PWA.)
 - [ ] Compact anchored note-actions popup and tap-card-to-open behavior (PR #18 implemented; automated checks pass, Android and screen-reader verification pending). Use the reference menu design without adding new actions; preserve inline checklist interaction, the standalone pin button, and Trash-only actions. Verify popup placement near screen edges and with large text.
-- [ ] Duplicate notes if supported by the PWA.
+- [ ] Duplicate notes if supported by the PWA. (PR #19 implements PWA-style Copy of title, fresh timestamps, original category/body, unpinned/unarchived copies, storage-first saves, and regression tests; automated/device verification pending.)
 - [ ] Archive and restore notes. (PR #15 implements the initial archive library, persisted archive state, and restore action; testing required.)
 - [ ] Move notes to Trash and restore them.
 - [ ] Permanently delete notes with clear confirmation.
