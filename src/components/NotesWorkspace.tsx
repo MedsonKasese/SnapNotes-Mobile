@@ -101,6 +101,7 @@ export function NotesWorkspace() {
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [foldersExpanded, setFoldersExpanded] = useState(false);
   const [foldersReady, setFoldersReady] = useState(false);
   const [foldersSaving, setFoldersSaving] = useState(false);
   const foldersRef = useRef<Folder[]>([]);
@@ -949,9 +950,29 @@ export function NotesWorkspace() {
             <ScrollView style={styles.flex} contentContainerStyle={styles.drawerNavigation} keyboardShouldPersistTaps="handled">
               <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
-              <Text style={styles.drawerEyebrow}>FOLDERS</Text>
-              {folders.map(folder => <MenuRow key={folder.id} label={folder.name} icon="folder-o" detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`} active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
-              <Pressable accessibilityRole="button" disabled={!foldersReady || foldersSaving || folders.length >= MAX_FOLDERS} accessibilityState={{ disabled: !foldersReady || foldersSaving || folders.length >= MAX_FOLDERS }} onPress={() => openFolderDialog('create')} style={styles.folderControl}><Text style={styles.folderControlText}>+ New folder</Text></Pressable>
+              <View style={styles.folderSectionHeading}>
+                <Text style={styles.drawerEyebrow}>FOLDERS</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Create new folder"
+                  disabled={!foldersReady || foldersSaving || folders.length >= MAX_FOLDERS}
+                  accessibilityState={{ disabled: !foldersReady || foldersSaving || folders.length >= MAX_FOLDERS }}
+                  onPress={() => openFolderDialog('create')}
+                  style={({ pressed }) => [styles.folderAddButton, (pressed || !foldersReady || foldersSaving || folders.length >= MAX_FOLDERS) && styles.pressed]}>
+                  <Text style={styles.folderAddText}>+ New Folder</Text>
+                </Pressable>
+              </View>
+              {(foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3)
+                ? folders : folders.slice(0, 3)).map(folder =>
+                <MenuRow key={folder.id} label={folder.name} icon="folder-o"
+                  detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`}
+                  active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
+              {folders.length > 3 && <Pressable accessibilityRole="button"
+                accessibilityLabel={foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) ? 'Show fewer folders' : `View all folders, ${folders.length}`}
+                accessibilityState={{ expanded: foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) }}
+                onPress={() => setFoldersExpanded(value => !(value || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3)))}
+                style={({ pressed }) => [styles.folderExpandButton, pressed && styles.pressed]}>
+                <Text style={styles.folderExpandText}>{foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
+                <FontAwesome name={foldersExpanded || (view === 'folder' && folders.findIndex(folder => folder.id === activeFolderId) >= 3) ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
+              </Pressable>}
               {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
@@ -1115,6 +1136,11 @@ const styles = StyleSheet.create({
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
   drawerNavigation: { paddingTop: 15, gap: 7 },
+  folderSectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 12, paddingTop: 10 },
+  folderAddButton: { minHeight: 40, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#eff7e9' },
+  folderAddText: { color: '#3b7f16', fontSize: 12, fontWeight: '800' },
+  folderExpandButton: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 15 },
+  folderExpandText: { color: '#3b7f16', fontSize: 13, fontWeight: '700' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingHorizontal: 13, paddingVertical: 8, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
   menuRowActive: { backgroundColor: '#eff7e9', borderColor: '#e0efd5' },
 
