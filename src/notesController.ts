@@ -105,7 +105,7 @@ export function createNotesController(storage: NotesStorage) {
 
     const pinned = !target.pinned;
     const notes = previous.notes.map(note => note.id === id
-      ? { ...note, pinned, updatedAt: now }
+      ? { ...note, pinned }
       : note);
     publish({ ...snapshot, status: 'saving', storageError: null });
     try {
