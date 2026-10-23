@@ -307,3 +307,149 @@ test('three or fewer folders do not show a redundant expand control', async () =
   assert.equal(elements(app.render()).some(item => /^(View all folders,|Show fewer folders)/.test(item.props.accessibilityLabel ?? '')), false);
   assert.equal(labeled(app, 'Create new folder').props.disabled, false);
 });
+
+function openAppearance(app, name = folder.name) {
+  action(app, name).props.onPress();
+  button(app, 'Customize folder').props.onPress();
+  return appearanceModal(app);
+}
+function appearanceModal(app) {
+  return find(app.render(), item => item.type === 'Modal' && item.props.visible && text(item).includes('Customize folder'));
+}
+
+test('appearance Save persists only the selected folder and renders its chosen icon and color after reload', async () => {
+  const other = { ...folder, id: 'other', name: 'Other', icon: 'cloud', color: 'teal' };
+  const originals = [note, { ...note, id: 'archive', archived: true }, { ...note, id: 'trash', deletedAt: NOW }];
+  const app = await workspace({ initialFolders: [folder, other], initialNotes: originals });
+  openAppearance(app);
+  assert.equal(labeled(app, 'folder folder icon').props.accessibilityState.selected, true);
+  assert.equal(labeled(app, 'None folder color').props.accessibilityState.selected, true);
+  labeled(app, 'briefcase folder icon').props.onPress();
+  labeled(app, 'blue folder color').props.onPress();
+  action(app, 'Save appearance').props.onPress();
+  await app.flush();
+  const [saved, untouched] = JSON.parse(app.storedFolders);
+  assert.deepEqual({ ...saved, updatedAt: NOW }, { ...folder, icon: 'briefcase', color: 'blue' });
+  assert.notEqual(saved.updatedAt, NOW);
+  assert.deepEqual(untouched, other);
+  assert.deepEqual(app.storedNotes, originals);
+  assert.equal(app.noteWrites.length, 0);
+  assert.equal(elements(app.render()).some(item => item.type === 'Modal' && item.props.visible && text(item).includes('Customize folder')), false);
+  const reloaded = await workspace({ rawFolders: app.storedFolders, initialNotes: originals });
+  const row = action(reloaded, folder.name);
+  assert.equal(row.props.icon, 'briefcase');
+  assert.equal(row.props.iconColor, folders.FOLDER_COLOR_VALUES.blue);
+  openAppearance(reloaded);
+  assert.equal(labeled(reloaded, 'briefcase folder icon').props.accessibilityState.selected, true);
+  assert.equal(labeled(reloaded, 'blue folder color').props.accessibilityState.selected, true);
+});
+
+test('appearance Cancel and Android back discard unsaved selections and reopen from saved values', async () => {
+  const original = { ...folder, icon: 'star', color: 'rose' };
+  const app = await workspace({ initialFolders: [original] });
+  openAppearance(app);
+  labeled(app, 'heart folder icon').props.onPress();
+  labeled(app, 'green folder color').props.onPress();
+  action(app, 'Cancel').props.onPress();
+  openAppearance(app);
+  assert.equal(labeled(app, 'star folder icon').props.accessibilityState.selected, true);
+  assert.equal(labeled(app, 'rose folder color').props.accessibilityState.selected, true);
+  labeled(app, 'cloud folder icon').props.onPress();
+  appearanceModal(app).props.onRequestClose();
+  openAppearance(app);
+  assert.equal(labeled(app, 'star folder icon').props.accessibilityState.selected, true);
+  assert.equal(app.folderWrites.length, 0);
+  assert.deepEqual(JSON.parse(app.storedFolders), [original]);
+});
+
+test('None removes the color accent without changing the selected icon', async () => {
+  const app = await workspace({ initialFolders: [{ ...folder, icon: 'book', color: 'purple' }] });
+  openAppearance(app);
+  labeled(app, 'None folder color').props.onPress();
+  action(app, 'Save appearance').props.onPress();
+  await app.flush();
+  assert.equal(JSON.parse(app.storedFolders)[0].color, '');
+  assert.equal(action(app, folder.name).props.iconColor, undefined);
+  assert.equal(action(app, folder.name).props.icon, 'book');
+});
+
+test('appearance save failure preserves storage, shows the error and allows retry', async () => {
+  let fail = true;
+  const app = await workspace({ saveFolders: async () => { if (fail) throw Error('full'); } });
+  openAppearance(app);
+  labeled(app, 'heart folder icon').props.onPress();
+  labeled(app, 'orange folder color').props.onPress();
+  action(app, 'Save appearance').props.onPress();
+  await app.flush();
+  assert.deepEqual(JSON.parse(app.storedFolders), [folder]);
+  assert.match(text(appearanceModal(app)), /Could not save folder appearance/);
+  assert.equal(action(app, 'Save appearance').props.disabled, false);
+  assert.equal(labeled(app, 'heart folder icon').props.accessibilityState.selected, true);
+  fail = false;
+  action(app, 'Save appearance').props.onPress();
+  await app.flush();
+  assert.equal(JSON.parse(app.storedFolders)[0].icon, 'heart');
+  assert.equal(JSON.parse(app.storedFolders)[0].color, 'orange');
+  assert.equal(app.noteWrites.length, 0);
+});
+
+test('appearance save blocks double taps and pre-render Android back until persistence completes', async () => {
+  const pending = deferred();
+  const app = await workspace({ saveFolders: () => pending.promise });
+  openAppearance(app);
+  labeled(app, 'cloud folder icon').props.onPress();
+  const modal = appearanceModal(app);
+  const save = action(app, 'Save appearance');
+  const cancel = action(app, 'Cancel');
+  const reopen = button(app, 'Customize folder');
+  save.props.onPress();
+  save.props.onPress();
+  modal.props.onRequestClose();
+  cancel.props.onPress();
+  reopen.props.onPress();
+  assert.equal(app.folderWrites.length, 1);
+  assert.equal(appearanceModal(app).props.visible, true);
+  assert.equal(labeled(app, 'cloud folder icon').props.accessibilityState.selected, true);
+  assert.equal(action(app, 'Save appearance').props.disabled, true);
+  assert.equal(action(app, 'Cancel').props.disabled, true);
+  assert.equal(labeled(app, 'book folder icon').props.disabled, true);
+  assert.deepEqual(JSON.parse(app.storedFolders), [folder]);
+  pending.resolve();
+  await app.flush();
+  assert.equal(JSON.parse(app.storedFolders)[0].icon, 'cloud');
+});
+
+test('every supported folder icon and color is selectable and round-trips through workspace persistence', async () => {
+  const app = await workspace();
+  const colors = ['', ...Object.keys(folders.FOLDER_COLOR_VALUES)];
+  for (const [index, icon] of folders.FOLDER_ICON_NAMES.entries()) {
+    const color = colors[index % colors.length];
+    openAppearance(app);
+    labeled(app, icon + ' folder icon').props.onPress();
+    labeled(app, (color || 'None') + ' folder color').props.onPress();
+    action(app, 'Save appearance').props.onPress();
+    await app.flush();
+    assert.equal(JSON.parse(app.storedFolders)[0].icon, icon);
+    assert.equal(JSON.parse(app.storedFolders)[0].color, color);
+  }
+  assert.equal(app.folderWrites.length, folders.FOLDER_ICON_NAMES.length);
+  assert.equal(app.noteWrites.length, 0);
+});
+
+test('renaming a customized folder preserves appearance and creation uses valid defaults', async () => {
+  const app = await workspace({ initialFolders: [{ ...folder, icon: 'flask', color: 'teal' }] });
+  action(app, folder.name).props.onPress();
+  button(app, 'Rename folder').props.onPress();
+  input(app).props.onChangeText('Renamed research');
+  action(app, 'Save folder').props.onPress();
+  await app.flush();
+  newFolder(app, 'Brand new').props.onPress();
+  await app.flush();
+  const [renamed, created] = JSON.parse(app.storedFolders);
+  assert.equal(renamed.icon, 'flask');
+  assert.equal(renamed.color, 'teal');
+  assert.equal(renamed.name, 'Renamed research');
+  assert.equal(created.icon, 'folder');
+  assert.equal(created.color, '');
+  assert.equal(app.noteWrites.length, 0);
+});

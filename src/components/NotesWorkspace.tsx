@@ -354,11 +354,15 @@ export function NotesWorkspace() {
   }
 
   function openFolderAppearance(folder: Folder) {
-    if (!foldersReady || foldersSaving) return;
+    if (!foldersReady || folderMutationInFlight.current) return;
     setDrawerOpen(false);
     setAppearanceFolderId(folder.id);
     setAppearanceIcon(normalizeFolderIcon(folder.icon));
     setAppearanceColor(normalizeFolderColor(folder.color));
+  }
+
+  function closeFolderAppearance() {
+    if (!folderMutationInFlight.current) setAppearanceFolderId(null);
   }
 
   async function saveFolderAppearance() {
@@ -386,7 +390,7 @@ export function NotesWorkspace() {
     const error = validateFolderName(current, name, folderDialog.id);
     if (error) { Alert.alert('Folder name', error); return; }
     const now = new Date().toISOString();
-    const next = folderDialog.mode === 'create'
+    const next: Folder[] = folderDialog.mode === 'create'
       ? [...current, { id: makeFolderId(current, now), name, icon: 'folder', color: '', createdAt: now, updatedAt: now }]
       : current.map(folder => folder.id === folderDialog.id ? { ...folder, name, updatedAt: now } : folder);
     // A ref closes the pre-render double-tap window; state also disables controls.
@@ -932,7 +936,7 @@ export function NotesWorkspace() {
         </SafeAreaProvider>
       </Modal>
 
-      <Modal visible={appearanceFolderId !== null} transparent animationType="fade" onRequestClose={() => { if (!foldersSaving) setAppearanceFolderId(null); }}>
+      <Modal visible={appearanceFolderId !== null} transparent animationType="fade" onRequestClose={closeFolderAppearance}>
         <View style={styles.folderModalLayer}><ScrollView style={styles.folderModalCard} keyboardShouldPersistTaps="handled" accessibilityViewIsModal>
           <Text accessibilityRole="header" style={styles.label}>Customize folder</Text>
           <Text style={styles.label}>Icon</Text>
@@ -954,7 +958,7 @@ export function NotesWorkspace() {
             </Pressable>)}
           </View>
           {folderError !== null && <Text accessibilityRole="alert" style={styles.error}>{folderError}</Text>}
-          <View style={styles.folderControls}><Action label="Cancel" secondary disabled={foldersSaving} onPress={() => setAppearanceFolderId(null)} /><Action label="Save appearance" disabled={foldersSaving} onPress={() => { void saveFolderAppearance(); }} /></View>
+          <View style={styles.folderControls}><Action label="Cancel" secondary disabled={foldersSaving} onPress={closeFolderAppearance} /><Action label="Save appearance" disabled={foldersSaving} onPress={() => { void saveFolderAppearance(); }} /></View>
         </ScrollView></View>
       </Modal>
       <Modal visible={folderDialog !== null} transparent animationType="fade" onRequestClose={() => { if (!folderMutationInFlight.current) setFolderDialog(null); }}>
