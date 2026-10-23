@@ -1,5 +1,6 @@
 import { initialNotesState, notesReducer, validateDraft } from './notes.ts';
 import type { Note, NotesAction, NotesState } from './notes.ts';
+import { plainTextToHtml } from './noteFormatting.ts';
 
 export const TRASH_RETENTION_DAYS = 15;
 const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -302,19 +303,27 @@ export function createNotesController(storage: NotesStorage) {
       publish({ ...snapshot, state: next, storageError: null });
       return;
     }
+    const before = previous.notes.find(note => note.id === previous.editingId);
+    const after = next.notes.find(note => note.id === previous.editingId);
+    const contentChanged = before && after && (
+      before.title !== after.title || before.text !== after.text ||
+      (before.html ?? plainTextToHtml(before.text)) !== (after.html ?? plainTextToHtml(after.text)) ||
+      before.category !== after.category
+    );
+    // An unchanged Save still completes the normal storage/editor handshake,
+    // but must not rewrite timestamps or break an existing undo/redo chain.
+    const notes = before && after && !contentChanged
+      ? next.notes.map(note => note.id === before.id ? before : note)
+      : next.notes;
     publish({ state: previous, status: 'saving', storageError: null });
     try {
-      await storage.save(next.notes);
-      if (previous.editingId !== null) {
-        const before = previous.notes.find(note => note.id === previous.editingId);
-        const after = next.notes.find(note => note.id === previous.editingId);
-        if (before && after && JSON.stringify(before) !== JSON.stringify(after)) {
-          undoStack.push({ id: before.id, before: { ...before }, after: { ...after } });
-          if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
-          redoStack.length = 0;
-        }
+      await storage.save(notes);
+      if (before && after && contentChanged) {
+        undoStack.push({ id: before.id, before: { ...before }, after: { ...after } });
+        if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+        redoStack.length = 0;
       }
-      publish({ state: { ...next, notice: previous.editingId === null ? 'Note saved on this device.' : 'Changes saved on this device.' }, status: 'ready', storageError: null });
+      publish({ state: { ...next, notes, notice: previous.editingId === null ? 'Note saved on this device.' : 'Changes saved on this device.' }, status: 'ready', storageError: null });
     } catch {
       publish({ state: previous, status: 'ready', storageError: 'Could not save on this device. Your draft is still here. Try Save again before closing the app.' });
     }

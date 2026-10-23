@@ -148,3 +148,70 @@ test('editor failure rejects an outstanding save and offers reload with the draf
   assert.match(app.sent.at(-1).html, /Keep my draft/);
   app.unmount();
 });
+
+test('typing undo/redo use ordered bridge commands only while the editor is ready and editable', () => {
+  const app = editor();
+  app.handle.current.undo();
+  app.handle.current.redo();
+  assert.equal(app.sent.length, 0);
+  app.message({ type: 'ready' });
+  app.handle.current.undo();
+  app.handle.current.redo();
+  const commands = app.sent.filter(message => message.type === 'command');
+  assert.deepEqual(commands.map(message => message.command), ['undo', 'redo']);
+  assert.ok(commands[0].id < commands[1].id);
+  app.message({ type: 'change', html: '<i>Restored body</i>' });
+  assert.equal(app.changed.at(-1).text, 'Restored body');
+  assert.equal(app.changed.at(-1).html, '<i>Restored body</i>');
+  app.props.editable = false;
+  app.render();
+  app.handle.current.undo();
+  app.handle.current.redo();
+  assert.equal(app.sent.filter(message => message.type === 'command').length, 2);
+  app.props.editable = true;
+  app.render();
+  app.web().props.onRenderProcessGone();
+  app.handle.current.undo();
+  app.handle.current.redo();
+  assert.equal(app.sent.filter(message => message.type === 'command').length, 2);
+  app.unmount();
+});
+
+test('offline document executes undo/redo once per bridge id and reports the resulting body', () => {
+  const events = {}, sent = [], commands = [];
+  const selection = { rangeCount: 0, removeAllRanges() {}, addRange() {} };
+  const range = { selectNodeContents() {}, collapse() {} };
+  const body = {
+    innerHTML: '<b>After</b>', contentEditable: 'true',
+    addEventListener() {}, focus() {}, contains() { return false; },
+  };
+  const document = {
+    getElementById() { return body; },
+    addEventListener(name, callback) { events[name] = callback; },
+    createRange() { return range; },
+    queryCommandState() { return false; },
+    execCommand(command) {
+      commands.push(command);
+      body.innerHTML = command === 'undo' ? '<i>Before</i>' : '<b>After</b>';
+    },
+  };
+  const window = {
+    getSelection() { return selection; },
+    addEventListener(name, callback) { events[`window:${name}`] = callback; },
+    ReactNativeWebView: { postMessage(value) { sent.push(JSON.parse(value)); } },
+  };
+  const script = RICH_EDITOR_DOCUMENT.match(/<script>([\s\S]*?)<\/script>/)[1];
+  vm.runInNewContext(script, { window, document });
+  const undo = { data: JSON.stringify({ type: 'command', command: 'undo', id: 1 }) };
+  events.message(undo);
+  events['window:message'](undo);
+  assert.deepEqual(commands, ['undo']);
+  assert.equal(sent.at(-1).type, 'change');
+  assert.equal(sent.at(-1).html, '<i>Before</i>');
+  events.message({ data: JSON.stringify({ type: 'command', command: 'redo', id: 2 }) });
+  assert.deepEqual(commands, ['undo', 'redo']);
+  assert.equal(sent.at(-1).html, '<b>After</b>');
+  body.contentEditable = 'false';
+  events.message({ data: JSON.stringify({ type: 'command', command: 'undo', id: 3 }) });
+  assert.deepEqual(commands, ['undo', 'redo']);
+});

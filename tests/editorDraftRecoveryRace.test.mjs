@@ -62,6 +62,9 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     publish() { listeners.forEach(listener => listener()); },
     load: () => Promise.resolve(),
+    canUndoSaved: () => false,
+    canRedoSaved: () => false,
+    async travelSavedHistory() {},
     dispatch(action) {
       dispatchCalls.push(action);
       if (controller.status !== 'ready') return;

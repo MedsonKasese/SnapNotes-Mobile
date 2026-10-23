@@ -24,7 +24,12 @@ test('startup restores React state only after notes loading completes', async ()
   const loading = new Promise(resolve => { finishLoad = resolve; });
   let loads = 0;
   let restores = 0;
-  const controller = { load() { loads += 1; return loading; } };
+  const controller = {
+    load() { loads += 1; return loading; },
+    canUndoSaved() { return false; },
+    canRedoSaved() { return false; },
+    async travelSavedHistory() {},
+  };
   const runEffect = new Function('controller', 'restoreEditorDraft', effect[1]);
 
   runEffect(controller, () => { restores += 1; });

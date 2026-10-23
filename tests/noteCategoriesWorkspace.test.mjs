@@ -25,7 +25,7 @@ const savedNotes = [
 
 // Exercise real component JSX and handlers with native primitives stubbed out.
 // Effects/native layout are intentionally excluded; this does not replace device QA.
-function workspace(initialNotes = savedNotes, controllerOverride = null) {
+function workspace(initialNotes = savedNotes, controllerOverride = null, history = { canUndoSaved: false, canRedoSaved: false }) {
   let state = { ...notes.initialNotesState(), notes: initialNotes };
   let status = 'ready';
   const slots = [];
@@ -37,6 +37,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
   const trashCalls = [];
   const pinCalls = [];
   const duplicateCalls = [];
+  const historyCalls = [];
   const storedValues = new Map();
   const asyncStorage = {
     async getItem(key) { return storedValues.get(key) ?? null; },
@@ -53,6 +54,9 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
     moveToTrash(...args) { events.push(['move-to-trash']); trashCalls.push(['move', ...args]); },
     restoreFromTrash(...args) { events.push(['restore']); trashCalls.push(['restore', ...args]); },
     permanentlyDelete(...args) { events.push(['delete']); trashCalls.push(['delete', ...args]); },
+    canUndoSaved: () => history.canUndoSaved,
+    canRedoSaved: () => history.canRedoSaved,
+    async travelSavedHistory(direction) { historyCalls.push(direction); },
   };
   const controller = controllerOverride ?? defaultController;
   const exports = {};
@@ -112,7 +116,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
   });
   return {
     render() { cursor = 0; refCursor = 0; return exports.NotesWorkspace(); },
-    controller, alerts, archiveCalls, trashCalls, pinCalls, duplicateCalls, events,
+    controller, alerts, archiveCalls, trashCalls, pinCalls, duplicateCalls, historyCalls, events,
     setStatus(next) { status = next; },
   };
 }
@@ -266,6 +270,32 @@ test('note actions are disabled while saving', () => {
     assert.equal(button.props.accessibilityState.disabled, true);
   }
   assert.deepEqual(app.events.filter(([event]) => ['pin', 'duplicate', 'archive', 'move-to-trash'].includes(event)), []);
+});
+
+test('saved-history controls announce unavailable history and delegate enabled undo/redo', () => {
+  const unavailable = workspace();
+  const unavailableUndo = action(unavailable.render(), '↶ Undo saved edit');
+  const unavailableRedo = action(unavailable.render(), '↷ Redo saved edit');
+  for (const control of [unavailableUndo, unavailableRedo]) {
+    assert.equal(control.props.disabled, true);
+    const rendered = control.type(control.props);
+    assert.equal(rendered.props.disabled, true);
+    assert.equal(rendered.props.accessibilityState.disabled, true);
+  }
+  assert.deepEqual(unavailable.historyCalls, []);
+
+  const available = workspace(savedNotes, null, { canUndoSaved: true, canRedoSaved: true });
+  const undo = action(available.render(), '↶ Undo saved edit');
+  const redo = action(available.render(), '↷ Redo saved edit');
+  for (const control of [undo, redo]) {
+    assert.equal(control.props.disabled, false);
+    const rendered = control.type(control.props);
+    assert.equal(rendered.props.disabled, false);
+    assert.equal(rendered.props.accessibilityState.disabled, false);
+  }
+  undo.props.onPress();
+  redo.props.onPress();
+  assert.deepEqual(available.historyCalls, ['undo', 'redo']);
 });
 
 test('Duplicate note closes the sheet and routes the selected library or archive note to the controller', () => {
@@ -749,4 +779,68 @@ test('all existing library, archive, and trash menu actions retain their origina
       assert.ok(row.minHeight >= 44);
     }
   }
+});
+
+async function realHistoryController(initialNotes = [savedNotes[0]]) {
+  let persisted = structuredClone(initialNotes);
+  const controller = createNotesController({
+    async load() { return structuredClone(persisted); },
+    async save(next) { persisted = structuredClone(next); },
+  });
+  await controller.load();
+  return { controller, get persisted() { return structuredClone(persisted); } };
+}
+
+async function settleControllerWrite() {
+  await new Promise(resolve => setImmediate(resolve));
+}
+
+async function createSavedHistoryEntry(controller) {
+  controller.dispatch({ type: 'edit', id: savedNotes[0].id });
+  controller.dispatch({ type: 'change', field: 'title', value: 'Edited project alpha' });
+  await controller.save('2026-10-23T20:00:00.000Z');
+}
+
+test('history conflict after a later pin or folder change is announced in the library', async () => {
+  for (const [change, mutate] of [
+    ['pin', controller => controller.togglePin(savedNotes[0].id, '2026-10-23T20:01:00.000Z')],
+    ['folder', controller => controller.moveNoteToFolder(savedNotes[0].id, 'folder-later')],
+  ]) {
+    const { controller } = await realHistoryController();
+    await createSavedHistoryEntry(controller);
+    await mutate(controller);
+
+    const app = workspace([], controller);
+    const library = app.render();
+    const undo = action(library, '↶ Undo saved edit');
+    assert.equal(undo.props.disabled, false, `${change}: undo remains available before conflict detection`);
+    undo.props.onPress();
+    await settleControllerWrite();
+
+    const message = 'This note changed since the history entry. Undo/Redo was cancelled to protect your current note.';
+    const feedback = find(app.render(), element => element.type === 'Text' && text(element) === message);
+    assert.equal(feedback.props.accessibilityRole, 'alert', `${change}: cancellation is an alert`);
+    assert.equal(feedback.props.accessibilityLiveRegion, 'assertive', `${change}: cancellation is announced assertively`);
+    assert.equal(controller.getSnapshot().state.notes[0].title, 'Edited project alpha');
+  }
+});
+
+test('successful saved undo and redo notices are visible and politely announced in the library', async () => {
+  const { controller } = await realHistoryController();
+  await createSavedHistoryEntry(controller);
+  const app = workspace([], controller);
+
+  action(app.render(), '↶ Undo saved edit').props.onPress();
+  await settleControllerWrite();
+  let feedback = find(app.render(), element => element.type === 'Text' && text(element) === 'Saved change undone.');
+  assert.equal(feedback.props.accessibilityLiveRegion, 'polite');
+  assert.notEqual(feedback.props.accessibilityRole, 'alert');
+  assert.equal(controller.getSnapshot().state.notes[0].title, savedNotes[0].title);
+
+  action(app.render(), '↷ Redo saved edit').props.onPress();
+  await settleControllerWrite();
+  feedback = find(app.render(), element => element.type === 'Text' && text(element) === 'Saved change redone.');
+  assert.equal(feedback.props.accessibilityLiveRegion, 'polite');
+  assert.notEqual(feedback.props.accessibilityRole, 'alert');
+  assert.equal(controller.getSnapshot().state.notes[0].title, 'Edited project alpha');
 });
