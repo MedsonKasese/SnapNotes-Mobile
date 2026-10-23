@@ -1,6 +1,12 @@
 export const MAX_FOLDERS = 20;
+export const FOLDER_ICON_NAMES = ['folder', 'book', 'flask', 'code', 'lightbulb', 'briefcase', 'heart', 'star', 'cloud'] as const;
+export type FolderIcon = typeof FOLDER_ICON_NAMES[number];
+export const FOLDER_COLOR_VALUES = { green: '#5b8c43', blue: '#4b78b5', purple: '#8561ad', orange: '#c77a32', rose: '#bb5e73', teal: '#3b8983' } as const;
+export type FolderColor = keyof typeof FOLDER_COLOR_VALUES | '';
+export function normalizeFolderIcon(value: unknown): FolderIcon { return typeof value === 'string' && (FOLDER_ICON_NAMES as readonly string[]).includes(value) ? value as FolderIcon : 'folder'; }
+export function normalizeFolderColor(value: unknown): FolderColor { return typeof value === 'string' && Object.prototype.hasOwnProperty.call(FOLDER_COLOR_VALUES, value) ? value as keyof typeof FOLDER_COLOR_VALUES : ''; }
 export const MAX_FOLDER_NAME = 32;
-export type Folder = { id: string; name: string; icon: string; color: string; createdAt: string; updatedAt: string };
+export type Folder = { id: string; name: string; icon: FolderIcon; color: FolderColor; createdAt: string; updatedAt: string };
 export const FOLDERS_KEY = '@snapnotes-mobile/folders-v1';
 
 export function normalizeFolderName(value: string): string {
@@ -32,8 +38,8 @@ export function parseFolders(raw: string | null): Folder[] {
       !Number.isFinite(Date.parse(item.updatedAt))) throw Error('Invalid folder record.');
     ids.add(item.id);
     names.add(item.name.toLowerCase());
-    return { id: item.id, name: item.name, icon: typeof item.icon === 'string' ? item.icon : 'folder',
-      color: typeof item.color === 'string' ? item.color : '', createdAt: item.createdAt, updatedAt: item.updatedAt };
+    return { id: item.id, name: item.name, icon: normalizeFolderIcon(item.icon),
+      color: normalizeFolderColor(item.color), createdAt: item.createdAt, updatedAt: item.updatedAt };
   });
 }
 
