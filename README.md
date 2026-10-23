@@ -4,16 +4,20 @@ A private, standalone React Native app built with Expo SDK 58 and TypeScript. Th
 
 ## Current scope
 
-You can create and edit plain-text notes saved **on this device**. After Save succeeds, notes survive app reloads and restarts. The editor also autosaves one recovery draft on this device and restores it into the editor after a successful notes load. Recovery drafts are not saved notes, do not appear in the library, and are cleared after a successful save or an explicit discard. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
+You can create and edit plain-text notes saved **on this device**. The migration checklist records additional implemented features and their verification status. After Save succeeds, notes survive app reloads and restarts. The editor also autosaves one recovery draft on this device and restores it into the editor after a successful notes load. Recovery drafts are not saved notes, do not appear in the library, and are cleared after a successful save or an explicit discard. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
 
 - Optional title and body; at least one must contain non-whitespace text. Body-only notes display as “Untitled note” without storing that fallback.
 - The 1,500-character budget follows the PWA inline editor: normalized title + body, including `## ` and a line break when a title is present. The live counter and save validator use the same rule. Title/body are explicit native fields; Markdown heading parsing and rich text are not included.
 - Saving creates a new note at the top of the device list. Editing updates that note without changing its ID, creation time, or default `general` category; update time changes on save.
 - Draft changes do not touch a saved note until Save changes is tapped. The latest changed editor draft is autosaved to a separate device-only recovery key after a short debounce and restored after restart; changing views still asks before discarding it. Recovery is a single editor draft, not the PWA's full multi-draft library.
 
-There is no account/auth, cloud sync, migration/import from the PWA, categories UI, deletion, or notifications. The PWA repository and its users/data are untouched.
+The mobile app now also includes category assignment and filtering, pinning, archive, Trash with 15-day retention and Empty Trash, and note-actions menus. PR #19 proposes note duplication; device verification is pending. There is still no account/auth, cloud sync, migration/import from the PWA, or notifications. The PWA repository and its users/data are untouched.
 
 No secrets or production-data connections are needed. Deployment and over-the-air update setup are out of scope.
+
+## Migration feature status
+
+See [MIGRATION_CHECKLIST.md](MIGRATION_CHECKLIST.md) for the authoritative, actively maintained feature-by-feature status. The PWA remains the behaviour reference. This README describes the device-only foundation; cloud sync, auth, private notes, folders, and other advanced PWA features have not been migrated yet. PR #19 adds duplication to the note-actions menu for review, with automated and Android tests still required.
 
 ## Requirements and setup
 
