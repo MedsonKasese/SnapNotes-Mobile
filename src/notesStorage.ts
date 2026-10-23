@@ -1,4 +1,5 @@
-import { normalizeCategory, NOTE_CATEGORIES, validateDraft as validateNoteDraft, type Note, type NoteCategory } from './notes.ts';
+import { MAX_NOTE_HTML_LENGTH, normalizeCategory, NOTE_CATEGORIES, validateDraft as validateNoteDraft, type Note, type NoteCategory } from './notes.ts';
+import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
 
 export const NOTES_STORAGE_KEY = '@snapnotes-mobile/notes';
 
@@ -57,7 +58,7 @@ function enqueue<T>(backend: AsyncKeyValueBackend, operation: () => Promise<T>):
   return pending;
 }
 
-type NoteDraft = Pick<Note, 'title' | 'text'>;
+type NoteDraft = Pick<Note, 'title' | 'text'> & { html?: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -110,7 +111,7 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (!isRecord(value)) {
     throw new Error(`Invalid note at index ${index}: expected an object.`);
   }
-  const { id, category: rawCategory, title, text, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived, deletedAt: rawDeletedAt } = value;
+  const { id, category: rawCategory, title, text, html: rawHtml, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived, deletedAt: rawDeletedAt } = value;
   const category = normalizeCategory(rawCategory);
   const pinned = rawPinned === undefined ? false : rawPinned;
   const archived = rawArchived === undefined ? false : rawArchived;
@@ -135,12 +136,22 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (typeof title !== 'string' || typeof text !== 'string') {
     throw new Error(`Invalid note at index ${index}: title and text must be strings.`);
   }
+  if (rawHtml !== undefined && typeof rawHtml !== 'string') {
+    throw new Error(`Invalid note at index ${index}: html must be a string when provided.`);
+  }
+  if (typeof rawHtml === 'string' && rawHtml.length > MAX_NOTE_HTML_LENGTH) {
+    throw new Error(`Invalid note at index ${index}: html exceeds the supported 100000 character limit.`);
+  }
+  const html = typeof rawHtml === 'string' ? sanitizeNoteHtml(rawHtml) : undefined;
+  if (html !== undefined && noteHtmlToText(html).trim() !== text.replace(/\r/g, '').trim()) {
+    throw new Error(`Invalid note at index ${index}: html visible text does not match text.`);
+  }
   validateTimestamp(createdAt, 'createdAt', index);
   validateTimestamp(updatedAt, 'updatedAt', index);
-  validateDraft({ title, text }, index);
+  validateDraft({ title, text, ...(html === undefined ? {} : { html }) }, index);
 
   ids.add(id);
-  return { id, category, title, text, createdAt, updatedAt, pinned, archived, deletedAt };
+  return { id, category, title, text, ...(html === undefined ? {} : { html }), createdAt, updatedAt, pinned, archived, deletedAt };
 }
 
 function validateNotes(value: unknown): Note[] {

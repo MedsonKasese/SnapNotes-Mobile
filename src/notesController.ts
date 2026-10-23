@@ -1,4 +1,4 @@
-import { initialNotesState, notesReducer } from './notes.ts';
+import { initialNotesState, notesReducer, validateDraft } from './notes.ts';
 import type { Note, NotesAction, NotesState } from './notes.ts';
 
 export const TRASH_RETENTION_DAYS = 15;
@@ -66,7 +66,7 @@ export function createNotesController(storage: NotesStorage) {
     publish({ ...snapshot, state: notesReducer(snapshot.state, action) });
   }
 
-  async function updateNoteText(id: string, text: string, now: string) {
+  async function updateNoteText(id: string, text: string, now: string, html?: string) {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
     if (!previous.notes.some(note => note.id === id)) {
@@ -75,7 +75,7 @@ export function createNotesController(storage: NotesStorage) {
     }
 
     const notes = previous.notes.map(note => note.id === id
-      ? { ...note, text, updatedAt: now }
+      ? { ...note, text, ...(html !== undefined ? { html } : {}), updatedAt: now }
       : note);
     publish({ ...snapshot, status: 'saving', state: previous, storageError: null });
     try {
@@ -222,6 +222,10 @@ export function createNotesController(storage: NotesStorage) {
       archived: false,
       deletedAt: null,
     };
+    if (validateDraft(copy)) {
+      publish({ ...snapshot, storageError: 'This note is too long to duplicate. Shorten it before duplicating.' });
+      return;
+    }
     const notes = [copy, ...previous.notes];
     publish({ ...snapshot, status: 'saving', storageError: null });
     try {

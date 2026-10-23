@@ -7,13 +7,17 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
-  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import { ChecklistLabel } from './ChecklistLabel';
+import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
+import { FormattedText } from './FormattedText';
+import { FormattingToolbar } from './FormattingToolbar';
+import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
 type NoteAction = 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
@@ -101,6 +105,15 @@ export function NotesWorkspace() {
   const [actionsMenuHeight, setActionsMenuHeight] = useState(0);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+  const [formattingState, setFormattingState] = useState<FormattingState>({});
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [flushing, setFlushing] = useState(false);
+  const bodyEditor = useRef<RichNoteEditorHandle>(null);
+  const editorSession = useRef(0);
+  const saveInFlight = useRef(false);
   const actionTriggers = useRef(new Map<string, ComponentRef<typeof View>>());
   const actionsLayer = useRef<ComponentRef<typeof View> | null>(null);
   const actionsRequest = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
@@ -120,11 +133,16 @@ export function NotesWorkspace() {
     const current = controller.getSnapshot().state.draft;
     // Merely choosing a category/navigation destination must not delete an
     // unreadable or still-pending recovery record from an otherwise empty editor.
-    claimEditorDraft(draftHydrated || action.type === 'change' || action.type === 'edit' ||
+    claimEditorDraft(draftHydrated || action.type === 'change' || action.type === 'rich-change' || action.type === 'edit' ||
       Boolean(current.title.trim() || current.text.trim()));
+    if (action.type === 'reset' || action.type === 'edit' || action.type === 'restore-draft') {
+      editorSession.current += 1;
+      setFormattingState({});
+      setLinkOpen(false);
+    }
     controller.dispatch(action);
   };
-  const saving = status === 'saving';
+  const saving = status === 'saving' || flushing;
   const count = characterCount(state.draft);
   const dirty = hasUnsavedChanges(state);
   const activeNotes = state.notes.filter(note => !note.archived && note.deletedAt === null);
@@ -174,10 +192,14 @@ export function NotesWorkspace() {
           record.version !== EDITOR_DRAFT_VERSION ||
           typeof record.title !== 'string' ||
           typeof record.text !== 'string' ||
+          (record.html !== undefined && (typeof record.html !== 'string' || record.html.length > MAX_NOTE_HTML_LENGTH)) ||
           (record.category !== undefined && !NOTE_CATEGORIES.includes(record.category as NoteCategory)) ||
           !(record.editingId === null || typeof record.editingId === 'string')
         ) {
           throw new Error('Unsupported draft record');
+        }
+        if (typeof record.html === 'string' && noteHtmlToText(record.html).trim() !== record.text.replace(/\r/g, '').trim()) {
+          throw new Error('Rich draft text does not match its formatting');
         }
 
         if (record.title.trim() || record.text.trim()) {
@@ -197,7 +219,8 @@ export function NotesWorkspace() {
           if (revision !== draftRecoveryRevision.current || controller.getSnapshot().status !== 'ready') return;
           controller.dispatch({
             type: 'restore-draft',
-            draft: { title: record.title, text: record.text, category: normalizeCategory(record.category) },
+            draft: { title: record.title, text: record.text, category: normalizeCategory(record.category),
+              ...(typeof record.html === 'string' ? { html: sanitizeNoteHtml(record.html) } : {}) },
             editingId: record.editingId,
           });
           setView('editor');
@@ -230,6 +253,7 @@ export function NotesWorkspace() {
           version: EDITOR_DRAFT_VERSION,
           title: state.draft.title,
           text: state.draft.text,
+          ...(state.draft.html !== undefined ? { html: state.draft.html } : {}),
           category: normalizeCategory(state.draft.category),
           editingId: state.editingId,
           savedAt: new Date().toISOString(),
@@ -250,7 +274,7 @@ export function NotesWorkspace() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.category, state.editingId]);
+  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.html, state.draft.category, state.editingId]);
 
   function changeDraft(field: 'title' | 'text', value: string) {
     dispatch({ type: 'change', field, value });
@@ -426,15 +450,29 @@ export function NotesWorkspace() {
     return () => subscription.remove();
   });
 
-  function insertChecklistItem() {
-    const current = state.draft.text;
-    const separator = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
-    const next = current + separator + '☐ ';
-    if (characterCount({ ...state.draft, text: next }) > MAX_NOTE_CHARACTERS) {
-      Alert.alert('Note is too long', 'Remove some text before adding a checklist item.');
+  function changeRichDraft(content: RichContent) {
+    dispatch({ type: 'rich-change', ...content });
+  }
+
+  function formatNote(action: FormattingAction) {
+    if (saving || !editorReady) return;
+    if (action === 'link') {
+      bodyEditor.current?.rememberSelection();
+      setLinkUrl('');
+      setLinkError(null);
+      setLinkOpen(true);
+    } else bodyEditor.current?.command(action);
+  }
+
+  function insertLink() {
+    const url = normalizeNoteLink(linkUrl);
+    if (!url) {
+      setLinkError('Enter a complete https://, http://, or mailto: link.');
       return;
     }
-    changeDraft('text', next);
+    if (saving || !editorReady) return;
+    setLinkOpen(false);
+    bodyEditor.current?.command('link', url);
   }
 
   function toggleChecklistItem(noteId: string, lineIndex: number) {
@@ -444,16 +482,35 @@ export function NotesWorkspace() {
     const lines = note.text.split('\n');
     const line = lines[lineIndex];
     if (line === undefined) return;
-    const match = /^(\s*)(☐|☑)(\s)/.exec(line);
+    const match = /^(\s*)(☐|☑)(\s|$)/.exec(line);
     if (!match) return;
     const replacement = match[2] === '☐' ? '☑' : '☐';
     lines[lineIndex] = match[1] + replacement + line.slice(match[1].length + match[2].length);
-    void controller.updateNoteText(noteId, lines.join('\n'), new Date().toISOString());
+    const html = note.html !== undefined ? updateChecklistHtml(note.html, lineIndex, replacement === '☑') : undefined;
+    void controller.updateNoteText(noteId, lines.join('\n'), new Date().toISOString(), html);
   }
 
-  function saveNote() {
-    claimEditorDraft(draftHydrated || Boolean(state.draft.title.trim() || state.draft.text.trim()));
-    void controller.save(new Date().toISOString());
+  async function saveNote() {
+    if (saveInFlight.current || controller.getSnapshot().status !== 'ready') return;
+    saveInFlight.current = true;
+    setFlushing(true);
+    const session = editorSession.current;
+    try {
+      const content = await bodyEditor.current?.getContent();
+      if (!content) throw new Error('The editor is not ready. Please try saving again.');
+      if (session !== editorSession.current) return;
+      const current = controller.getSnapshot().state.draft;
+      // A blank Save is validation, not consent to replace an unreadable recovery record.
+      if (content.text.trim() || current.text.trim() || current.title.trim() || current.html !== undefined) {
+        changeRichDraft(content);
+      }
+      await controller.save(new Date().toISOString());
+    } catch (error) {
+      Alert.alert('Could not save note', error instanceof Error ? error.message : 'Your draft is still here. Please try again.');
+    } finally {
+      saveInFlight.current = false;
+      setFlushing(false);
+    }
   }
 
   if (status === 'loading' || status === 'load-error') {
@@ -568,30 +625,30 @@ export function NotesWorkspace() {
               />
               <View style={styles.editorTools}>
                 <Text style={styles.label}>Note</Text>
-                <Action label="+ Checklist item" secondary disabled={saving} onPress={insertChecklistItem} />
+                <FormattingToolbar disabled={saving || !editorReady} active={formattingState} onAction={formatNote} />
               </View>
-              <TextInput
+              <RichNoteEditor
+                key={state.editingId ?? 'new-note'}
+                ref={bodyEditor}
                 editable={!saving}
                 accessibilityLabel="Note body"
-                value={state.draft.text}
-                onChangeText={value => changeDraft('text', value)}
-                placeholder="What's on your mind?"
-                placeholderTextColor="#64748b"
-                multiline
-                textAlignVertical="top"
-                style={[styles.input, styles.bodyInput]}
+                text={state.draft.text}
+                html={state.draft.html}
+                onChange={changeRichDraft}
+                onReady={setEditorReady}
+                onSelection={setFormattingState}
               />
               <Text style={[styles.hint, count > MAX_NOTE_CHARACTERS && styles.error]}>
                 {count}/{MAX_NOTE_CHARACTERS} characters
               </Text>
-              <Text style={styles.hint}>Plain text only for now. The PWA’s “## ” title marker is included in the character count.</Text>
+              <Text style={styles.hint}>Select text to format it, or choose a tool before typing. The PWA’s “## ” title marker is included in the character count.</Text>
               {storageError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{storageError}</Text>}
               {draftStorageError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftStorageError}</Text>}
               {saving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving on this device…</Text>}
               {state.error !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{state.error}</Text>}
               {state.notice !== null && <Text accessibilityLiveRegion="polite" style={styles.notice}>{state.notice}</Text>}
               <View style={styles.actions}>
-                <Action disabled={saving} label={saving ? 'Saving…' : state.editingId === null ? 'Save note' : 'Save changes'} onPress={saveNote} />
+                <Action disabled={saving || !editorReady} label={saving ? 'Saving…' : state.editingId === null ? 'Save note' : 'Save changes'} onPress={() => { void saveNote(); }} />
                 {(state.editingId !== null || dirty) && <Action disabled={saving} label="Cancel" onPress={openLibrary} secondary />}
                 {state.editingId !== null && <Action disabled={saving} label="New note" onPress={openNewNote} secondary />}
               </View>
@@ -626,7 +683,9 @@ export function NotesWorkspace() {
                 {!searching && view === 'library' && <Action label={categoryFilter === 'all' ? 'Create your first note' : 'Create a note'} onPress={openNewNote} />}
               </View>
             }
-            renderItem={({ item }) => (
+            renderItem={({ item }) => {
+              const formattedLines = item.html ? getNoteHtmlLines(item.html) : undefined;
+              return (
               // Keep nested checkboxes/menu independently reachable by screen readers.
               // The contextual menu provides their explicit Open note control.
               <Pressable style={styles.card} accessible={false} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
@@ -637,8 +696,9 @@ export function NotesWorkspace() {
                 {item.text !== '' && (
                   <View style={styles.notePreview}>
                     {item.text.split('\n').slice(0, 6).map((line, index) => {
-                      const checklist = /^(\s*)(☐|☑)(\s)(.*)$/.exec(line);
-                      if (!checklist) return <Text key={index} style={styles.noteText}>{line || ' '}</Text>;
+                      const checklist = /^(\s*)(☐|☑)(\s|$)(.*)$/.exec(line);
+                      const formatted = formattedLines?.[index];
+                      if (!checklist) return <Text key={index} style={styles.noteText}><FormattedText line={formatted} fallback={line || ' '} /></Text>;
                       const checked = checklist[2] === '☑';
                       return (
                         <Pressable key={index} accessibilityRole="checkbox"
@@ -648,7 +708,9 @@ export function NotesWorkspace() {
                           disabled={saving || view === 'trash'}
                           style={styles.checklistRow}>
                           <Text style={styles.checkboxGlyph}>{checked ? '☑' : '☐'}</Text>
-                          <ChecklistLabel text={checklist[4]} checked={checked} />
+                          <ChecklistLabel text={checklist[4]} checked={checked}>
+                            <FormattedText line={formatted} fallback={checklist[4]} skipChecklistMarker />
+                          </ChecklistLabel>
                         </Pressable>
                       );
                     })}
@@ -686,7 +748,8 @@ export function NotesWorkspace() {
                   </View>
                 </View>
               </Pressable>
-            )}
+              );
+            }}
           />
         </View>
       )}
@@ -764,6 +827,23 @@ export function NotesWorkspace() {
         </View>
       </Modal>
 
+      <Modal visible={linkOpen} transparent animationType="fade" onRequestClose={() => setLinkOpen(false)}>
+        <KeyboardAvoidingView style={styles.linkLayer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.linkDialog} accessibilityViewIsModal>
+            <Text accessibilityRole="header" style={styles.label}>Insert link</Text>
+            <Text style={styles.hint}>The selected text becomes a link. With no selection, the URL is inserted.</Text>
+            <TextInput accessibilityLabel="Link URL" value={linkUrl} onChangeText={value => { setLinkUrl(value); setLinkError(null); }}
+              autoFocus autoCapitalize="none" autoCorrect={false} keyboardType="url" returnKeyType="done"
+              placeholder="https://example.com" placeholderTextColor="#64748b" onSubmitEditing={insertLink} style={styles.input} />
+            {linkError !== null && <Text accessibilityRole="alert" style={styles.error}>{linkError}</Text>}
+            <View style={styles.actions}>
+              <Action label="Cancel link" secondary onPress={() => setLinkOpen(false)} />
+              <Action label="Insert link" disabled={saving || !editorReady} onPress={insertLink} />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {view === 'library' && (
         <Pressable
           accessibilityRole="button"
@@ -833,7 +913,9 @@ const styles = StyleSheet.create({
   categoryChipActive: { backgroundColor: '#48a111' },
   categoryChipText: { color: '#3b5731', fontSize: 13, lineHeight: 18, includeFontPadding: false, textAlign: 'center' },
   categoryChipTextActive: { color: '#fff', fontWeight: '700' },
-  editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  linkLayer: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(20,35,15,0.35)' },
+  linkDialog: { padding: 20, borderRadius: 16, backgroundColor: '#ffffff', gap: 14 },
   notePreview: { gap: 0 },
   checklistRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 28, paddingVertical: 2, gap: 8 },
   checkboxGlyph: { fontSize: 20, lineHeight: 24, includeFontPadding: false, flexShrink: 0, color: '#347b0a' },

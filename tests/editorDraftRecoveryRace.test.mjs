@@ -7,6 +7,7 @@ import ts from 'typescript';
 import * as notes from '../src/notes.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
+import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -36,7 +37,7 @@ function sameDeps(left, right) {
 // A small deterministic hook renderer: refs and state persist by hook slot,
 // callbacks honor dependency identity, effects commit after each render and run
 // their previous cleanup when dependencies change. No native layout is involved.
-function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) {
+function workspace({ initialNotes = [], reads = [], checklistSaves = [], contentReads = [], saveSaves = [] } = {}) {
   let state = { ...notes.initialNotesState(), notes: initialNotes };
   const alerts = [];
   const updateCalls = [];
@@ -46,6 +47,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
   const storage = { value: null, reads: [...reads], getCalls: 0, sets: [], removes: [] };
   const listeners = new Set();
   const dispatchCalls = [];
+  const editorCommands = [];
+  const saveCalls = [];
   let cursor = 0;
   let stateCursor = 0;
   const stateSlots = new Map();
@@ -81,8 +84,28 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
     },
     async save() {
       if (controller.status !== 'ready') return;
-      state = notes.notesReducer(state, { type: 'save', id: 'new-test-note', now: '2026-10-21T00:00:00Z' });
+      const now = '2026-10-21T00:00:00Z';
+      saveCalls.push({ now, draft: { ...state.draft } });
+      const next = notes.notesReducer(state, { type: 'save', id: 'new-test-note', now });
+      if (next.notes === state.notes) {
+        state = next;
+        controller.publish();
+        return;
+      }
+      const previous = state;
+      controller.status = 'saving';
       controller.publish();
+      const pendingSave = saveSaves.shift() ?? { promise: Promise.resolve() };
+      try {
+        await pendingSave.promise;
+        state = { ...next, notice: 'Note saved on this device.' };
+      } catch {
+        state = previous;
+        controller.storageError = 'Could not save this note on this device.';
+      } finally {
+        controller.status = 'ready';
+        controller.publish();
+      }
     },
   };
   const AsyncStorage = {
@@ -161,7 +184,12 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
       if (name === '../notesController') return { createNotesController: () => controller };
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };
       if (name === '../noteSearch') return { searchNotes };
+      if (name === '../noteFormatting') return { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml,
+        getNoteHtmlLines: html => [], normalizeNoteLink: value => value, updateChecklistHtml: (html, _line, checked) => html.replace(checked ? '☐' : '☑', checked ? '☑' : '☐') };
       if (name === './ChecklistLabel') return { ChecklistLabel: 'ChecklistLabel' };
+      if (name === './FormattedText') return { FormattedText: 'FormattedText' };
+      if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
+      if (name === './RichNoteEditor') return { RichNoteEditor: 'RichNoteEditor' };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
@@ -170,6 +198,26 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
     cursor = 0;
     stateCursor = 0;
     const tree = exports.NotesWorkspace();
+    const attachEditorRef = node => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(attachEditorRef); return; }
+      if (node.type === 'RichNoteEditor' && node.props.ref) {
+        const ref = node.props.ref;
+        ref.current = {
+          getContent() {
+            const next = contentReads.shift();
+            return next?.promise ?? next ?? Promise.resolve({
+              text: state.draft.text,
+              html: state.draft.html ?? plainTextToHtml(state.draft.text),
+            });
+          },
+          command(action, url) { editorCommands.push({ action, url }); },
+          rememberSelection() {},
+        };
+      }
+      attachEditorRef(node.props?.children);
+    };
+    attachEditorRef(tree);
     for (const slot of effectSlots) {
       if (slot?.pending) {
         slot.pending = false;
@@ -191,7 +239,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
     await flushMicrotasks();
   }
   return {
-    render, controller, storage, alerts, timers, slots, updateCalls, dispatchCalls,
+    render, controller, storage, alerts, timers, slots, updateCalls, dispatchCalls, saveCalls, editorCommands,
     get draftHydrated() { return slots[stateSlots.get('draftHydrated')]; },
     get draftStorageError() { return slots[stateSlots.get('draftStorageError')]; },
     flushMicrotasks, advanceTimers,
@@ -240,13 +288,13 @@ function chooseDraftCategory(app, category = 'Personal') {
   labeled(app.render(), `Set category ${category}`).props.onPress();
 }
 function typeDraft(app, { title = 'Typed title', body = 'Typed body' } = {}) {
-  if (!elements(app.render()).some(element => element.type === 'TextInput' && element.props.accessibilityLabel === 'Note title (optional)')) {
+  if (!elements(app.render()).some(element => element.type === 'RichNoteEditor')) {
     action(app.render(), '+ New note').props.onPress();
   }
   let tree = app.render();
   labeled(tree, 'Note title (optional)').props.onChangeText(title);
   tree = app.render();
-  labeled(tree, 'Note body').props.onChangeText(body);
+  find(tree, element => element.type === 'RichNoteEditor').props.onChange({ text: body, html: plainTextToHtml(body) });
   app.render();
   find(app.render(), element => element.props.accessibilityLabel === 'Choose note category').props.onPress();
   tree = app.render();
@@ -268,13 +316,13 @@ async function persistCurrentDraft(app) {
   await app.flushMicrotasks();
   const tree = app.render();
   const state = app.controller.getSnapshot().state;
-  assert.deepEqual({ ...state.draft }, { title: 'Typed title', text: 'Typed body', category: 'personal' });
+  assert.deepEqual({ ...state.draft }, { title: 'Typed title', text: 'Typed body', category: 'personal', html: '<div>Typed body</div>' });
   assert.equal(state.notice, null, 'stale restore must not dispatch');
   assert.equal(visibleDraftError(tree), false);
   await persistCurrentDraft(app);
   assert.equal(app.storage.sets.length, 1);
   assert.deepEqual(JSON.parse(app.storage.sets[0]), {
-    version: 1, title: 'Typed title', text: 'Typed body', category: 'personal', editingId: null,
+    version: 1, title: 'Typed title', text: 'Typed body', html: '<div>Typed body</div>', category: 'personal', editingId: null,
     savedAt: JSON.parse(app.storage.sets[0]).savedAt,
   });
   assert.equal(app.storage.removes.length, 0);
@@ -462,6 +510,50 @@ test('an unopposed valid recovery record restores normally after startup loading
   assert.equal(visibleDraftError(tree), false);
 });
 
+test('formatted recovery restores and persists its HTML alongside the visible text', async () => {
+  const html = '<div><strong>Rich only</strong></div>';
+  const app = workspace({ reads: [validRecord({ text: 'Rich only', html })] });
+  await startRead(app);
+  await app.flushMicrotasks();
+  assert.deepEqual({ ...app.controller.getSnapshot().state.draft }, {
+    title: 'Recovered title', text: 'Rich only', category: 'ideas', html,
+  });
+  await persistCurrentDraft(app);
+  assert.equal(JSON.parse(app.storage.sets[0]).html, html);
+  assert.equal(noteHtmlToText(JSON.parse(app.storage.sets[0]).html), 'Rich only');
+});
+
+test('Save waits for the rich editor snapshot before invoking the controller save', async () => {
+  const content = deferred();
+  const app = workspace({ contentReads: [content] });
+  await startRead(app);
+  typeDraft(app, { title: 'Flush title', body: 'stale editor state' });
+  action(app.render(), 'Save note').props.onPress();
+  assert.equal(app.saveCalls.length, 0, 'controller save must wait for getContent()');
+  content.resolve({ text: 'flushed body', html: '<div><b>flushed body</b></div>' });
+  await app.flushMicrotasks();
+  assert.equal(app.saveCalls.length, 1);
+  assert.deepEqual(app.saveCalls[0].draft, {
+    title: 'Flush title', text: 'flushed body', category: 'personal', html: '<div><b>flushed body</b></div>',
+  });
+});
+
+test('controller save remains pending until asynchronous device persistence resolves', async () => {
+  const save = deferred();
+  const app = workspace({ saveSaves: [save] });
+  await startRead(app);
+  typeDraft(app, { title: 'Pending save', body: 'Keep this draft' });
+  action(app.render(), 'Save note').props.onPress();
+  await app.flushMicrotasks();
+  assert.equal(app.saveCalls.length, 1);
+  assert.equal(app.controller.getSnapshot().status, 'saving');
+  assert.equal(app.controller.getSnapshot().state.notes.length, 0);
+  save.resolve();
+  await app.flushMicrotasks();
+  assert.equal(app.controller.getSnapshot().status, 'ready');
+  assert.equal(app.controller.getSnapshot().state.notes.length, 1);
+});
+
 test('blank-record cleanup is debounced and a newer draft replaces cleanup with a write', async () => {
   const app = workspace({ reads: [validRecord({ title: '  ', text: '  ' })] });
   await startRead(app);
@@ -521,6 +613,7 @@ test('blank Save after a malformed read and category choice preserves the unread
   action(app.render(), '+ New note').props.onPress();
   chooseDraftCategory(app);
   action(app.render(), 'Save note').props.onPress();
+  await app.flushMicrotasks();
   assert.ok(app.controller.getSnapshot().state.error, 'empty Save must fail actual draft validation');
   await app.advanceTimers(500);
   assert.equal(app.draftHydrated, false);
@@ -579,4 +672,37 @@ test('a card tap during checklist persistence does not open a blank editor or su
   await app.flushMicrotasks();
   assert.equal(app.controller.getSnapshot().state.draft.title, 'Recovered title');
   assert.equal(app.controller.getSnapshot().state.notice, 'Recovered unsaved draft from this device.');
+});
+
+test('a rich recovery record with inconsistent visible text is retained as unreadable, not silently replaced', async () => {
+  const raw = validRecord({ text: 'Keep the original text', html: '<b>Different content</b>' });
+  const app = workspace({ reads: [raw] });
+  app.storage.value = raw;
+  await startRead(app);
+  await app.flushMicrotasks();
+  assert.equal(app.draftHydrated, false);
+  assert.match(app.draftStorageError, readError);
+  assert.equal(app.controller.getSnapshot().state.draft.text, '');
+  await app.advanceTimers(500);
+  assert.equal(app.storage.value, raw);
+  assert.equal(app.storage.removes.length, 0);
+});
+
+test('discarding through navigation invalidates an outstanding snapshot instead of saving an old draft', async () => {
+  const content = deferred();
+  const app = workspace({ contentReads: [content] });
+  await startRead(app);
+  typeDraft(app, { title: 'Old draft', body: 'Do not save after discard' });
+  action(app.render(), 'Save note').props.onPress();
+  const navigation = elements(app.render()).find(element => typeof element.type === 'function' && element.props.label === 'All notes' && element.props.detail);
+  assert.ok(navigation);
+  navigation.props.onPress();
+  const prompt = app.alerts.find(alert => alert[0] === 'Discard unsaved changes?');
+  assert.ok(prompt);
+  prompt[2].find(button => button.text === 'Discard changes').onPress();
+  content.resolve({ text: 'Do not save after discard', html: '<b>Do not save after discard</b>' });
+  await app.flushMicrotasks();
+  assert.equal(app.saveCalls.length, 0);
+  assert.equal(app.controller.getSnapshot().state.notes.length, 0);
+  assert.equal(app.controller.getSnapshot().state.draft.text, '');
 });

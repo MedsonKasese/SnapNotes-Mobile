@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNotesController } from '../src/notesController.ts';
+import { MAX_NOTE_CHARACTERS } from '../src/notes.ts';
 
 const FIRST = '2026-10-19T09:00:00.000Z';
 const SECOND = '2026-10-23T12:00:00.000Z';
@@ -31,6 +32,29 @@ test('duplicate of archived note returns to active library and blank title has P
   assert.equal(persisted[0].title, 'Copy of Untitled note');
   assert.equal(persisted[0].archived, false);
   assert.equal(persisted[0].category, 'ideas');
+});
+
+test('duplicate of a note at the character limit is rejected before persistence when the copy title would overflow', async () => {
+  const longNote = { ...original, title: 'x'.repeat(MAX_NOTE_CHARACTERS - 4) };
+  let writes = 0;
+  const controller = createNotesController({ async load() { return [longNote]; }, async save() { writes++; } });
+  await controller.load();
+  await controller.duplicateNote(longNote.id, SECOND);
+  const state = controller.getSnapshot().state;
+  assert.equal(state.notes.length, 1);
+  assert.match(controller.getSnapshot().storageError, /too long to duplicate/);
+  assert.equal(writes, 0);
+});
+
+test('checklist text updates persist supplied HTML and preserve it for legacy calls', async () => {
+  const html = '<p>☑ formatted item</p>';
+  let persisted = [{ ...original, html }];
+  const controller = createNotesController({ async load() { return persisted; }, async save(notes) { persisted = notes; } });
+  await controller.load();
+  await controller.updateNoteText(original.id, '☑ formatted item', SECOND, '<p>☐ formatted item</p>');
+  assert.equal(persisted[0].html, '<p>☐ formatted item</p>');
+  await controller.updateNoteText(original.id, '☑ updated plain text', SECOND);
+  assert.equal(persisted[0].html, '<p>☐ formatted item</p>');
 });
 
 test('failed duplication does not alter saved notes; retry works and IDs remain unique', async () => {

@@ -32,9 +32,9 @@ test('checklist preview keeps native and accessible states in sync during writes
 
 test('toggling a checklist item persists directly without opening the editor', () => {
   assert.match(source, /function toggleChecklistItem/);
-  assert.match(source, /controller\.updateNoteText\(noteId, lines\.join\('\\n'\), new Date\(\)\.toISOString\(\)\)/);
+  assert.match(source, /controller\.updateNoteText\(noteId, lines\.join\('\\n'\), new Date\(\)\.toISOString\(\), html\)/);
   assert.doesNotMatch(source.slice(source.indexOf('function toggleChecklistItem'), source.indexOf('function saveNote')), /setView\('editor'\)/);
-  assert.match(controller, /async function updateNoteText\(id: string, text: string, now: string\)/);
+  assert.match(controller, /async function updateNoteText\(id: string, text: string, now: string, html\?: string\)/);
   assert.match(controller, /await storage\.save\(notes\)/);
   assert.match(controller, /Could not save this checklist change on this device/);
 });
@@ -44,10 +44,21 @@ test('checklist rows remove excess height and keep wrapped labels aligned', () =
   assert.match(source, /checklistRow: \{[^}]*minHeight: 28, paddingVertical: 2/);
   assert.match(source, /checklistRow: \{[^}]*alignItems: 'flex-start'/);
   assert.match(source, /checkboxGlyph: \{[^}]*includeFontPadding: false, flexShrink: 0/);
-  assert.match(source, /<ChecklistLabel text=\{checklist\[4\]\} checked=\{checked\}/);
+  assert.match(source, /<ChecklistLabel text=\{checklist\[4\]\} checked=\{checked\}>\s*<FormattedText line=\{formatted\} fallback=\{checklist\[4\]\} skipChecklistMarker \/>\s*<\/ChecklistLabel>/);
 });
 
 test('checklist parser uses whitespace regexes rather than literal backslashes', () => {
-  assert.match(source, /const match = \/\^\(\\s\*\)\(☐\|☑\)\(\\s\)\//);
-  assert.match(source, /const checklist = \/\^\(\\s\*\)\(☐\|☑\)\(\\s\)\(\.\*\)\$\//);
+  assert.match(source, /const match = \/\^\(\\s\*\)\(☐\|☑\)\(\\s\|\$\)\//);
+  assert.match(source, /const checklist = \/\^\(\\s\*\)\(☐\|☑\)\(\\s\|\$\)\(\.\*\)\$\//);
+});
+
+test('saved empty checkboxes remain interactive after trailing spaces are normalized', () => {
+  const expression = source.match(/const checklist = (\/[^\n]+\/)\.exec\(line\)/)?.[1];
+  assert.ok(expression);
+  for (const line of ['☐', '☑', '☐ ', '  ☑ ']) {
+    const match = runInNewContext(`(${expression}).exec(line)`, { line });
+    assert.ok(match, line);
+    assert.equal(match[4], '');
+  }
+  assert.equal(runInNewContext(`(${expression}).exec(line)`, { line: '☐not a checkbox' }), null);
 });
