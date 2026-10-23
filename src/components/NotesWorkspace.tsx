@@ -65,6 +65,7 @@ export function NotesWorkspace() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
@@ -291,7 +292,24 @@ export function NotesWorkspace() {
     });
   }
 
+  function showNoteActions(id: string) {
+    setActionsNoteId(id);
+  }
+
+  function closeNoteActions() {
+    setActionsNoteId(null);
+  }
+
+  function runNoteAction(action: () => void) {
+    closeNoteActions();
+    action();
+  }
+
   function handleBack() {
+    if (actionsNoteId !== null) {
+      closeNoteActions();
+      return true;
+    }
     if (drawerOpen) {
       setDrawerOpen(false);
       return true;
@@ -510,15 +528,15 @@ export function NotesWorkspace() {
             }
             renderItem={({ item }) => (
               <View style={styles.card}>
-                <View style={styles.noteCardTop}>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`} disabled={view === 'trash'} onPress={() => editNote(item.id)} style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
-                </View>
+                </Pressable>
                 {item.text !== '' && (
                   <View style={styles.notePreview}>
                     {item.text.split('\n').slice(0, 6).map((line, index) => {
                       const checklist = /^(\s*)(☐|☑)(\s)(.*)$/.exec(line);
-                      if (!checklist) return <Text key={index} style={styles.noteText}>{line || ' '}</Text>;
+                      if (!checklist) return <Pressable key={index} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`} disabled={view === 'trash'} onPress={() => editNote(item.id)}><Text style={styles.noteText}>{line || ' '}</Text></Pressable>;
                       const checked = checklist[2] === '☑';
                       return (
                         <Pressable key={index} accessibilityRole="checkbox"
@@ -540,65 +558,16 @@ export function NotesWorkspace() {
                     <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
                   </View>
                   <View style={styles.noteFooterActions}>
-                    {view === 'library' && (
+                    {view === 'library' && item.pinned && <FontAwesome name="thumb-tack" size={16} color="#b98500" accessible={false} />}
                     <Pressable
-                      disabled={saving}
                       accessibilityRole="button"
-                      accessibilityLabel={(item.pinned ? 'Unpin ' : 'Pin ') + (item.title || 'Untitled note')}
-                      accessibilityState={{ disabled: saving, selected: item.pinned }}
-                      onPress={() => { void controller.togglePin(item.id, new Date().toISOString()); }}
-                      style={({ pressed }) => [styles.pinButton, item.pinned && styles.pinButtonActive, pressed && styles.pressed]}
+                      accessibilityLabel={'Note actions for ' + (item.title || 'Untitled note')}
+                      accessibilityState={{ expanded: actionsNoteId === item.id }}
+                      onPress={() => showNoteActions(item.id)}
+                      style={({ pressed }) => [styles.noteMenuTrigger, pressed && styles.pressed]}
                     >
-                      <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#52634b'} accessible={false} />
+                      <FontAwesome name="ellipsis-h" size={21} color="#52634b" accessible={false} />
                     </Pressable>
-                    )}
-                    {view === 'library' && (
-                      <Pressable
-                        disabled={saving}
-                        accessibilityRole="button"
-                        accessibilityLabel={'Archive ' + (item.title || 'Untitled note')}
-                        accessibilityState={{ disabled: saving }}
-                        onPress={() => { void controller.setArchived(item.id, true, new Date().toISOString()); }}
-                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
-                      >
-                        <FontAwesome name="archive" size={18} color="#52634b" accessible={false} />
-                      </Pressable>
-                    )}
-                    {view === 'trash' && (
-                      <>
-                        <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Restore ' + (item.title || 'Untitled note')} onPress={() => { void controller.restoreFromTrash(item.id, new Date().toISOString()); }} style={styles.archiveButton}>
-                          <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
-                        </Pressable>
-                        <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Delete forever ' + (item.title || 'Untitled note')} onPress={() => confirmPermanentDelete(item.id, item.title)} style={styles.archiveButton}>
-                          <FontAwesome name="trash" size={18} color="#b3261e" accessible={false} />
-                        </Pressable>
-                      </>
-                    )}
-                    {view === 'archive' && (
-                      <Pressable
-                        disabled={saving}
-                        accessibilityRole="button"
-                        accessibilityLabel={'Restore ' + (item.title || 'Untitled note')}
-                        accessibilityState={{ disabled: saving }}
-                        onPress={() => { void controller.setArchived(item.id, false, new Date().toISOString()); }}
-                        style={({ pressed }) => [styles.archiveButton, pressed && styles.pressed]}
-                      >
-                        <FontAwesome name="undo" size={18} color="#3b7f16" accessible={false} />
-                      </Pressable>
-                    )}
-                    {view !== 'trash' && <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={'Move to Trash ' + (item.title || 'Untitled note')} onPress={() => confirmTrash(item.id, item.title)} style={styles.archiveButton}>
-                      <FontAwesome name="trash-o" size={18} color="#8a5146" accessible={false} />
-                    </Pressable>}
-                    {view !== 'trash' && <Pressable
-                      disabled={saving}
-                      accessibilityState={{ disabled: saving }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Edit ${item.title || 'Untitled note'}`}
-                      onPress={() => editNote(item.id)}
-                      style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.editButtonText}>Open note ›</Text>
-                    </Pressable>}
                   </View>
                 </View>
               </View>
@@ -606,6 +575,43 @@ export function NotesWorkspace() {
           />
         </View>
       )}
+
+      <Modal visible={actionsNoteId !== null} transparent animationType="fade" onRequestClose={closeNoteActions}>
+        <View style={styles.actionsModalLayer}>
+          <Pressable style={styles.actionsBackdrop} accessibilityRole="button" accessibilityLabel="Close note actions" onPress={closeNoteActions} />
+          <View style={styles.actionsSheet} accessibilityViewIsModal>
+            <Text accessibilityRole="header" style={styles.actionsSheetTitle}>Note actions</Text>
+            {(() => {
+              const selected = state.notes.find(note => note.id === actionsNoteId);
+              if (!selected) return null;
+              const title = selected.title || 'Untitled note';
+              const inTrash = selected.deletedAt !== null;
+              const inArchive = selected.archived && !inTrash;
+              const options: { label: string; icon: FontAwesomeName; destructive?: boolean; action: () => void }[] = inTrash
+                ? [
+                    { label: 'Restore note', icon: 'undo', action: () => { void controller.restoreFromTrash(selected.id, new Date().toISOString()); } },
+                    { label: 'Delete forever', icon: 'trash', destructive: true, action: () => confirmPermanentDelete(selected.id, title) },
+                  ]
+                : [
+                    { label: 'Open note', icon: 'file-text-o', action: () => editNote(selected.id) },
+                    ...(!inArchive ? [{ label: selected.pinned ? 'Unpin note' : 'Pin note', icon: 'thumb-tack' as FontAwesomeName, action: () => { void controller.togglePin(selected.id, new Date().toISOString()); } }] : []),
+                    { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: () => { void controller.setArchived(selected.id, !inArchive, new Date().toISOString()); } },
+                    { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: () => confirmTrash(selected.id, title) },
+                  ];
+              return options.map(option => (
+                <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + title}
+                  disabled={saving} accessibilityState={{ disabled: saving }}
+                  onPress={() => runNoteAction(option.action)}
+                  style={({ pressed }) => [styles.actionsSheetRow, pressed && styles.pressed]}>
+                  <FontAwesome name={option.icon} size={19} color={option.destructive ? '#b3261e' : '#52634b'} accessible={false} />
+                  <Text style={[styles.actionsSheetRowText, option.destructive && styles.actionsSheetDanger]}>{option.label}</Text>
+                </Pressable>
+              ));
+            })()}
+            <Pressable accessibilityRole="button" onPress={closeNoteActions} style={styles.actionsSheetCancel}><Text style={styles.actionsSheetCancelText}>Cancel</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={drawerOpen}
@@ -745,6 +751,16 @@ const styles = StyleSheet.create({
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
   noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
+  noteMenuTrigger: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  actionsModalLayer: { flex: 1, justifyContent: 'flex-end' },
+  actionsBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 28, 12, 0.45)' },
+  actionsSheet: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, backgroundColor: '#ffffff', borderTopLeftRadius: 22, borderTopRightRadius: 22, gap: 3 },
+  actionsSheetTitle: { fontSize: 18, fontWeight: '800', color: '#20351d', marginBottom: 12 },
+  actionsSheetRow: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 50, paddingHorizontal: 12, borderRadius: 10 },
+  actionsSheetRowText: { color: '#293d23', fontSize: 15, fontWeight: '600' },
+  actionsSheetDanger: { color: '#b3261e' },
+  actionsSheetCancel: { minHeight: 48, justifyContent: 'center', alignItems: 'center', marginTop: 12, backgroundColor: '#f0f5eb', borderRadius: 12 },
+  actionsSheetCancelText: { color: '#344b2d', fontWeight: '800' },
   pinButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
   archiveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
