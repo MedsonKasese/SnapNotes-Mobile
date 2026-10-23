@@ -15,7 +15,9 @@ test('navigation exposes only implemented destinations and explains upcoming mig
   assert.match(source, /label="New note"/);
   assert.match(source, /label="Archived" icon="archive"[\s\S]*?onPress={selectArchive}/);
   assert.match(source, /label="Trash" icon="trash"[\s\S]*?onPress={selectTrash}/);
-  assert.match(source, /Folders, settings, and account features/);
+  assert.match(source, /<Text style={styles\.drawerEyebrow}>FOLDERS<\/Text>/);
+  assert.match(source, /<ScrollView[^>]*contentContainerStyle={styles\.drawerNavigation}/);
+  assert.match(source, /Settings and account features will appear here as they are migrated and tested/);
   assert.doesNotMatch(source, /Folders, Trash, settings/);
   assert.doesNotMatch(source, /Folders, archive, trash/);
   assert.doesNotMatch(source, /Categories, folders/);

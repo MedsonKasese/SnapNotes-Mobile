@@ -17,6 +17,7 @@ export type Note = NoteDraft & {
   pinned: boolean;
   archived: boolean;
   deletedAt: string | null;
+  folderId?: string | null;
 };
 export type NotesState = {
   notes: Note[];

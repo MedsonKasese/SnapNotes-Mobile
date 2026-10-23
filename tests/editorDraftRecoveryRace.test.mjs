@@ -8,6 +8,7 @@ import * as notes from '../src/notes.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
+import * as folders from '../src/folders.ts';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -44,7 +45,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
   const slots = [];
   const effectSlots = [];
   const timers = new Map();
-  const storage = { value: null, reads: [...reads], getCalls: 0, sets: [], removes: [] };
+  const storage = { value: null, folderValue: null, reads: [...reads], getCalls: 0, sets: [], removes: [] };
   const listeners = new Set();
   const dispatchCalls = [];
   const editorCommands = [];
@@ -110,6 +111,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
   };
   const AsyncStorage = {
     getItem(key) {
+      if (key === folders.FOLDERS_KEY) return Promise.resolve(storage.folderValue);
       assert.equal(key, DRAFT_KEY);
       storage.getCalls += 1;
       const read = storage.reads.shift();
@@ -118,11 +120,13 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       return Promise.resolve(read ?? storage.value);
     },
     async setItem(key, value) {
+      if (key === folders.FOLDERS_KEY) { storage.folderValue = value; return; }
       assert.equal(key, DRAFT_KEY);
       storage.sets.push(value);
       storage.value = value;
     },
     async removeItem(key) {
+      if (key === folders.FOLDERS_KEY) { storage.folderValue = null; return; }
       assert.equal(key, DRAFT_KEY);
       storage.removes.push(key);
       storage.value = null;
@@ -182,6 +186,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '@react-native-async-storage/async-storage') return AsyncStorage;
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };
+      if (name === '../folders') return folders;
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };
       if (name === '../noteSearch') return { searchNotes };
       if (name === '../noteFormatting') return { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml,

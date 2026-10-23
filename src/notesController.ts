@@ -236,6 +236,38 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  async function moveNoteToFolder(id: string, folderId: string | null) {
+    if (snapshot.status !== 'ready') return;
+    const previous = snapshot.state;
+    const note = previous.notes.find(item => item.id === id && item.deletedAt === null);
+    if (!note) return;
+    if ((note.folderId ?? null) === folderId) return;
+    const notes = previous.notes.map(item => item.id === id ? { ...item, folderId } : item);
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      publish({ state: { ...previous, notes, error: null, notice: folderId ? 'Note moved to folder.' : 'Note removed from folder.' }, status: 'ready', storageError: null });
+    } catch {
+      publish({ state: previous, status: 'ready', storageError: 'Could not change folder. Your note is unchanged.' });
+    }
+  }
+
+  async function clearFolder(folderId: string): Promise<boolean> {
+    if (snapshot.status !== 'ready') return false;
+    const previous = snapshot.state;
+    const notes = previous.notes.map(note => note.folderId === folderId ? { ...note, folderId: null } : note);
+    if (notes.every((note, index) => note === previous.notes[index])) return true;
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      publish({ state: { ...previous, notes, error: null, notice: 'Notes safely removed from folder.' }, status: 'ready', storageError: null });
+      return true;
+    } catch {
+      publish({ state: previous, status: 'ready', storageError: 'Could not unfile notes; folder has not been deleted.' });
+      return false;
+    }
+  }
+
   async function emptyTrash() {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
@@ -278,6 +310,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, emptyTrash,
+    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }

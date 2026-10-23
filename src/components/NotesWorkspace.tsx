@@ -10,6 +10,7 @@ import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
+import { FOLDERS_KEY, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
@@ -19,8 +20,8 @@ import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
-type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
-type NoteAction = 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
+type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder';
+type NoteAction = 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
@@ -99,6 +100,17 @@ export function NotesWorkspace() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [foldersExpanded, setFoldersExpanded] = useState(false);
+  const [foldersReady, setFoldersReady] = useState(false);
+  const [foldersSaving, setFoldersSaving] = useState(false);
+  const foldersRef = useRef<Folder[]>([]);
+  const folderMutationInFlight = useRef(false);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename'; id?: string } | null>(null);
+  const [folderName, setFolderName] = useState('');
+  const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
   const [actionsViewport, setActionsViewport] = useState<MenuRect | null>(null);
@@ -149,7 +161,7 @@ export function NotesWorkspace() {
   const categoryNotes = activeNotes.filter(note => categoryFilter === 'all' || normalizeCategory(note.category) === categoryFilter);
   const archiveNotes = state.notes.filter(note => note.archived && note.deletedAt === null);
   const trashNotes = state.notes.filter(note => note.deletedAt !== null);
-  const sourceNotes = view === 'trash' ? trashNotes : view === 'archive' ? archiveNotes : categoryNotes;
+  const sourceNotes = view === 'trash' ? trashNotes : view === 'archive' ? archiveNotes : view === 'folder' ? activeNotes.filter(note => note.folderId === activeFolderId) : categoryNotes;
   const visibleNotes = sortNotesPinnedFirst(searchNotes(sourceNotes, searchQuery));
   const searching = searchQuery.trim().length > 0;
 
@@ -163,6 +175,7 @@ export function NotesWorkspace() {
       ]
     : [
         { label: 'Duplicate note', icon: 'clone', action: 'duplicate' },
+        { label: 'Move to folder', icon: 'folder-o', action: 'move-folder' },
         { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
         { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
       ];
@@ -295,6 +308,112 @@ export function NotesWorkspace() {
     });
   }
 
+  useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(FOLDERS_KEY).then(raw => {
+      const loaded = parseFolders(raw);
+      if (active) { foldersRef.current = loaded; setFolders(loaded); setFoldersReady(true); setFolderError(null); }
+    }).catch(() => {
+      if (active) { setFoldersReady(false); setFolderError('Folders could not be loaded. Existing folders have not been changed.'); }
+    });
+    return () => { active = false; };
+  }, []);
+
+  async function persistFolders(next: Folder[], failureMessage = 'Could not save folders. No folder changes were applied.'): Promise<boolean> {
+    if (!foldersReady) return false;
+    try {
+      await AsyncStorage.setItem(FOLDERS_KEY, JSON.stringify(next));
+      foldersRef.current = next;
+      setFolders(next);
+      setFolderError(null);
+      return true;
+    } catch {
+      setFolderError(failureMessage);
+      return false;
+    }
+  }
+
+  function selectFolder(id: string) {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      setActiveFolderId(id);
+      setDrawerOpen(false);
+      setView('folder');
+    });
+  }
+
+  function openFolderDialog(mode: 'create' | 'rename', folder?: Folder) {
+    if (!foldersReady || folderMutationInFlight.current) return;
+    setDrawerOpen(false);
+    setFolderName(folder?.name ?? '');
+    setFolderDialog({ mode, id: folder?.id });
+  }
+
+  async function submitFolder() {
+    if (!folderDialog || !foldersReady || folderMutationInFlight.current) return;
+    const current = foldersRef.current;
+    if (folderDialog.mode === 'rename' && !current.some(folder => folder.id === folderDialog.id)) return;
+    const name = normalizeFolderName(folderName);
+    const error = validateFolderName(current, name, folderDialog.id);
+    if (error) { Alert.alert('Folder name', error); return; }
+    const now = new Date().toISOString();
+    const next = folderDialog.mode === 'create'
+      ? [...current, { id: makeFolderId(current, now), name, icon: 'folder', color: '', createdAt: now, updatedAt: now }]
+      : current.map(folder => folder.id === folderDialog.id ? { ...folder, name, updatedAt: now } : folder);
+    // A ref closes the pre-render double-tap window; state also disables controls.
+    folderMutationInFlight.current = true;
+    setFoldersSaving(true);
+    try {
+      if (await persistFolders(next)) setFolderDialog(null);
+    } finally {
+      folderMutationInFlight.current = false;
+      setFoldersSaving(false);
+    }
+  }
+
+  function confirmDeleteFolder(folder: Folder) {
+    if (!foldersReady || folderMutationInFlight.current || controller.getSnapshot().status !== 'ready') return;
+    const count = state.notes.filter(note => note.folderId === folder.id).length;
+    Alert.alert('Delete folder?', `Delete "${folder.name}"? ${count} ${count === 1 ? 'note' : 'notes'} will remain in SnapNotes, without a folder.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete folder', style: 'destructive', onPress: () => {
+        void (async () => {
+          if (!foldersReady || folderMutationInFlight.current || controller.getSnapshot().status !== 'ready' ||
+            !foldersRef.current.some(item => item.id === folder.id)) return;
+          folderMutationInFlight.current = true;
+          setFoldersSaving(true);
+          try {
+            // Hold the lock across both writes so no move can refile a note in
+            // the gap after unfiling commits and before folder deletion commits.
+            const unfiled = await controller.clearFolder(folder.id);
+            if (!unfiled) return;
+            const ok = await persistFolders(foldersRef.current.filter(item => item.id !== folder.id),
+              'Could not delete the folder. The folder remains, but its notes are safely unfiled. Please try again.');
+            if (ok && activeFolderId === folder.id) { setActiveFolderId(null); setView('library'); }
+          } finally {
+            folderMutationInFlight.current = false;
+            setFoldersSaving(false);
+          }
+        })();
+      } },
+    ]);
+  }
+
+  function chooseFolder(noteId: string) {
+    if (folderMutationInFlight.current) return;
+    if (!foldersReady) { Alert.alert('Folders unavailable', folderError ?? 'Wait for folders to load.'); return; }
+    setFolderMoveNoteId(noteId);
+  }
+
+  function moveNoteToFolder(folderId: string | null) {
+    if (!foldersReady || folderMutationInFlight.current || controller.getSnapshot().status !== 'ready') return;
+    if (folderId !== null && !foldersRef.current.some(folder => folder.id === folderId)) return;
+    const id = folderMoveNoteId;
+    setFolderMoveNoteId(null);
+    if (id) void controller.moveNoteToFolder(id, folderId);
+  }
+
   function selectArchive() {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
@@ -420,6 +539,7 @@ export function NotesWorkspace() {
     if (!selected) return;
     const now = new Date().toISOString();
     switch (action) {
+      case 'move-folder': chooseFolder(id); break;
       case 'duplicate': void controller.duplicateNote(id, now); break;
       case 'archive': void controller.setArchived(id, true, now); break;
       case 'restore-archive': void controller.setArchived(id, false, now); break;
@@ -438,7 +558,7 @@ export function NotesWorkspace() {
       setDrawerOpen(false);
       return true;
     }
-    if (view === 'editor' || view === 'archive' || view === 'trash') {
+    if (view === 'editor' || view === 'archive' || view === 'trash' || view === 'folder') {
       openLibrary();
       return true;
     }
@@ -582,6 +702,9 @@ export function NotesWorkspace() {
         )}
       </View>
 
+      {folderError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{folderError}</Text>}
+      {foldersSaving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving folders on this device…</Text>}
+
       {view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
@@ -660,11 +783,11 @@ export function NotesWorkspace() {
           <View style={styles.libraryHeading}>
             <View>
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
-              <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'trash' ? 'Trash' : view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
+              <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'trash' ? 'Trash' : view === 'archive' ? 'Archived' : view === 'folder' ? folders.find(folder => folder.id === activeFolderId)?.name ?? 'Folder' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
             {view === 'trash' ? <Action label="Empty Trash" destructive onPress={confirmEmptyTrash} disabled={saving || trashNotes.length === 0} /> : <Action label="+ New note" onPress={openNewNote} />}
           </View>
-          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore within 15 days or they are permanently deleted.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
+          <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore within 15 days or they are permanently deleted.` : view === 'folder' ? `${sourceNotes.length} notes in this folder.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
           {view === 'library' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
             {(['all', ...NOTE_CATEGORIES] as const).map(category => <Pressable key={category} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === category }} onPress={() => setCategoryFilter(category)} style={[styles.categoryChip, categoryFilter === category && styles.categoryChipActive]}><Text style={[styles.categoryChipText, categoryFilter === category && styles.categoryChipTextActive]}>{category === 'all' ? 'All' : categoryLabel(category)}</Text></Pressable>)}
           </ScrollView>}
@@ -781,6 +904,22 @@ export function NotesWorkspace() {
         </SafeAreaProvider>
       </Modal>
 
+      <Modal visible={folderDialog !== null} transparent animationType="fade" onRequestClose={() => { if (!folderMutationInFlight.current) setFolderDialog(null); }}>
+        <KeyboardAvoidingView style={styles.folderModalLayer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.folderModalCard} accessibilityViewIsModal>
+          <Text accessibilityRole="header" style={styles.label}>{folderDialog?.mode === 'rename' ? 'Rename folder' : 'New folder'}</Text>
+          <TextInput accessibilityLabel="Folder name" autoFocus editable={!foldersSaving} maxLength={32} value={folderName} onChangeText={setFolderName} placeholder="Folder name" style={styles.input} />
+          {folderError !== null && <Text accessibilityRole="alert" style={styles.error}>{folderError}</Text>}
+          <View style={styles.folderControls}><Action label="Cancel" secondary disabled={foldersSaving} onPress={() => setFolderDialog(null)} /><Action label="Save folder" disabled={foldersSaving || !foldersReady} onPress={() => { void submitFolder(); }} /></View>
+        </View></KeyboardAvoidingView>
+      </Modal>
+      <Modal visible={folderMoveNoteId !== null} transparent animationType="fade" onRequestClose={() => setFolderMoveNoteId(null)}>
+        <View style={styles.folderModalLayer}><ScrollView style={styles.folderModalCard} keyboardShouldPersistTaps="handled" accessibilityViewIsModal>
+          <Text accessibilityRole="header" style={styles.label}>Move note to folder</Text>
+          {[{ id: null, name: 'No folder' }, ...folders].map(folder => <Pressable key={folder.id ?? 'none'} accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => moveNoteToFolder(folder.id)} style={styles.folderControl}><Text style={styles.folderControlText}>{folder.name}</Text></Pressable>)}
+          <Action label="Cancel" secondary onPress={() => setFolderMoveNoteId(null)} />
+        </ScrollView></View>
+      </Modal>
+
       <Modal
         visible={drawerOpen}
         transparent
@@ -808,16 +947,39 @@ export function NotesWorkspace() {
                 <Text style={styles.closeGlyph}>×</Text>
               </Pressable>
             </View>
-            <View style={styles.drawerNavigation}>
+            <ScrollView style={styles.flex} contentContainerStyle={styles.drawerNavigation} keyboardShouldPersistTaps="handled">
               <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <View style={styles.folderSectionHeading}>
+                <Text style={styles.drawerEyebrow}>FOLDERS</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Create new folder"
+                  disabled={!foldersReady || foldersSaving || folders.length >= MAX_FOLDERS}
+                  accessibilityState={{ disabled: !foldersReady || foldersSaving || folders.length >= MAX_FOLDERS }}
+                  onPress={() => openFolderDialog('create')}
+                  style={({ pressed }) => [styles.folderAddButton, (pressed || !foldersReady || foldersSaving || folders.length >= MAX_FOLDERS) && styles.pressed]}>
+                  <Text style={styles.folderAddText}>+ New Folder</Text>
+                </Pressable>
+              </View>
+              {(foldersExpanded ? folders : folders.slice(0, 3)).map(folder =>
+                <MenuRow key={folder.id} label={folder.name} icon="folder-o"
+                  detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`}
+                  active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
+              {folders.length > 3 && <Pressable accessibilityRole="button"
+                accessibilityLabel={foldersExpanded ? 'Show fewer folders' : `View all folders, ${folders.length}`}
+                accessibilityState={{ expanded: foldersExpanded }}
+                onPress={() => setFoldersExpanded(value => !value)}
+                style={({ pressed }) => [styles.folderExpandButton, pressed && styles.pressed]}>
+                <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
+                <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
+              </Pressable>}
+              {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
                <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
-            </View>
+            </ScrollView>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
-              <Text style={styles.drawerNoticeText}>Folders, settings, and account features will appear here as they are migrated and tested.</Text>
+              <Text style={styles.drawerNoticeText}>Settings and account features will appear here as they are migrated and tested.</Text>
             </View>
             <View style={styles.drawerFooter}>
               <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
@@ -936,6 +1098,12 @@ const styles = StyleSheet.create({
   noteAccent: { width: 4, alignSelf: 'stretch', minHeight: 22, borderRadius: 4, backgroundColor: '#48a111' },
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
+  folderModalLayer: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(0,0,0,0.45)' },
+  folderModalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: '75%', gap: 12 },
+  folderControl: { paddingVertical: 10, paddingHorizontal: 12, minHeight: 40 },
+  folderControls: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  folderControlText: { color: '#3b7f16', fontWeight: '700' },
+  folderDanger: { color: '#b3261e', fontWeight: '700' },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
   noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
   noteMenuTrigger: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
@@ -967,6 +1135,11 @@ const styles = StyleSheet.create({
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
   drawerNavigation: { paddingTop: 15, gap: 7 },
+  folderSectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 12, paddingTop: 10 },
+  folderAddButton: { minHeight: 40, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#eff7e9' },
+  folderAddText: { color: '#3b7f16', fontSize: 12, fontWeight: '800' },
+  folderExpandButton: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 15 },
+  folderExpandText: { color: '#3b7f16', fontSize: 13, fontWeight: '700' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingHorizontal: 13, paddingVertical: 8, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
   menuRowActive: { backgroundColor: '#eff7e9', borderColor: '#e0efd5' },
 
