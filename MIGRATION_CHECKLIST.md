@@ -162,6 +162,8 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 13. Drafts and edit history
 
+- [ ] Multi-draft library foundation (PR #22 adds a separate validated draft model, PWA-style upsert/remove helpers and regression tests; UI, persistence wiring, and Android verification still pending).
+
 - [ ] Audit PWA draft/autosave behaviour and decide when a note becomes a draft.
 - [ ] Preserve unfinished work after navigation or unexpected app closure. (Testing required: PR #10 adds debounced device-only editor-draft recovery; automated checks pass locally, but Android restart/error-path verification is still required.)
 - [ ] Provide a Drafts view if supported by the PWA.
