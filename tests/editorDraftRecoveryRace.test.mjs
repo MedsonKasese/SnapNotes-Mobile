@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as notes from '../src/notes.ts';
 import { searchNotes } from '../src/noteSearch.ts';
+import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -150,6 +151,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [] } = {}) 
         Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
+      if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
+      if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === 'react/jsx-runtime') return require(name);
       // Native font loading is outside this deterministic recovery harness.
       if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };

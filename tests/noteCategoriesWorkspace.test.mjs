@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as notes from '../src/notes.ts';
 import { searchNotes } from '../src/noteSearch.ts';
+import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -25,6 +26,8 @@ function workspace(initialNotes = savedNotes) {
   let state = { ...notes.initialNotesState(), notes: initialNotes };
   let status = 'ready';
   const slots = [];
+  const refs = [];
+  let refCursor = 0;
   const alerts = [];
   const events = [];
   const archiveCalls = [];
@@ -54,7 +57,11 @@ function workspace(initialNotes = savedNotes) {
             slots[index] = next;
           }];
         },
-        useRef: value => ({ current: value }),
+        useRef(value) {
+          const index = refCursor++;
+          if (!(index in refs)) refs[index] = { current: value };
+          return refs[index];
+        },
         useCallback: callback => callback,
         useEffect() {},
         useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
@@ -65,6 +72,8 @@ function workspace(initialNotes = savedNotes) {
         Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
+      if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
+      if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === 'react/jsx-runtime') return require(name);
       // Keep the icon element/props inspectable without loading native fonts.
       if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };
@@ -78,7 +87,7 @@ function workspace(initialNotes = savedNotes) {
     },
   });
   return {
-    render() { cursor = 0; return exports.NotesWorkspace(); },
+    render() { cursor = 0; refCursor = 0; return exports.NotesWorkspace(); },
     controller, alerts, archiveCalls, trashCalls, pinCalls, events,
     setStatus(next) { status = next; },
   };
@@ -87,6 +96,7 @@ function workspace(initialNotes = savedNotes) {
 function elements(tree) {
   if (Array.isArray(tree)) return tree.flatMap(elements);
   if (!tree || typeof tree !== 'object' || !tree.props) return [];
+  if (typeof tree.type === 'function' && tree.type.name === 'NoteActionsMenuContent') return [tree, ...elements(tree.type(tree.props))];
   return [tree, ...elements(tree.props.children)];
 }
 function find(tree, predicate) {
@@ -101,12 +111,22 @@ const action = (tree, label) => find(tree, element => element.props.label === la
 const actionsModal = tree => find(tree, element => element.type === 'Modal' && element.props.transparent === true);
 const sheetActions = (tree, title) => elements(actionsModal(tree)).filter(element =>
   element.type === 'Pressable' && element.props.accessibilityLabel?.endsWith(`: ${title}`));
-function openNoteActions(app, item) {
+function openNoteActions(app, item, {
+  triggerRect = [310, 530, 40, 40], viewportRect = [0, 30, 380, 740], menuHeight = 146,
+} = {}) {
   const card = list(app.render()).props.renderItem({ item });
   const openCard = find(card, element => element.props.accessibilityLabel === `Open ${item.title}`);
   assert.equal(openCard.props.accessibilityRole, 'button');
   assert.equal(find(card, element => element.props.accessibilityLabel === `Note actions for ${item.title}`).props.accessibilityRole, 'button');
-  find(card, element => element.props.accessibilityLabel === `Note actions for ${item.title}`).props.onPress();
+  const trigger = find(card, element => element.props.accessibilityLabel === `Note actions for ${item.title}`);
+  trigger.props.ref({ measureInWindow: callback => callback(...triggerRect) });
+  trigger.props.onPress();
+  const modal = actionsModal(app.render());
+  const layer = find(modal, element => element.props.testID === 'note-actions-layer');
+  layer.props.ref.current = { measureInWindow: callback => callback(...viewportRect) };
+  modal.props.onShow();
+  const menu = find(app.render(), element => element.props.testID === 'note-actions-menu');
+  menu.props.onLayout({ nativeEvent: { layout: { height: menuHeight } } });
   return { card, sheet: app.render() };
 }
 
@@ -180,7 +200,7 @@ test('drawer icons retain their names and remain decorative within labelled butt
   }
 });
 
-test('library, archive, and trash expose exactly their available note actions in the sheet', () => {
+test('library, archive, and trash expose exactly their available note actions in the popup', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, expected] of [
     ['library', savedNotes[0], ['Open note: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
@@ -199,12 +219,12 @@ test('library, archive, and trash expose exactly their available note actions in
   }
 });
 
-test('note actions sheet can be dismissed by Cancel, backdrop, or native request-close', () => {
-  for (const dismiss of ['cancel', 'backdrop', 'request-close']) {
+test('note actions popup can be dismissed by backdrop, native request-close, or accessibility escape', () => {
+  for (const dismiss of ['backdrop', 'request-close', 'accessibility-escape']) {
     const app = workspace();
     const { sheet } = openNoteActions(app, savedNotes[0]);
     const modal = actionsModal(sheet);
-    if (dismiss === 'cancel') find(modal, element => element.type === 'Pressable' && text(element) === 'Cancel').props.onPress();
+    if (dismiss === 'accessibility-escape') find(modal, element => element.props.testID === 'note-actions-menu').props.onAccessibilityEscape();
     if (dismiss === 'backdrop') find(modal, element => element.props.accessibilityLabel === 'Close note actions').props.onPress();
     if (dismiss === 'request-close') modal.props.onRequestClose();
     assert.equal(actionsModal(app.render()).props.visible, false, `${dismiss} should close the note actions sheet`);
@@ -493,4 +513,134 @@ test('the standalone pin control is disabled and announced as disabled while sav
   assert.equal(pin.props.disabled, true);
   assert.equal(pin.props.accessibilityState.disabled, true);
   assert.deepEqual(app.pinCalls, []);
+});
+
+const popup = tree => find(tree, element => element.props.testID === 'note-actions-menu');
+const popupLayer = tree => find(tree, element => element.props.testID === 'note-actions-layer');
+const flatStyle = style => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style]));
+
+function triggerFor(app, item, measureInWindow) {
+  const card = list(app.render()).props.renderItem({ item });
+  const trigger = find(card, element => element.props.accessibilityLabel === `Note actions for ${item.title}`);
+  trigger.props.ref({ measureInWindow });
+  return trigger;
+}
+
+test('the contextual popup is compact, text-only, rounded on all corners, and contains no new actions', () => {
+  const app = workspace();
+  const { sheet } = openNoteActions(app, savedNotes[0]);
+  const menu = popup(sheet);
+  const style = flatStyle(menu.props.style);
+  assert.equal(style.width, 216);
+  assert.equal(style.position, 'absolute');
+  assert.equal(style.borderRadius, 14);
+  assert.equal(menu.props.pointerEvents, 'auto');
+  assert.equal(menu.props.accessibilityViewIsModal, true);
+  assert.equal(menu.props.accessibilityElementsHidden, false);
+  assert.equal(elements(menu).some(element => element.type === 'FontAwesome'), false);
+  assert.equal(elements(menu).some(element => element.props.accessibilityRole === 'header'), false);
+  assert.doesNotMatch(text(menu), /Cancel|Duplicate|Share|history|private|folder|Pin|Unpin/);
+  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Open note', 'Archive note', 'Move to Trash']);
+  const danger = find(menu, element => element.type === 'Text' && text(element) === 'Move to Trash');
+  assert.equal(flatStyle(danger.props.style).color, '#b3261e');
+  for (const button of sheetActions(sheet, savedNotes[0].title)) {
+    assert.ok(flatStyle(button.props.style({ pressed: false })).minHeight >= 44);
+  }
+});
+
+test('the popup uses the tapped trigger and the measured safe viewport origin', () => {
+  const app = workspace();
+  const triggerRect = [324, 680, 40, 40];
+  const viewportRect = [8, 48, 370, 720];
+  const { sheet } = openNoteActions(app, savedNotes[0], { triggerRect, viewportRect, menuHeight: 160 });
+  const style = flatStyle(popup(sheet).props.style);
+  const rect = ([x, y, width, height]) => ({ x, y, width, height });
+  const expected = getNoteActionsMenuLayout(rect(triggerRect), rect(viewportRect), 160);
+  for (const key of ['left', 'top', 'width', 'maxHeight']) assert.equal(style[key], expected[key]);
+  assert.ok(style.top < triggerRect[1] - viewportRect[1]);
+});
+
+test('the popup stays hidden and noninteractive until native anchor and panel measurements are ready', () => {
+  const app = workspace();
+  let finishTrigger;
+  const trigger = triggerFor(app, savedNotes[0], callback => { finishTrigger = callback; });
+  trigger.props.onPress();
+  let tree = app.render();
+  popupLayer(tree).props.ref.current = { measureInWindow: callback => callback(0, 30, 380, 740) };
+  actionsModal(tree).props.onShow();
+  popup(tree).props.onLayout({ nativeEvent: { layout: { height: 150 } } });
+  tree = app.render();
+  assert.equal(popup(tree).props.pointerEvents, 'none');
+  assert.equal(popup(tree).props.accessibilityElementsHidden, true);
+  assert.equal(flatStyle(popup(tree).props.style).opacity, 0);
+  finishTrigger(310, 530, 40, 40);
+  tree = app.render();
+  assert.equal(popup(tree).props.pointerEvents, 'auto');
+  assert.equal(popup(tree).props.accessibilityElementsHidden, false);
+  assert.notEqual(flatStyle(popup(tree).props.style).opacity, 0);
+});
+
+test('late native measurements cannot revive a dismissed popup at either async stage', () => {
+  for (const stage of ['layer', 'trigger']) {
+    const app = workspace();
+    let finishLayer;
+    let finishTrigger;
+    let triggerCalls = 0;
+    const trigger = triggerFor(app, savedNotes[0], callback => { triggerCalls++; finishTrigger = callback; });
+    trigger.props.onPress();
+    const tree = app.render();
+    popupLayer(tree).props.ref.current = { measureInWindow: callback => { finishLayer = callback; } };
+    actionsModal(tree).props.onShow();
+    if (stage === 'trigger') finishLayer(0, 30, 380, 740);
+    find(tree, element => element.props.accessibilityLabel === 'Close note actions').props.onPress();
+    if (stage === 'layer') finishLayer(0, 30, 380, 740);
+    else finishTrigger(310, 530, 40, 40);
+    assert.equal(actionsModal(app.render()).props.visible, false);
+    assert.equal(popup(app.render()).props.pointerEvents, 'none');
+    if (stage === 'layer') assert.equal(triggerCalls, 0);
+  }
+});
+
+test('old measurements and an old onShow cannot move the menu to a previous note', () => {
+  const app = workspace();
+  const pendingFirst = [];
+  const pendingSecond = [];
+  const first = triggerFor(app, savedNotes[0], callback => pendingFirst.push(callback));
+  first.props.onPress();
+  let tree = app.render();
+  popupLayer(tree).props.ref.current = { measureInWindow: callback => callback(0, 30, 380, 740) };
+  const oldOnShow = actionsModal(tree).props.onShow;
+  oldOnShow();
+  const second = triggerFor(app, savedNotes[1], callback => pendingSecond.push(callback));
+  second.props.onPress();
+  const secondCalls = pendingSecond.length;
+  oldOnShow();
+  assert.equal(pendingSecond.length, secondCalls);
+  pendingSecond.at(-1)(290, 300, 40, 40);
+  popup(app.render()).props.onLayout({ nativeEvent: { layout: { height: 150 } } });
+  for (const finish of pendingFirst) finish(20, 700, 40, 40);
+  tree = app.render();
+  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Open note', 'Archive note', 'Move to Trash']);
+  const expected = getNoteActionsMenuLayout({ x: 290, y: 300, width: 40, height: 40 }, { x: 0, y: 30, width: 380, height: 740 }, 150);
+  const style = flatStyle(popup(tree).props.style);
+  assert.equal(style.left, expected.left);
+  assert.equal(style.top, expected.top);
+  assert.equal(app.controller.getSnapshot().state.editingId, null);
+});
+
+test('viewport changes remeasure the trigger and keep tall menu content inside the new frame', () => {
+  const app = workspace();
+  openNoteActions(app, savedNotes[0]);
+  triggerFor(app, savedNotes[0], callback => callback(260, 100, 40, 40));
+  const layer = popupLayer(app.render());
+  layer.props.ref.current = { measureInWindow: callback => callback(0, 24, 320, 230) };
+  layer.props.onLayout();
+  popup(app.render()).props.onLayout({ nativeEvent: { layout: { height: 340 } } });
+  const menu = popup(app.render());
+  const style = flatStyle(menu.props.style);
+  assert.equal(style.maxHeight, 206);
+  assert.ok(style.left >= 12 && style.left + style.width <= 308);
+  assert.ok(style.top >= 12 && style.top + Math.min(340, style.maxHeight) <= 218);
+  assert.equal(menu.props.pointerEvents, 'auto');
+  assert.equal(find(menu, element => element.type === 'ScrollView').props.keyboardShouldPersistTaps, 'handled');
 });

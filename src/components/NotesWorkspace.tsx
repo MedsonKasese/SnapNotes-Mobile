@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ComponentRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import {
   Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
+import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
 type NoteAction = 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
+type NoteActionOption = { label: string; destructive?: boolean; action: NoteAction };
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -59,6 +62,30 @@ function MenuRow({ label, detail, icon, onPress, active = false }: {
   );
 }
 
+function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAction }: {
+  title: string; canOpen: boolean; saving: boolean; options: NoteActionOption[];
+  onOpen: () => void; onAction: (action: NoteAction) => void;
+}) {
+  return (
+    <ScrollView style={styles.actionsMenuScroll} keyboardShouldPersistTaps="handled">
+      {canOpen && (
+        <Pressable accessibilityRole="button" accessibilityLabel={'Open note: ' + title}
+          disabled={saving} accessibilityState={{ disabled: saving }} onPress={onOpen}
+          style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+          <Text style={styles.actionsMenuText}>Open note</Text>
+        </Pressable>
+      )}
+      {options.map(option => (
+        <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + title}
+          disabled={saving} accessibilityState={{ disabled: saving }} onPress={() => onAction(option.action)}
+          style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+          <Text style={[styles.actionsMenuText, option.destructive && styles.actionsMenuDanger]}>{option.label}</Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+
 export function NotesWorkspace() {
   const [controller] = useState(() => createNotesController(deviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,8 +94,14 @@ export function NotesWorkspace() {
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
+  const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
+  const [actionsViewport, setActionsViewport] = useState<MenuRect | null>(null);
+  const [actionsMenuHeight, setActionsMenuHeight] = useState(0);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
+  const actionTriggers = useRef(new Map<string, ComponentRef<typeof View>>());
+  const actionsLayer = useRef<ComponentRef<typeof View> | null>(null);
+  const actionsRequest = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -103,15 +136,21 @@ export function NotesWorkspace() {
   const selected = state.notes.find(note => note.id === actionsNoteId);
   const inTrash = selected !== undefined && selected.deletedAt !== null;
   const inArchive = selected?.archived && !inTrash;
-  const options: { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction }[] = !selected ? [] : inTrash
+  const options: NoteActionOption[] = !selected ? [] : inTrash
     ? [
-        { label: 'Restore note', icon: 'undo', action: 'restore-trash' },
-        { label: 'Delete forever', icon: 'trash', destructive: true, action: 'delete' },
+        { label: 'Restore note', action: 'restore-trash' },
+        { label: 'Delete forever', destructive: true, action: 'delete' },
       ]
     : [
-        { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
-        { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
+        { label: inArchive ? 'Restore from archive' : 'Archive note', action: inArchive ? 'restore-archive' : 'archive' },
+        { label: 'Move to Trash', destructive: true, action: 'trash' },
       ];
+
+  const actionsMenuLayout = actionsAnchor && actionsViewport
+    ? getNoteActionsMenuLayout(actionsAnchor, actionsViewport, actionsMenuHeight)
+    : null;
+  const actionsMenuReady = actionsMenuLayout !== null && actionsMenuLayout.width > 0 &&
+    actionsMenuLayout.maxHeight > 0 && actionsMenuHeight > 0;
 
   const restoreEditorDraft = useCallback(async () => {
     if (controller.getSnapshot().status !== 'ready') return;
@@ -307,12 +346,43 @@ export function NotesWorkspace() {
     });
   }
 
+  function measureActionsMenu(id: string | null) {
+    if (id === null || actionsRequest.current.id !== id) return;
+    const trigger = actionTriggers.current.get(id);
+    const layer = actionsLayer.current;
+    if (!trigger || !layer) return;
+    const revision = ++actionsRequest.current.revision;
+    // Both rectangles use native window coordinates. The measured safe-area
+    // layer origin is subtracted by the placement helper, not guessed from bars.
+    layer.measureInWindow((x, y, width, height) => {
+      if (revision !== actionsRequest.current.revision || width <= 0 || height <= 0 ||
+        ![x, y, width, height].every(Number.isFinite)) return;
+      trigger.measureInWindow((anchorX, anchorY, anchorWidth, anchorHeight) => {
+        if (revision !== actionsRequest.current.revision || anchorWidth <= 0 || anchorHeight <= 0 ||
+          ![anchorX, anchorY, anchorWidth, anchorHeight].every(Number.isFinite)) return;
+        setActionsViewport({ x, y, width, height });
+        setActionsAnchor({ x: anchorX, y: anchorY, width: anchorWidth, height: anchorHeight });
+      });
+    });
+  }
+
   function showNoteActions(id: string) {
+    actionsRequest.current = { id, revision: actionsRequest.current.revision + 1 };
+    setActionsAnchor(null);
+    setActionsViewport(null);
+    setActionsMenuHeight(0);
+    Keyboard.dismiss();
     setActionsNoteId(id);
+    measureActionsMenu(id);
   }
 
   function closeNoteActions() {
+    // Late native measurements must never move or revive a dismissed menu.
+    actionsRequest.current = { id: null, revision: actionsRequest.current.revision + 1 };
     setActionsNoteId(null);
+    setActionsAnchor(null);
+    setActionsViewport(null);
+    setActionsMenuHeight(0);
   }
 
   function handleNoteAction(id: string, action: NoteAction) {
@@ -554,7 +624,7 @@ export function NotesWorkspace() {
             }
             renderItem={({ item }) => (
               // Keep nested checkboxes/menu independently reachable by screen readers.
-              // The actions sheet provides their explicit Open note control.
+              // The contextual menu provides their explicit Open note control.
               <Pressable style={styles.card} accessible={false} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
                 <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
@@ -597,6 +667,10 @@ export function NotesWorkspace() {
                       <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#8c9988'} accessible={false} />
                     </Pressable>}
                     <Pressable
+                      ref={node => {
+                        if (node) actionTriggers.current.set(item.id, node);
+                        else actionTriggers.current.delete(item.id);
+                      }}
                       accessibilityRole="button"
                       accessibilityLabel={'Note actions for ' + (item.title || 'Untitled note')}
                       accessibilityState={{ expanded: actionsNoteId === item.id }}
@@ -613,36 +687,31 @@ export function NotesWorkspace() {
         </View>
       )}
 
-      <Modal visible={actionsNoteId !== null} transparent animationType="fade" onRequestClose={closeNoteActions}>
-        <View style={styles.actionsModalLayer}>
-          <Pressable style={styles.actionsBackdrop} accessibilityRole="button" accessibilityLabel="Close note actions" onPress={closeNoteActions} />
-          <View style={styles.actionsSheet} accessibilityViewIsModal>
-            <Text accessibilityRole="header" style={styles.actionsSheetTitle}>Note actions</Text>
-            {selected && selected.deletedAt === null && (
-              <Pressable accessibilityRole="button" accessibilityLabel={'Open note: ' + (selected.title || 'Untitled note')}
-                disabled={saving} accessibilityState={{ disabled: saving }}
-                onPress={() => {
-                  if (controller.getSnapshot().status !== 'ready') return;
-                  closeNoteActions();
-                  editNote(selected.id);
-                }}
-                style={({ pressed }) => [styles.actionsSheetRow, pressed && styles.pressed]}>
-                <FontAwesome name="file-text-o" size={19} color="#52634b" accessible={false} />
-                <Text style={styles.actionsSheetRowText}>Open note</Text>
-              </Pressable>
-            )}
-            {selected && options.map(option => (
-              <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + (selected.title || 'Untitled note')}
-                disabled={saving} accessibilityState={{ disabled: saving }}
-                onPress={() => handleNoteAction(selected.id, option.action)}
-                style={({ pressed }) => [styles.actionsSheetRow, pressed && styles.pressed]}>
-                <FontAwesome name={option.icon} size={19} color={option.destructive ? '#b3261e' : '#52634b'} accessible={false} />
-                <Text style={[styles.actionsSheetRowText, option.destructive && styles.actionsSheetDanger]}>{option.label}</Text>
-              </Pressable>
-            ))}
-            <Pressable accessibilityRole="button" onPress={closeNoteActions} style={styles.actionsSheetCancel}><Text style={styles.actionsSheetCancelText}>Cancel</Text></Pressable>
-          </View>
-        </View>
+      <Modal visible={actionsNoteId !== null} transparent animationType="fade"
+        onShow={() => measureActionsMenu(actionsNoteId)} onRequestClose={closeNoteActions}>
+        <SafeAreaProvider>
+          <SafeAreaView style={styles.flex}>
+            <View ref={actionsLayer} style={styles.actionsModalLayer} testID="note-actions-layer"
+              onLayout={() => measureActionsMenu(actionsNoteId)}>
+              <Pressable style={styles.actionsBackdrop} accessibilityRole="button" accessibilityLabel="Close note actions" onPress={closeNoteActions} />
+              <View testID="note-actions-menu" accessibilityLabel="Note actions" accessibilityViewIsModal
+                onAccessibilityEscape={closeNoteActions}
+                accessibilityElementsHidden={!actionsMenuReady} importantForAccessibility={actionsMenuReady ? 'auto' : 'no-hide-descendants'}
+                pointerEvents={actionsMenuReady ? 'auto' : 'none'}
+                onLayout={event => setActionsMenuHeight(event.nativeEvent.layout.height)}
+                style={[styles.actionsMenu, actionsMenuLayout, !actionsMenuReady && styles.actionsMenuMeasuring]}>
+                {selected && <NoteActionsMenuContent title={selected.title || 'Untitled note'} canOpen={selected.deletedAt === null}
+                  saving={saving} options={options}
+                  onOpen={() => {
+                    if (controller.getSnapshot().status !== 'ready') return;
+                    closeNoteActions();
+                    editNote(selected.id);
+                  }}
+                  onAction={action => handleNoteAction(selected.id, action)} />}
+              </View>
+            </View>
+          </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
 
       <Modal
@@ -784,15 +853,15 @@ const styles = StyleSheet.create({
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
   noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
   noteMenuTrigger: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
-  actionsModalLayer: { flex: 1, justifyContent: 'flex-end' },
-  actionsBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.45)' },
-  actionsSheet: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, backgroundColor: '#ffffff', borderTopLeftRadius: 22, borderTopRightRadius: 22, gap: 3 },
-  actionsSheetTitle: { fontSize: 18, fontWeight: '800', color: '#20351d', marginBottom: 12 },
-  actionsSheetRow: { flexDirection: 'row', alignItems: 'center', gap: 15, minHeight: 50, paddingHorizontal: 12, borderRadius: 10 },
-  actionsSheetRowText: { color: '#293d23', fontSize: 15, fontWeight: '600' },
-  actionsSheetDanger: { color: '#b3261e' },
-  actionsSheetCancel: { minHeight: 48, justifyContent: 'center', alignItems: 'center', marginTop: 12, backgroundColor: '#f0f5eb', borderRadius: 12 },
-  actionsSheetCancelText: { color: '#344b2d', fontWeight: '800' },
+  actionsModalLayer: { flex: 1 },
+  actionsBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.08)' },
+  actionsMenu: { position: 'absolute', width: 216, maxWidth: '100%', paddingVertical: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#dce4d7', borderRadius: 14, shadowColor: '#172712', shadowOpacity: 0.16, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  actionsMenuMeasuring: { opacity: 0 },
+  actionsMenuScroll: { flexGrow: 0, flexShrink: 1 },
+  actionsMenuRow: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  actionsMenuRowPressed: { backgroundColor: '#eff4eb' },
+  actionsMenuText: { color: '#293d23', fontSize: 15, fontWeight: '600' },
+  actionsMenuDanger: { color: '#b3261e' },
   pinButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
   archiveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
