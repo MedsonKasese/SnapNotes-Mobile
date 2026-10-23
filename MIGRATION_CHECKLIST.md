@@ -162,7 +162,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 13. Drafts and edit history
 
-- [ ] Multi-draft library UI and local persistence (PR #23 adds Save to Drafts, drawer Drafts count/list, reopen and confirmed deletion; Android verification pending). Drafts are device-only and are not edit history. Existing recovery draft is retained.
+- [ ] Multi-draft library UI and local persistence (PR #23 adds Save to Drafts, drawer Drafts count/list, reopen and confirmed deletion; reviewed save locking, recovery identity, visible storage errors and removal only after a note successfully commits are covered by regression tests; Android verification pending). Drafts are device-only and are not edit history. Existing recovery draft is retained. Note and draft writes use separate storage keys: if draft cleanup fails after a note save, both copies are kept with an explicit warning.
 
 - [ ] Multi-draft library foundation (PR #22 adds a separate validated draft model, PWA-style upsert/remove helpers and regression tests; UI, persistence wiring, and Android verification still pending).
 

@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as notes from '../src/notes.ts';
 import * as folders from '../src/folders.ts';
+import * as draftLibrary from '../src/draftLibrary.ts';
 import * as formatting from '../src/noteFormatting.ts';
 import { createNotesController } from '../src/notesController.ts';
 import { searchNotes } from '../src/noteSearch.ts';
@@ -40,7 +41,11 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     async save(next) { noteWrites.push(next); await saveNotes(next); storedNotes = next; },
   });
   const backend = {
-    async getItem(key) { return key === folders.FOLDERS_KEY ? storedFolders : null; },
+    async getItem(key) {
+      if (key === folders.FOLDERS_KEY) return storedFolders;
+      if (key === draftLibrary.DRAFT_LIBRARY_KEY) return null;
+      return null;
+    },
     async setItem(key, value) {
       assert.equal(key, folders.FOLDERS_KEY);
       folderWrites.push(value);
@@ -93,6 +98,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '@react-native-async-storage/async-storage': backend,
     '../notes': notes,
     '../folders': folders,
+    '../draftLibrary': draftLibrary,
     '../notesController': { createNotesController: () => controller },
     '../deviceNotesStorage': {},
     '../noteSearch': { searchNotes },

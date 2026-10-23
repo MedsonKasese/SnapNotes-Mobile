@@ -135,6 +135,7 @@ export function NotesWorkspace() {
   const draftLibraryBusy = useRef(false);
   const [draftLibrarySaving, setDraftLibrarySaving] = useState(false);
   const [openedDraftId, setOpenedDraftId] = useState<string | null>(null);
+  const openedDraftIdRef = useRef<string | null>(null);
   const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [formattingState, setFormattingState] = useState<FormattingState>({});
@@ -145,12 +146,17 @@ export function NotesWorkspace() {
   const bodyEditor = useRef<RichNoteEditorHandle>(null);
   const editorSession = useRef(0);
   const saveInFlight = useRef(false);
+  const draftSaveInFlight = useRef(false);
   const actionTriggers = useRef(new Map<string, ComponentRef<typeof View>>());
   const actionsLayer = useRef<ComponentRef<typeof View> | null>(null);
   const actionsRequest = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  function trackOpenedDraft(id: string | null) {
+    openedDraftIdRef.current = id;
+    setOpenedDraftId(id);
+  }
   // User intent takes ownership synchronously, before React can render again.
   // This also covers reset/edit actions that leave the editor clean or blank.
   function claimEditorDraft(hydrate: boolean) {
@@ -167,6 +173,7 @@ export function NotesWorkspace() {
     claimEditorDraft(draftHydrated || action.type === 'change' || action.type === 'rich-change' || action.type === 'edit' ||
       Boolean(current.title.trim() || current.text.trim()));
     if (action.type === 'reset' || action.type === 'edit' || action.type === 'restore-draft') {
+      if (action.type !== 'restore-draft') trackOpenedDraft(null);
       editorSession.current += 1;
       setFormattingState({});
       setLinkOpen(false);
@@ -228,6 +235,7 @@ export function NotesWorkspace() {
           typeof record.text !== 'string' ||
           (record.html !== undefined && (typeof record.html !== 'string' || record.html.length > MAX_NOTE_HTML_LENGTH)) ||
           (record.category !== undefined && !NOTE_CATEGORIES.includes(record.category as NoteCategory)) ||
+          (record.openedDraftId !== undefined && !(record.openedDraftId === null || typeof record.openedDraftId === 'string')) ||
           !(record.editingId === null || typeof record.editingId === 'string')
         ) {
           throw new Error('Unsupported draft record');
@@ -251,6 +259,8 @@ export function NotesWorkspace() {
             });
           }
           if (revision !== draftRecoveryRevision.current || controller.getSnapshot().status !== 'ready') return;
+          openedDraftIdRef.current = typeof record.openedDraftId === 'string' ? record.openedDraftId : null;
+          setOpenedDraftId(openedDraftIdRef.current);
           controller.dispatch({
             type: 'restore-draft',
             draft: { title: record.title, text: record.text, category: normalizeCategory(record.category),
@@ -290,6 +300,7 @@ export function NotesWorkspace() {
           ...(state.draft.html !== undefined ? { html: state.draft.html } : {}),
           category: normalizeCategory(state.draft.category),
           editingId: state.editingId,
+          ...(openedDraftId === null ? {} : { openedDraftId }),
           savedAt: new Date().toISOString(),
         })
       : null;
@@ -308,13 +319,15 @@ export function NotesWorkspace() {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.html, state.draft.category, state.editingId]);
+  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.html, state.draft.category, state.editingId, openedDraftId]);
 
   function changeDraft(field: 'title' | 'text', value: string) {
+    if (saveInFlight.current) return;
     dispatch({ type: 'change', field, value });
   }
 
   function selectDraftCategory(category: NoteCategory) {
+    if (saveInFlight.current) return;
     dispatch({ type: 'category', category });
     setCategoryPickerOpen(false);
   }
@@ -540,36 +553,57 @@ export function NotesWorkspace() {
   }
 
   async function saveToDrafts() {
-    if (!draftLibraryReady || draftLibraryBusy.current || saving) return;
+    if (!draftLibraryReady || draftLibraryBusy.current || saveInFlight.current || controller.getSnapshot().status !== 'ready') return;
+    // Both save destinations share a synchronous lock, including the WebView
+    // snapshot await before React has had a chance to disable the buttons.
+    saveInFlight.current = true;
+    draftSaveInFlight.current = true;
     const session = editorSession.current;
     setFlushing(true);
     try {
       const content = await bodyEditor.current?.getContent();
-      if (!content || session !== editorSession.current) throw Error('Editor is not ready. Please try again.');
+      if (!content) throw Error('Editor is not ready. Please try again.');
+      if (session !== editorSession.current || controller.getSnapshot().status !== 'ready') return;
+      if (content.html.length > MAX_NOTE_HTML_LENGTH) throw Error('Draft formatting is too large. Simplify the formatting before saving.');
+      // Keep the authoritative snapshot in the editor/recovery even if the
+      // library write fails; never fall back to an older onChange message.
+      dispatch({ type: 'rich-change', ...content });
       const current = controller.getSnapshot().state;
       const title = current.draft.title;
-      if (!title.trim() && !content.text.trim()) { Alert.alert('Empty draft', 'Write something before saving a draft.'); return; }
+      if (!title.trim() && !current.draft.text.trim()) { Alert.alert('Empty draft', 'Write something before saving a draft.'); return; }
       const now = new Date().toISOString();
       const draft: SavedDraft = {
-        id: openedDraftId ?? newDraftId(draftLibraryRef.current, now),
-        title, text: content.text, html: content.html,
+        id: openedDraftIdRef.current ?? newDraftId(draftLibraryRef.current, now),
+        title, text: current.draft.text, html: current.draft.html,
         category: normalizeCategory(current.draft.category), editingId: current.editingId, savedAt: now,
       };
-      if (await writeDraftLibrary(upsertDraft(draftLibraryRef.current, draft))) {
-        setOpenedDraftId(null);
+      if (await writeDraftLibrary(upsertDraft(draftLibraryRef.current, draft)) && session === editorSession.current) {
         dispatch({ type: 'reset' });
+        Keyboard.dismiss();
+        closeDrawer();
         setView('drafts');
       }
     } catch (error) {
       Alert.alert('Could not save draft', error instanceof Error ? error.message : 'Please try again.');
-    } finally { setFlushing(false); }
+    } finally {
+      draftSaveInFlight.current = false;
+      saveInFlight.current = false;
+      setFlushing(false);
+    }
   }
 
   function openSavedDraft(draft: SavedDraft) {
     confirmDiscard(() => {
-      const editingId = draft.editingId && state.notes.some(note => note.id === draft.editingId && note.deletedAt === null) ? draft.editingId : null;
+      // Stored drafts are untrusted input just like the recovery record. Do not
+      // open HTML that would silently replace a different stored plain-text body.
+      if (draft.html !== undefined && (draft.html.length > MAX_NOTE_HTML_LENGTH ||
+        noteHtmlToText(draft.html).trim() !== draft.text.replace(/\r/g, '').trim())) {
+        Alert.alert('Could not open draft', 'This draft has invalid formatting. Its stored content has not been changed.');
+        return;
+      }
+      const editingId = draft.editingId && controller.getSnapshot().state.notes.some(note => note.id === draft.editingId && note.deletedAt === null) ? draft.editingId : null;
       dispatch({ type: 'restore-draft', draft: { title: draft.title, text: draft.text, ...(draft.html === undefined ? {} : { html: draft.html }), category: normalizeCategory(draft.category) }, editingId });
-      setOpenedDraftId(draft.id);
+      trackOpenedDraft(draft.id);
       setView('editor');
     });
   }
@@ -620,13 +654,17 @@ export function NotesWorkspace() {
     ]);
   }
   function confirmDiscard(continueAction: () => void) {
+    // A normal note's pending snapshot remains cancellable via editorSession.
+    // A draft write must not later reset a different editor after committing.
+    const canLeave = () => !draftSaveInFlight.current && !draftLibraryBusy.current;
+    if (!canLeave()) return;
     if (!dirty) {
       continueAction();
       return;
     }
     Alert.alert('Discard unsaved changes?', 'Your saved notes will not be changed.', [
       { text: 'Keep editing', style: 'cancel' },
-      { text: 'Discard changes', style: 'destructive', onPress: continueAction },
+      { text: 'Discard changes', style: 'destructive', onPress: () => { if (canLeave()) continueAction(); } },
     ], { cancelable: true });
   }
 
@@ -641,7 +679,6 @@ export function NotesWorkspace() {
 
   function openNewNote() {
     confirmDiscard(() => {
-      setOpenedDraftId(null);
       dispatch({ type: 'reset' });
       closeDrawer();
       setView('editor');
@@ -655,7 +692,6 @@ export function NotesWorkspace() {
       return;
     }
     confirmDiscard(() => {
-      setOpenedDraftId(null);
       dispatch({ type: 'edit', id });
       setView('editor');
     });
@@ -740,6 +776,7 @@ export function NotesWorkspace() {
   });
 
   function changeRichDraft(content: RichContent) {
+    if (saveInFlight.current) return;
     dispatch({ type: 'rich-change', ...content });
   }
 
@@ -780,10 +817,15 @@ export function NotesWorkspace() {
   }
 
   async function saveNote() {
-    if (saveInFlight.current || controller.getSnapshot().status !== 'ready') return;
+    if (saveInFlight.current || draftLibraryBusy.current || controller.getSnapshot().status !== 'ready') return;
+    if (openedDraftIdRef.current !== null && !draftLibraryReady) {
+      Alert.alert('Saved drafts unavailable', 'Wait until saved drafts can be read before converting this draft to a note.');
+      return;
+    }
     saveInFlight.current = true;
     setFlushing(true);
     const session = editorSession.current;
+    const draftId = openedDraftIdRef.current;
     try {
       const content = await bodyEditor.current?.getContent();
       if (!content) throw new Error('The editor is not ready. Please try saving again.');
@@ -791,9 +833,20 @@ export function NotesWorkspace() {
       const current = controller.getSnapshot().state.draft;
       // A blank Save is validation, not consent to replace an unreadable recovery record.
       if (content.text.trim() || current.text.trim() || current.title.trim() || current.html !== undefined) {
-        changeRichDraft(content);
+        dispatch({ type: 'rich-change', ...content });
       }
+      const previousNotes = controller.getSnapshot().state.notes;
       await controller.save(new Date().toISOString());
+      const saved = controller.getSnapshot();
+      if (saved.state.notes !== previousNotes && saved.status === 'ready' && saved.storageError === null && saved.state.error === null) {
+        // Notes and drafts are separate storage keys. Commit the note first;
+        // a cleanup failure must retain both copies, never lose the only one.
+        trackOpenedDraft(null);
+        editorSession.current += 1;
+        if (draftId !== null && !await writeDraftLibrary(removeDraft(draftLibraryRef.current, draftId))) {
+          setDraftLibraryError('Your note was saved, but its saved draft could not be removed. Both copies are safe. Delete the extra draft from Drafts when storage is available.');
+        }
+      }
     } catch (error) {
       Alert.alert('Could not save note', error instanceof Error ? error.message : 'Your draft is still here. Please try again.');
     } finally {
@@ -873,6 +926,7 @@ export function NotesWorkspace() {
 
       {folderError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{folderError}</Text>}
       {foldersSaving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving folders on this device…</Text>}
+      {draftLibraryError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftLibraryError}</Text>}
 
       {view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -941,7 +995,7 @@ export function NotesWorkspace() {
               {state.notice !== null && <Text accessibilityLiveRegion="polite" style={styles.notice}>{state.notice}</Text>}
               <View style={styles.actions}>
                 <Action disabled={saving || !editorReady} label={saving ? 'Saving…' : state.editingId === null ? 'Save note' : 'Save changes'} onPress={() => { void saveNote(); }} />
-                <Action disabled={saving || draftLibrarySaving || !draftLibraryReady} label="Save to Drafts" onPress={() => { void saveToDrafts(); }} secondary />
+                <Action disabled={saving || !editorReady || draftLibrarySaving || !draftLibraryReady} label="Save to Drafts" onPress={() => { void saveToDrafts(); }} secondary />
                 {(state.editingId !== null || dirty) && <Action disabled={saving} label="Cancel" onPress={openLibrary} secondary />}
                 {state.editingId !== null && <Action disabled={saving} label="New note" onPress={openNewNote} secondary />}
               </View>
@@ -952,7 +1006,6 @@ export function NotesWorkspace() {
         <View style={styles.flex}>
           <View style={styles.libraryHeading}><View><Text style={styles.eyebrow}>UNFINISHED WORK</Text><Text accessibilityRole="header" style={styles.screenTitle}>Drafts</Text></View><Action label="+ New note" onPress={openNewNote} /></View>
           <Text style={styles.libraryHint}>Saved on this device only. Drafts are not synced or backed up.</Text>
-          {draftLibraryError !== null && <Text accessibilityRole="alert" style={styles.error}>{draftLibraryError}</Text>}
           {!draftLibraryReady ? <Text style={styles.libraryHint}>Drafts unavailable until storage can be read.</Text> : <ScrollView contentContainerStyle={styles.editorContent}>
             {savedDrafts.length === 0 && <Text style={styles.libraryHint}>No saved drafts yet. Open the editor and tap Save to Drafts.</Text>}
             {savedDrafts.map(draft => <View key={draft.id} style={styles.editor}>
