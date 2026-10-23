@@ -526,7 +526,7 @@ function triggerFor(app, item, measureInWindow) {
   return trigger;
 }
 
-test('the contextual popup is compact, text-only, rounded on all corners, and contains no new actions', () => {
+test('the contextual popup is compact, includes its action icons, is rounded on all corners, and contains no new actions', () => {
   const app = workspace();
   const { sheet } = openNoteActions(app, savedNotes[0]);
   const menu = popup(sheet);
@@ -537,7 +537,7 @@ test('the contextual popup is compact, text-only, rounded on all corners, and co
   assert.equal(menu.props.pointerEvents, 'auto');
   assert.equal(menu.props.accessibilityViewIsModal, true);
   assert.equal(menu.props.accessibilityElementsHidden, false);
-  assert.equal(elements(menu).some(element => element.type === 'FontAwesome'), false);
+  assert.deepEqual(elements(menu).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), ['file-text-o', 'archive', 'trash-o']);
   assert.equal(elements(menu).some(element => element.props.accessibilityRole === 'header'), false);
   assert.doesNotMatch(text(menu), /Cancel|Duplicate|Share|history|private|folder|Pin|Unpin/);
   assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Open note', 'Archive note', 'Move to Trash']);
@@ -643,4 +643,38 @@ test('viewport changes remeasure the trigger and keep tall menu content inside t
   assert.ok(style.top >= 12 && style.top + Math.min(340, style.maxHeight) <= 218);
   assert.equal(menu.props.pointerEvents, 'auto');
   assert.equal(find(menu, element => element.type === 'ScrollView').props.keyboardShouldPersistTaps, 'handled');
+});
+
+test('all existing library, archive, and trash menu actions retain their original decorative icons', () => {
+  const app = workspace([...savedNotes, archivedNote, trashedNote]);
+  for (const [view, item, icons] of [
+    ['library', savedNotes[0], ['file-text-o', 'archive', 'trash-o']],
+    ['archive', archivedNote, ['file-text-o', 'undo', 'trash-o']],
+    ['trash', trashedNote, ['undo', 'trash']],
+  ]) {
+    if (view !== 'library') action(app.render(), view === 'archive' ? 'Archived' : 'Trash').props.onPress();
+    const { sheet } = openNoteActions(app, item);
+    const buttons = sheetActions(sheet, item.title);
+    assert.equal(flatStyle(popup(sheet).props.style).width, 216, 'icons must not widen the compact popup');
+    assert.deepEqual(buttons.map(button => find(button, element => element.type === 'FontAwesome').props.name), icons);
+    for (const button of buttons) {
+      const icon = find(button, element => element.type === 'FontAwesome');
+      const label = find(button, element => element.type === 'Text');
+      const destructive = /^(Move to Trash|Delete forever):/.test(button.props.accessibilityLabel);
+      assert.equal(icon.props.size, 19);
+      assert.equal(icon.props.accessible, false, 'the button label, not the decorative glyph, should be announced');
+      assert.equal(icon.props.color, destructive ? '#b3261e' : '#52634b');
+      assert.equal(flatStyle(icon.props.style).flexShrink, 0);
+      assert.equal(flatStyle(icon.props.style).width, 20);
+      assert.equal(flatStyle(label.props.style).flex, 1);
+      assert.equal(flatStyle(label.props.style).flexShrink, 1);
+      assert.equal(flatStyle(label.props.style).minWidth, 0);
+      assert.equal(label.props.numberOfLines, undefined, 'long and scaled labels must be allowed to wrap');
+      const row = flatStyle(button.props.style({ pressed: false }));
+      assert.equal(row.flexDirection, 'row');
+      assert.equal(row.alignItems, 'center');
+      assert.equal(row.gap, 10);
+      assert.ok(row.minHeight >= 44);
+    }
+  }
 });

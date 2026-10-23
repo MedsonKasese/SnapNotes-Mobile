@@ -17,7 +17,7 @@ import { ChecklistLabel } from './ChecklistLabel';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash';
 type NoteAction = 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
-type NoteActionOption = { label: string; destructive?: boolean; action: NoteAction };
+type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
 
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
@@ -72,6 +72,7 @@ function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAct
         <Pressable accessibilityRole="button" accessibilityLabel={'Open note: ' + title}
           disabled={saving} accessibilityState={{ disabled: saving }} onPress={onOpen}
           style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+          <FontAwesome name="file-text-o" size={19} color="#52634b" style={styles.actionsMenuIcon} accessible={false} />
           <Text style={styles.actionsMenuText}>Open note</Text>
         </Pressable>
       )}
@@ -79,6 +80,7 @@ function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAct
         <Pressable key={option.label} accessibilityRole="button" accessibilityLabel={option.label + ': ' + title}
           disabled={saving} accessibilityState={{ disabled: saving }} onPress={() => onAction(option.action)}
           style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+          <FontAwesome name={option.icon} size={19} color={option.destructive ? '#b3261e' : '#52634b'} style={styles.actionsMenuIcon} accessible={false} />
           <Text style={[styles.actionsMenuText, option.destructive && styles.actionsMenuDanger]}>{option.label}</Text>
         </Pressable>
       ))}
@@ -138,12 +140,12 @@ export function NotesWorkspace() {
   const inArchive = selected?.archived && !inTrash;
   const options: NoteActionOption[] = !selected ? [] : inTrash
     ? [
-        { label: 'Restore note', action: 'restore-trash' },
-        { label: 'Delete forever', destructive: true, action: 'delete' },
+        { label: 'Restore note', icon: 'undo', action: 'restore-trash' },
+        { label: 'Delete forever', icon: 'trash', destructive: true, action: 'delete' },
       ]
     : [
-        { label: inArchive ? 'Restore from archive' : 'Archive note', action: inArchive ? 'restore-archive' : 'archive' },
-        { label: 'Move to Trash', destructive: true, action: 'trash' },
+        { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
+        { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
       ];
 
   const actionsMenuLayout = actionsAnchor && actionsViewport
@@ -858,9 +860,10 @@ const styles = StyleSheet.create({
   actionsMenu: { position: 'absolute', width: 216, maxWidth: '100%', paddingVertical: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#dce4d7', borderRadius: 14, shadowColor: '#172712', shadowOpacity: 0.16, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
   actionsMenuMeasuring: { opacity: 0 },
   actionsMenuScroll: { flexGrow: 0, flexShrink: 1 },
-  actionsMenuRow: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  actionsMenuRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   actionsMenuRowPressed: { backgroundColor: '#eff4eb' },
-  actionsMenuText: { color: '#293d23', fontSize: 15, fontWeight: '600' },
+  actionsMenuIcon: { width: 20, flexShrink: 0, textAlign: 'center' },
+  actionsMenuText: { flex: 1, flexShrink: 1, minWidth: 0, color: '#293d23', fontSize: 15, fontWeight: '600' },
   actionsMenuDanger: { color: '#b3261e' },
   pinButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
