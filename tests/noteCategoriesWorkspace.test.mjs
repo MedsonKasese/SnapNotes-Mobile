@@ -183,7 +183,7 @@ test('drawer icons retain their names and remain decorative within labelled butt
 test('library, archive, and trash expose exactly their available note actions in the sheet', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, expected] of [
-    ['library', savedNotes[0], ['Open note: Project alpha', 'Pin note: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
+    ['library', savedNotes[0], ['Open note: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
     ['archive', archivedNote, ['Open note: Archived project', 'Restore from archive: Archived project', 'Move to Trash: Archived project']],
     ['trash', { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' }, ['Restore note: Deleted project', 'Delete forever: Deleted project']],
   ]) {
@@ -192,7 +192,10 @@ test('library, archive, and trash expose exactly their available note actions in
     const { card, sheet } = openNoteActions(app, item);
     assert.equal(actionsModal(sheet).props.visible, true);
     assert.deepEqual(sheetActions(sheet, item.title).map(button => button.props.accessibilityLabel), expected);
-    assert.equal(elements(card).some(element => element.type === 'Pressable' && /^(Edit|Pin|Unpin|Archive|Move to Trash) /.test(element.props.accessibilityLabel ?? '')), false);
+    assert.equal(elements(card).some(element => element.type === 'Pressable' && /^(Edit|Archive|Move to Trash) /.test(element.props.accessibilityLabel ?? '')), false);
+    const pinButtons = elements(card).filter(element => element.type === 'Pressable' && /^(Pin|Unpin) /.test(element.props.accessibilityLabel ?? ''));
+    assert.equal(pinButtons.length, view === 'library' ? 1 : 0);
+    assert.equal(elements(actionsModal(sheet)).some(element => /^(Pin|Unpin) /.test(element.props.accessibilityLabel ?? '')), false);
   }
 });
 
@@ -213,7 +216,7 @@ test('note actions are disabled while saving', () => {
   app.setStatus('saving');
   const { sheet } = openNoteActions(app, savedNotes[0]);
   const buttons = sheetActions(sheet, savedNotes[0].title);
-  assert.equal(buttons.length, 4);
+  assert.equal(buttons.length, 3);
   for (const button of buttons) {
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
@@ -224,11 +227,11 @@ test('note actions are disabled while saving', () => {
 test('a stale enabled sheet callback is ignored if saving begins before it is pressed', () => {
   const app = workspace();
   const { sheet } = openNoteActions(app, savedNotes[0]);
-  const pin = find(sheet, element => element.props.accessibilityLabel === 'Pin note: Project alpha');
+  const archive = find(sheet, element => element.props.accessibilityLabel === 'Archive note: Project alpha');
   app.setStatus('saving');
-  pin.props.onPress();
+  archive.props.onPress();
   assert.equal(actionsModal(app.render()).props.visible, true);
-  assert.deepEqual(app.pinCalls, []);
+  assert.deepEqual(app.archiveCalls, []);
   assert.deepEqual(app.events.filter(([event]) => event === 'close-actions'), []);
 });
 
@@ -447,4 +450,47 @@ test('a stale Open sheet callback cannot navigate while another write is saving'
   assert.equal(actionsModal(app.render()).props.visible, true);
   assert.equal(app.controller.getSnapshot().state.editingId, null);
   assert.deepEqual(app.events.filter(([event]) => ['close-actions', 'dispatch'].includes(event)), []);
+});
+
+test('pin and unpin stay on one independent card button, never in the action menu', () => {
+  for (const pinned of [false, true]) {
+    const item = { ...savedNotes[0], pinned };
+    const app = workspace([item]);
+    const card = list(app.render()).props.renderItem({ item });
+    const buttons = elements(card).filter(element => element.type === 'Pressable' && /^(Pin|Unpin) /.test(element.props.accessibilityLabel ?? ''));
+    assert.equal(buttons.length, 1);
+    const pin = buttons[0];
+    assert.equal(card.props.accessible, false, 'independent controls must remain reachable');
+    assert.equal(pin.props.accessibilityRole, 'button');
+    assert.equal(pin.props.accessibilityLabel, `${pinned ? 'Unpin' : 'Pin'} Project alpha`);
+    assert.equal(pin.props.accessibilityState.selected, pinned);
+    assert.equal(pin.props.disabled, false);
+    assert.equal(pin.props.accessibilityState.disabled, false);
+    const icon = find(pin, element => element.type === 'FontAwesome');
+    assert.equal(icon.props.name, 'thumb-tack');
+    assert.equal(icon.props.accessible, false);
+    assert.equal(icon.props.color, pinned ? '#b98500' : '#8c9988');
+    pin.props.onPress();
+    assert.equal(app.pinCalls.length, 1);
+    assert.equal(app.pinCalls[0][0], item.id);
+    assert.ok(Number.isFinite(Date.parse(app.pinCalls[0][1])));
+    assert.equal(app.controller.getSnapshot().state.editingId, null);
+    assert.equal(actionsModal(app.render()).props.visible, false);
+    assert.deepEqual(app.events.filter(([event]) => event === 'dispatch'), []);
+
+    const { sheet } = openNoteActions(app, item);
+    assert.deepEqual(sheetActions(sheet, item.title).map(button => button.props.accessibilityLabel), [
+      'Open note: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
+    ]);
+  }
+});
+
+test('the standalone pin control is disabled and announced as disabled while saving', () => {
+  const app = workspace();
+  app.setStatus('saving');
+  const card = list(app.render()).props.renderItem({ item: savedNotes[0] });
+  const pin = find(card, element => element.props.accessibilityLabel === 'Pin Project alpha');
+  assert.equal(pin.props.disabled, true);
+  assert.equal(pin.props.accessibilityState.disabled, true);
+  assert.deepEqual(app.pinCalls, []);
 });
