@@ -102,6 +102,9 @@ export function NotesWorkspace() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [foldersReady, setFoldersReady] = useState(false);
+  const [foldersSaving, setFoldersSaving] = useState(false);
+  const foldersRef = useRef<Folder[]>([]);
+  const folderMutationInFlight = useRef(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [folderDialog, setFolderDialog] = useState<{ mode: 'create' | 'rename'; id?: string } | null>(null);
@@ -308,22 +311,23 @@ export function NotesWorkspace() {
     let active = true;
     void AsyncStorage.getItem(FOLDERS_KEY).then(raw => {
       const loaded = parseFolders(raw);
-      if (active) { setFolders(loaded); setFoldersReady(true); setFolderError(null); }
+      if (active) { foldersRef.current = loaded; setFolders(loaded); setFoldersReady(true); setFolderError(null); }
     }).catch(() => {
       if (active) { setFoldersReady(false); setFolderError('Folders could not be loaded. Existing folders have not been changed.'); }
     });
     return () => { active = false; };
   }, []);
 
-  async function persistFolders(next: Folder[]): Promise<boolean> {
+  async function persistFolders(next: Folder[], failureMessage = 'Could not save folders. No folder changes were applied.'): Promise<boolean> {
     if (!foldersReady) return false;
     try {
       await AsyncStorage.setItem(FOLDERS_KEY, JSON.stringify(next));
+      foldersRef.current = next;
       setFolders(next);
       setFolderError(null);
       return true;
     } catch {
-      setFolderError('Could not save folders. No folder changes were applied.');
+      setFolderError(failureMessage);
       return false;
     }
   }
@@ -339,42 +343,74 @@ export function NotesWorkspace() {
   }
 
   function openFolderDialog(mode: 'create' | 'rename', folder?: Folder) {
+    if (!foldersReady || folderMutationInFlight.current) return;
     setDrawerOpen(false);
     setFolderName(folder?.name ?? '');
     setFolderDialog({ mode, id: folder?.id });
   }
 
   async function submitFolder() {
-    if (!folderDialog || !foldersReady) return;
+    if (!folderDialog || !foldersReady || folderMutationInFlight.current) return;
+    const current = foldersRef.current;
+    if (folderDialog.mode === 'rename' && !current.some(folder => folder.id === folderDialog.id)) return;
     const name = normalizeFolderName(folderName);
-    const error = validateFolderName(folders, name, folderDialog.id);
+    const error = validateFolderName(current, name, folderDialog.id);
     if (error) { Alert.alert('Folder name', error); return; }
     const now = new Date().toISOString();
     const next = folderDialog.mode === 'create'
-      ? [...folders, { id: makeFolderId(folders, now), name, icon: 'folder', color: '', createdAt: now, updatedAt: now }]
-      : folders.map(folder => folder.id === folderDialog.id ? { ...folder, name, updatedAt: now } : folder);
-    if (await persistFolders(next)) setFolderDialog(null);
+      ? [...current, { id: makeFolderId(current, now), name, icon: 'folder', color: '', createdAt: now, updatedAt: now }]
+      : current.map(folder => folder.id === folderDialog.id ? { ...folder, name, updatedAt: now } : folder);
+    // A ref closes the pre-render double-tap window; state also disables controls.
+    folderMutationInFlight.current = true;
+    setFoldersSaving(true);
+    try {
+      if (await persistFolders(next)) setFolderDialog(null);
+    } finally {
+      folderMutationInFlight.current = false;
+      setFoldersSaving(false);
+    }
   }
 
   function confirmDeleteFolder(folder: Folder) {
+    if (!foldersReady || folderMutationInFlight.current || controller.getSnapshot().status !== 'ready') return;
     const count = state.notes.filter(note => note.folderId === folder.id).length;
     Alert.alert('Delete folder?', `Delete "${folder.name}"? ${count} ${count === 1 ? 'note' : 'notes'} will remain in SnapNotes, without a folder.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete folder', style: 'destructive', onPress: () => {
         void (async () => {
-          // Commit note unfiling first; do not delete the folder if notes could not be saved.
-          const unfiled = await controller.clearFolder(folder.id);
-          if (!unfiled) return;
-          const ok = await persistFolders(folders.filter(item => item.id !== folder.id));
-          if (ok && activeFolderId === folder.id) { setActiveFolderId(null); setView('library'); }
+          if (!foldersReady || folderMutationInFlight.current || controller.getSnapshot().status !== 'ready' ||
+            !foldersRef.current.some(item => item.id === folder.id)) return;
+          folderMutationInFlight.current = true;
+          setFoldersSaving(true);
+          try {
+            // Hold the lock across both writes so no move can refile a note in
+            // the gap after unfiling commits and before folder deletion commits.
+            const unfiled = await controller.clearFolder(folder.id);
+            if (!unfiled) return;
+            const ok = await persistFolders(foldersRef.current.filter(item => item.id !== folder.id),
+              'Could not delete the folder. The folder remains, but its notes are safely unfiled. Please try again.');
+            if (ok && activeFolderId === folder.id) { setActiveFolderId(null); setView('library'); }
+          } finally {
+            folderMutationInFlight.current = false;
+            setFoldersSaving(false);
+          }
         })();
       } },
     ]);
   }
 
   function chooseFolder(noteId: string) {
+    if (folderMutationInFlight.current) return;
     if (!foldersReady) { Alert.alert('Folders unavailable', folderError ?? 'Wait for folders to load.'); return; }
     setFolderMoveNoteId(noteId);
+  }
+
+  function moveNoteToFolder(folderId: string | null) {
+    if (!foldersReady || folderMutationInFlight.current || controller.getSnapshot().status !== 'ready') return;
+    if (folderId !== null && !foldersRef.current.some(folder => folder.id === folderId)) return;
+    const id = folderMoveNoteId;
+    setFolderMoveNoteId(null);
+    if (id) void controller.moveNoteToFolder(id, folderId);
   }
 
   function selectArchive() {
@@ -665,6 +701,9 @@ export function NotesWorkspace() {
         )}
       </View>
 
+      {folderError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{folderError}</Text>}
+      {foldersSaving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving folders on this device…</Text>}
+
       {view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
@@ -864,17 +903,18 @@ export function NotesWorkspace() {
         </SafeAreaProvider>
       </Modal>
 
-      <Modal visible={folderDialog !== null} transparent animationType="fade" onRequestClose={() => setFolderDialog(null)}>
-        <View style={styles.folderModalLayer}><View style={styles.folderModalCard}>
+      <Modal visible={folderDialog !== null} transparent animationType="fade" onRequestClose={() => { if (!folderMutationInFlight.current) setFolderDialog(null); }}>
+        <KeyboardAvoidingView style={styles.folderModalLayer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><View style={styles.folderModalCard} accessibilityViewIsModal>
           <Text accessibilityRole="header" style={styles.label}>{folderDialog?.mode === 'rename' ? 'Rename folder' : 'New folder'}</Text>
-          <TextInput accessibilityLabel="Folder name" autoFocus maxLength={32} value={folderName} onChangeText={setFolderName} placeholder="Folder name" style={styles.input} />
-          <View style={styles.folderControls}><Action label="Cancel" secondary onPress={() => setFolderDialog(null)} /><Action label="Save folder" onPress={() => { void submitFolder(); }} /></View>
-        </View></View>
+          <TextInput accessibilityLabel="Folder name" autoFocus editable={!foldersSaving} maxLength={32} value={folderName} onChangeText={setFolderName} placeholder="Folder name" style={styles.input} />
+          {folderError !== null && <Text accessibilityRole="alert" style={styles.error}>{folderError}</Text>}
+          <View style={styles.folderControls}><Action label="Cancel" secondary disabled={foldersSaving} onPress={() => setFolderDialog(null)} /><Action label="Save folder" disabled={foldersSaving || !foldersReady} onPress={() => { void submitFolder(); }} /></View>
+        </View></KeyboardAvoidingView>
       </Modal>
       <Modal visible={folderMoveNoteId !== null} transparent animationType="fade" onRequestClose={() => setFolderMoveNoteId(null)}>
-        <View style={styles.folderModalLayer}><ScrollView style={styles.folderModalCard}>
+        <View style={styles.folderModalLayer}><ScrollView style={styles.folderModalCard} keyboardShouldPersistTaps="handled" accessibilityViewIsModal>
           <Text accessibilityRole="header" style={styles.label}>Move note to folder</Text>
-          {[{ id: null, name: 'No folder' }, ...folders].map(folder => <Pressable key={folder.id ?? 'none'} accessibilityRole="button" onPress={() => { const id = folderMoveNoteId; setFolderMoveNoteId(null); if (id) void controller.moveNoteToFolder(id, folder.id); }} style={styles.folderControl}><Text style={styles.folderControlText}>{folder.name}</Text></Pressable>)}
+          {[{ id: null, name: 'No folder' }, ...folders].map(folder => <Pressable key={folder.id ?? 'none'} accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => moveNoteToFolder(folder.id)} style={styles.folderControl}><Text style={styles.folderControlText}>{folder.name}</Text></Pressable>)}
           <Action label="Cancel" secondary onPress={() => setFolderMoveNoteId(null)} />
         </ScrollView></View>
       </Modal>
@@ -906,17 +946,17 @@ export function NotesWorkspace() {
                 <Text style={styles.closeGlyph}>×</Text>
               </Pressable>
             </View>
-            <View style={styles.drawerNavigation}>
+            <ScrollView style={styles.flex} contentContainerStyle={styles.drawerNavigation} keyboardShouldPersistTaps="handled">
               <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
               <Text style={styles.drawerEyebrow}>FOLDERS</Text>
               {folders.map(folder => <MenuRow key={folder.id} label={folder.name} icon="folder-o" detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`} active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
-              <Pressable accessibilityRole="button" disabled={!foldersReady || folders.length >= MAX_FOLDERS} onPress={() => openFolderDialog('create')} style={styles.folderControl}><Text style={styles.folderControlText}>+ New folder</Text></Pressable>
-              {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
+              <Pressable accessibilityRole="button" disabled={!foldersReady || foldersSaving || folders.length >= MAX_FOLDERS} accessibilityState={{ disabled: !foldersReady || foldersSaving || folders.length >= MAX_FOLDERS }} onPress={() => openFolderDialog('create')} style={styles.folderControl}><Text style={styles.folderControlText}>+ New folder</Text></Pressable>
+              {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
                <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
-            </View>
+            </ScrollView>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
               <Text style={styles.drawerNoticeText}>Settings and account features will appear here as they are migrated and tested.</Text>

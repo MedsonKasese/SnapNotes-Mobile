@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_FOLDERS, normalizeFolderName, parseFolders, validateFolderName, makeFolderId } from '../src/folders.ts';
 import { createNotesController } from '../src/notesController.ts';
+import { createNotesStorage } from '../src/notesStorage.ts';
 
 const NOW = '2026-10-23T09:00:00.000Z';
 const note = { id: 'local-note-1', title: 'Test', text: 'Content', category: 'general', createdAt: NOW, updatedAt: NOW, pinned: false, archived: false, deletedAt: null };
@@ -42,4 +43,42 @@ test('failed unfiling refuses folder deletion and keeps original data', async ()
   await controller.load();
   assert.equal(await controller.clearFolder(folder.id), false);
   assert.deepEqual(controller.getSnapshot().state.notes, [original]);
+});
+
+test('folder membership and rich formatting round-trip through real versioned storage after restart', async () => {
+  const values = new Map();
+  const backend = {
+    async getItem(key) { return values.get(key) ?? null; },
+    async setItem(key, value) { values.set(key, value); },
+    async getAllKeys() { return [...values.keys()]; },
+    async multiRemove(keys) { keys.forEach(key => values.delete(key)); },
+  };
+  const originals = [
+    { ...note, folderId: folder.id, html: '<p><strong>Content</strong></p>' },
+    { ...note, id: 'legacy-without-folder' },
+    { ...note, id: 'explicitly-unfiled', folderId: null },
+  ];
+  await createNotesStorage(backend).save(originals);
+  assert.deepEqual(await createNotesStorage(backend).load(), originals);
+  const before = new Map(values);
+  for (const folderId of ['', '   ', 123, {}, []]) {
+    await assert.rejects(createNotesStorage(backend).save([{ ...note, folderId }]), /folderId/);
+    assert.deepEqual(values, before, 'invalid folder assignments must not touch saved data');
+  }
+});
+
+test('editing, duplication, archive and Trash transitions retain folder membership', async () => {
+  let stored = [{ ...note, folderId: folder.id }];
+  const controller = createNotesController({ async load() { return stored; }, async save(next) { stored = next; } });
+  await controller.load();
+  controller.dispatch({ type: 'edit', id: note.id });
+  controller.dispatch({ type: 'change', field: 'title', value: 'Edited' });
+  await controller.save(NOW);
+  await controller.duplicateNote(note.id, NOW);
+  assert.ok(stored.every(item => item.folderId === folder.id));
+  await controller.setArchived(note.id, true, NOW);
+  await controller.setArchived(note.id, false, NOW);
+  await controller.moveToTrash(note.id, NOW);
+  await controller.restoreFromTrash(note.id, NOW);
+  assert.ok(stored.every(item => item.folderId === folder.id));
 });
