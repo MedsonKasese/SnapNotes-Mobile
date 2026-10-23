@@ -107,6 +107,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 ## 8. Note management
 
 - [x] Pin and unpin notes, matching PWA behaviour. (PR #14 merged; user verified the pin icon, pinned-first sorting, persistence, and clean card layout against the PWA.)
+- [ ] Native note-actions sheet and tap-card-to-open behavior (PR #18 implemented; automated checks and Android verification pending). Preserve inline checklist interaction and Trash-only actions.
 - [ ] Duplicate notes if supported by the PWA.
 - [ ] Archive and restore notes. (PR #15 implements the initial archive library, persisted archive state, and restore action; testing required.)
 - [ ] Move notes to Trash and restore them.
