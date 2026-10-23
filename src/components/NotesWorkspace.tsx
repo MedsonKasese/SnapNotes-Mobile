@@ -584,11 +584,20 @@ export function NotesWorkspace() {
                 )}
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
-                    <Text style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
-                    <Text style={styles.hint}>Updated {new Date(item.updatedAt).toLocaleString()}</Text>
+                    <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
+                    <Text numberOfLines={1} style={styles.noteTime}>Updated {new Date(item.updatedAt).toLocaleDateString()} · {new Date(item.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</Text>
                   </View>
                   <View style={styles.noteFooterActions}>
-                    {view === 'library' && item.pinned && <FontAwesome name="thumb-tack" size={16} color="#b98500" accessible={false} />}
+                    {view === 'library' && <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={(item.pinned ? 'Unpin ' : 'Pin ') + (item.title || 'Untitled note')}
+                      accessibilityState={{ selected: item.pinned, disabled: saving }}
+                      disabled={saving}
+                      onPress={() => { void controller.togglePin(item.id, new Date().toISOString()); }}
+                      style={({ pressed }) => [styles.pinButton, pressed && styles.pressed]}
+                    >
+                      <FontAwesome name="thumb-tack" size={18} color={item.pinned ? '#b98500' : '#8c9988'} accessible={false} />
+                    </Pressable>}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={'Note actions for ' + (item.title || 'Untitled note')}
@@ -596,7 +605,7 @@ export function NotesWorkspace() {
                       onPress={() => showNoteActions(item.id)}
                       style={({ pressed }) => [styles.noteMenuTrigger, pressed && styles.pressed]}
                     >
-                      <FontAwesome name="ellipsis-h" size={21} color="#52634b" accessible={false} />
+                      <FontAwesome name="ellipsis-v" size={19} color="#687567" accessible={false} />
                     </Pressable>
                   </View>
                 </View>
@@ -774,9 +783,9 @@ const styles = StyleSheet.create({
   noteAccent: { width: 4, alignSelf: 'stretch', minHeight: 22, borderRadius: 4, backgroundColor: '#48a111' },
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
-  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: '#edf1e9' },
-  noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
-  noteMenuTrigger: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
+  noteFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
+  noteMenuTrigger: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   actionsModalLayer: { flex: 1, justifyContent: 'flex-end' },
   actionsBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.45)' },
   actionsSheet: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, backgroundColor: '#ffffff', borderTopLeftRadius: 22, borderTopRightRadius: 22, gap: 3 },
@@ -786,12 +795,13 @@ const styles = StyleSheet.create({
   actionsSheetDanger: { color: '#b3261e' },
   actionsSheetCancel: { minHeight: 48, justifyContent: 'center', alignItems: 'center', marginTop: 12, backgroundColor: '#f0f5eb', borderRadius: 12 },
   actionsSheetCancelText: { color: '#344b2d', fontWeight: '800' },
-  pinButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
+  pinButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
   pinButtonActive: { backgroundColor: 'transparent' },
   archiveButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: 'transparent' },
 
-  noteMeta: { flex: 1, minWidth: 0, gap: 5, alignItems: 'flex-start' },
-  noteCategoryBadge: { color: '#3b7f16', fontSize: 12, fontWeight: '800', backgroundColor: '#eff7e9', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, overflow: 'hidden' },
+  noteMeta: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  noteCategoryBadge: { color: '#687b69', fontSize: 11, fontWeight: '700', backgroundColor: '#eef3ef', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, overflow: 'hidden', flexShrink: 0 },
+  noteTime: { color: '#7a857c', fontSize: 11, flexShrink: 1 },
   editButton: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 10, backgroundColor: '#eff7e9' },
   editButtonText: { color: '#3b7f16', fontSize: 13, fontWeight: '800' },
   drawerLayer: { flex: 1, flexDirection: 'row' },
