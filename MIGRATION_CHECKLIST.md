@@ -126,7 +126,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 - [ ] Preserve folder membership through restart and future sync.
 - [ ] Prevent accidental data loss when moving or deleting folders.
 
-- [ ] Customize folder icons and colors (PR #21 adds PWA's nine icons and six colors plus None, with persistent Android picker; automated/device verification pending).
+- [ ] Customize folder icons and colors (PR #21 adds PWA's nine icons and six colors plus None, with a persistent picker. Each folder has a three-dot menu beside its note count for Rename, Customize, and Delete; shared controls below the list are removed. Automated regressions cover per-folder targeting, persistence, cancellation/Back, retry, stale callbacks, and note preservation; native device verification remains pending).
 
 ## 10. Private Notes and security
 

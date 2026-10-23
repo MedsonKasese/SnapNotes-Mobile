@@ -23,8 +23,13 @@ import { RichNoteEditor, type FormattingAction, type FormattingState, type RichC
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder';
 type NoteAction = 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
+type FolderAction = 'rename' | 'customize' | 'delete';
+const FOLDER_ACTIONS: { action: FolderAction; label: string; icon: FontAwesomeName }[] = [
+  { action: 'rename', label: 'Rename folder', icon: 'pencil' },
+  { action: 'customize', label: 'Customize folder', icon: 'paint-brush' },
+  { action: 'delete', label: 'Delete folder', icon: 'trash' },
+];
 const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase() + category.slice(1);
-
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
 const EDITOR_DRAFT_VERSION = 1;
 
@@ -49,16 +54,17 @@ function Action({ label, onPress, secondary = false, destructive = false, disabl
 
 type FontAwesomeName = ComponentProps<typeof FontAwesome>['name'];
 
-function MenuRow({ label, detail, icon, onPress, active = false, iconColor }: {
+function MenuRow({ label, detail, icon, onPress, active = false, iconColor, fill = false }: {
   icon: FontAwesomeName;
-  label: string; detail: string; onPress: () => void; active?: boolean; iconColor?: string;
+  label: string; detail: string; onPress: () => void; active?: boolean; iconColor?: string; fill?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
+      accessibilityLabel={fill ? 'Open folder ' + label : undefined}
       onPress={onPress}
-      style={({ pressed }) => [styles.menuRow, active && styles.menuRowActive, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.menuRow, fill && styles.folderNavigationButton, active && styles.menuRowActive, pressed && styles.pressed]}
     >
       <FontAwesome name={icon} size={18} color={iconColor ?? (active ? '#3b7f16' : '#65775c')} accessible={false} />
       <Text numberOfLines={1} style={[styles.menuRowTitle, active && styles.menuRowTitleActive]}>{label}</Text>
@@ -100,6 +106,8 @@ export function NotesWorkspace() {
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [folderActionsMenu, setFolderActionsMenu] = useState<{ id: string; revision: number } | null>(null);
+  const folderActionsTarget = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
   const [folders, setFolders] = useState<Folder[]>([]);
   const [foldersExpanded, setFoldersExpanded] = useState(false);
   const [foldersReady, setFoldersReady] = useState(false);
@@ -169,6 +177,8 @@ export function NotesWorkspace() {
   const searching = searchQuery.trim().length > 0;
 
   const selected = state.notes.find(note => note.id === actionsNoteId);
+  const folderActionsId = folderActionsMenu?.id ?? null;
+  const folderActionsFolder = folders.find(folder => folder.id === folderActionsId);
   const inTrash = selected !== undefined && selected.deletedAt !== null;
   const inArchive = selected?.archived && !inTrash;
   const options: NoteActionOption[] = !selected ? [] : inTrash
@@ -306,7 +316,7 @@ export function NotesWorkspace() {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
       setCategoryFilter(category);
-      setDrawerOpen(false);
+      closeDrawer();
       setView('library');
     });
   }
@@ -336,26 +346,62 @@ export function NotesWorkspace() {
     }
   }
 
+  function closeFolderActions() {
+    folderActionsTarget.current = { id: null, revision: folderActionsTarget.current.revision + 1 };
+    setFolderActionsMenu(null);
+  }
+
+  function closeDrawer() {
+    closeFolderActions();
+    setDrawerOpen(false);
+  }
+
+  function dismissDrawer() {
+    if (folderActionsTarget.current.id !== null) closeFolderActions();
+    else closeDrawer();
+  }
+
+  function openFolderActions(id: string) {
+    if (!foldersReady || folderMutationInFlight.current || saving || controller.getSnapshot().status !== 'ready' ||
+      !foldersRef.current.some(folder => folder.id === id)) return;
+    const request = { id, revision: folderActionsTarget.current.revision + 1 };
+    folderActionsTarget.current = request;
+    setFolderActionsMenu(request);
+  }
+
+  function handleFolderAction(id: string, revision: number, action: FolderAction) {
+    if (folderActionsTarget.current.id !== id || folderActionsTarget.current.revision !== revision || !foldersReady || folderMutationInFlight.current ||
+      saving || controller.getSnapshot().status !== 'ready') return;
+    const folder = foldersRef.current.find(item => item.id === id);
+    closeFolderActions();
+    if (!folder) return;
+    // Use the menu's folder, not the currently open folder. Claim the action
+    // synchronously so a stale or double-tapped menu callback cannot run twice.
+    if (action === 'rename') openFolderDialog('rename', folder);
+    else if (action === 'customize') openFolderAppearance(folder);
+    else { closeDrawer(); confirmDeleteFolder(folder); }
+  }
+
   function selectFolder(id: string) {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
       setActiveFolderId(id);
-      setDrawerOpen(false);
+      closeDrawer();
       setView('folder');
     });
   }
 
   function openFolderDialog(mode: 'create' | 'rename', folder?: Folder) {
     if (!foldersReady || folderMutationInFlight.current) return;
-    setDrawerOpen(false);
+    closeDrawer();
     setFolderName(folder?.name ?? '');
     setFolderDialog({ mode, id: folder?.id });
   }
 
   function openFolderAppearance(folder: Folder) {
     if (!foldersReady || folderMutationInFlight.current) return;
-    setDrawerOpen(false);
+    closeDrawer();
     setAppearanceFolderId(folder.id);
     setAppearanceIcon(normalizeFolderIcon(folder.icon));
     setAppearanceColor(normalizeFolderColor(folder.color));
@@ -451,7 +497,7 @@ export function NotesWorkspace() {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
       setCategoryFilter('all');
-      setDrawerOpen(false);
+      closeDrawer();
       setView('archive');
     });
   }
@@ -461,7 +507,7 @@ export function NotesWorkspace() {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
       setCategoryFilter('all');
-      setDrawerOpen(false);
+      closeDrawer();
       setView('trash');
     });
   }
@@ -499,7 +545,7 @@ export function NotesWorkspace() {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
-      setDrawerOpen(false);
+      closeDrawer();
       setView('library');
     });
   }
@@ -507,7 +553,7 @@ export function NotesWorkspace() {
   function openNewNote() {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
-      setDrawerOpen(false);
+      closeDrawer();
       setView('editor');
     });
   }
@@ -587,7 +633,7 @@ export function NotesWorkspace() {
       return true;
     }
     if (drawerOpen) {
-      setDrawerOpen(false);
+      dismissDrawer();
       return true;
     }
     if (view === 'editor' || view === 'archive' || view === 'trash' || view === 'folder') {
@@ -687,7 +733,7 @@ export function NotesWorkspace() {
             accessibilityRole="button"
             accessibilityLabel="Open notes navigation"
             accessibilityState={{ expanded: drawerOpen }}
-            onPress={() => setDrawerOpen(true)}
+            onPress={() => { closeFolderActions(); setDrawerOpen(true); }}
             style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
           >
             <Text style={styles.menuGlyph}>☰</Text>
@@ -981,17 +1027,21 @@ export function NotesWorkspace() {
         visible={drawerOpen}
         transparent
         animationType="fade"
-        onRequestClose={() => setDrawerOpen(false)}
+        onRequestClose={dismissDrawer}
         statusBarTranslucent
       >
         <View style={styles.drawerLayer}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close navigation"
+            accessibilityElementsHidden={folderActionsFolder !== undefined}
+            importantForAccessibility={folderActionsFolder ? 'no-hide-descendants' : 'auto'}
             style={styles.drawerBackdrop}
-            onPress={() => setDrawerOpen(false)}
+            onPress={closeDrawer}
           />
-          <View style={styles.drawerPanel} accessibilityViewIsModal>
+          <View style={styles.drawerPanel} accessibilityViewIsModal
+            accessibilityElementsHidden={folderActionsFolder !== undefined}
+            importantForAccessibility={folderActionsFolder ? 'no-hide-descendants' : 'auto'}>
             <View style={styles.drawerHeader}>
               <View style={styles.drawerBrand}>
                 <View style={styles.brandMark}><Text style={styles.brandMarkText}>S</Text></View>
@@ -1000,7 +1050,7 @@ export function NotesWorkspace() {
                   <Text accessibilityRole="header" style={styles.drawerTitle}>My notes</Text>
                 </View>
               </View>
-              <Pressable accessibilityRole="button" accessibilityLabel="Close notes navigation" onPress={() => setDrawerOpen(false)} style={styles.iconButton}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close notes navigation" onPress={closeDrawer} style={styles.iconButton}>
                 <Text style={styles.closeGlyph}>×</Text>
               </Pressable>
             </View>
@@ -1018,9 +1068,17 @@ export function NotesWorkspace() {
                 </Pressable>
               </View>
               {(foldersExpanded ? folders : folders.slice(0, 3)).map(folder =>
-                <MenuRow key={folder.id} label={folder.name} icon={(({ folder: 'folder-o', book: 'book', flask: 'flask', code: 'code', lightbulb: 'lightbulb-o', briefcase: 'briefcase', heart: 'heart', star: 'star', cloud: 'cloud' } as const)[folder.icon])} iconColor={folder.color ? FOLDER_COLOR_VALUES[folder.color] : undefined}
-                  detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`}
-                  active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />)}
+                <View key={folder.id} style={styles.folderNavigationRow} testID={'folder-row-' + folder.id}>
+                  <MenuRow fill label={folder.name} icon={(({ folder: 'folder-o', book: 'book', flask: 'flask', code: 'code', lightbulb: 'lightbulb-o', briefcase: 'briefcase', heart: 'heart', star: 'star', cloud: 'cloud' } as const)[folder.icon])} iconColor={folder.color ? FOLDER_COLOR_VALUES[folder.color] : undefined}
+                    detail={`${activeNotes.filter(note => note.folderId === folder.id).length} notes`}
+                    active={view === 'folder' && activeFolderId === folder.id} onPress={() => selectFolder(folder.id)} />
+                  <Pressable accessibilityRole="button" accessibilityLabel={'Folder actions for ' + folder.name}
+                    accessibilityState={{ expanded: folderActionsId === folder.id, disabled: !foldersReady || saving || foldersSaving }}
+                    disabled={!foldersReady || saving || foldersSaving} onPress={() => openFolderActions(folder.id)}
+                    style={({ pressed }) => [styles.folderMenuTrigger, (pressed || saving || foldersSaving) && styles.pressed]}>
+                    <FontAwesome name="ellipsis-v" size={18} color="#65775c" accessible={false} />
+                  </Pressable>
+                </View>)}
               {folders.length > 3 && <Pressable accessibilityRole="button"
                 accessibilityLabel={foldersExpanded ? 'Show fewer folders' : `View all folders, ${folders.length}`}
                 accessibilityState={{ expanded: foldersExpanded }}
@@ -1029,7 +1087,6 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
-              {view === 'folder' && activeFolderId && folders.some(folder => folder.id === activeFolderId) && <View style={styles.folderControls}><Pressable accessibilityRole="button" disabled={foldersSaving} accessibilityState={{ disabled: foldersSaving }} onPress={() => openFolderDialog('rename', folders.find(folder => folder.id === activeFolderId))} style={styles.folderControl}><Text style={styles.folderControlText}>Rename folder</Text></Pressable><Pressable accessibilityRole="button" disabled={foldersSaving} onPress={() => { const folder = folders.find(item => item.id === activeFolderId); if (folder) openFolderAppearance(folder); }} style={styles.folderControl}><Text style={styles.folderControlText}>Customize folder</Text></Pressable><Pressable accessibilityRole="button" disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }} onPress={() => { setDrawerOpen(false); const folder = folders.find(item => item.id === activeFolderId); if (folder) confirmDeleteFolder(folder); }} style={styles.folderControl}><Text style={styles.folderDanger}>Delete folder</Text></Pressable></View>}
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
                <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
@@ -1043,6 +1100,24 @@ export function NotesWorkspace() {
               <Text style={styles.drawerFooterText}>Save Your Mind.</Text>
             </View>
           </View>
+          {folderActionsFolder && folderActionsMenu && <View style={styles.folderActionsLayer}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close folder actions"
+              style={styles.actionsBackdrop} onPress={closeFolderActions} />
+            <ScrollView style={styles.folderActionsCard} contentContainerStyle={styles.folderActionsContent}
+              keyboardShouldPersistTaps="handled" accessibilityViewIsModal onAccessibilityEscape={closeFolderActions}
+              accessibilityLabel={'Actions for folder ' + folderActionsFolder.name} testID="folder-actions-menu">
+              <Text accessibilityRole="header" style={styles.label}>{folderActionsFolder.name}</Text>
+              {FOLDER_ACTIONS.map(option => <Pressable key={option.action} accessibilityRole="button"
+                accessibilityLabel={option.label + ': ' + folderActionsFolder.name}
+                disabled={saving || foldersSaving} accessibilityState={{ disabled: saving || foldersSaving }}
+                onPress={() => handleFolderAction(folderActionsFolder.id, folderActionsMenu.revision, option.action)}
+                style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
+                <FontAwesome name={option.icon} size={18} color={option.action === 'delete' ? '#b3261e' : '#52634b'} accessible={false} />
+                <Text style={[styles.actionsMenuText, option.action === 'delete' && styles.actionsMenuDanger]}>{option.label}</Text>
+              </Pressable>)}
+              <Action label="Cancel folder actions" secondary onPress={closeFolderActions} />
+            </ScrollView>
+          </View>}
         </View>
       </Modal>
 
@@ -1192,6 +1267,12 @@ const styles = StyleSheet.create({
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
   drawerNavigation: { paddingTop: 15, gap: 7 },
+  folderNavigationRow: { flexDirection: 'row', alignItems: 'center' },
+  folderNavigationButton: { flex: 1, minWidth: 0 },
+  folderMenuTrigger: { width: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
+  folderActionsLayer: { ...StyleSheet.absoluteFill, padding: 20, alignItems: 'center', justifyContent: 'center' },
+  folderActionsCard: { flexGrow: 0, width: '100%', maxWidth: 320, maxHeight: '80%', borderRadius: 16, backgroundColor: '#ffffff' },
+  folderActionsContent: { padding: 16, gap: 8 },
   folderAppearanceChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingVertical: 8 },
   folderAppearanceOption: { minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 9, borderWidth: 1, borderColor: '#dce6d4' },
   folderAppearanceSelected: { borderColor: '#3b7f16', backgroundColor: '#eff7e9' },

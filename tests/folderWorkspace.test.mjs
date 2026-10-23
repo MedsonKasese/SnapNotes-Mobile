@@ -144,6 +144,7 @@ function newFolder(app, name) {
 }
 function requestDelete(app) {
   action(app, folder.name).props.onPress();
+  openFolderMenu(app, folder.name);
   button(app, 'Delete folder').props.onPress();
   return app.alerts.at(-1)[2].find(item => item.text === 'Delete folder').onPress;
 }
@@ -308,8 +309,13 @@ test('three or fewer folders do not show a redundant expand control', async () =
   assert.equal(labeled(app, 'Create new folder').props.disabled, false);
 });
 
+function openFolderMenu(app, name = folder.name) {
+  labeled(app, 'Open notes navigation').props.onPress();
+  labeled(app, 'Folder actions for ' + name).props.onPress();
+  return find(app.render(), item => item.props.testID === 'folder-actions-menu');
+}
 function openAppearance(app, name = folder.name) {
-  action(app, name).props.onPress();
+  openFolderMenu(app, name);
   button(app, 'Customize folder').props.onPress();
   return appearanceModal(app);
 }
@@ -401,7 +407,7 @@ test('appearance save blocks double taps and pre-render Android back until persi
   const modal = appearanceModal(app);
   const save = action(app, 'Save appearance');
   const cancel = action(app, 'Cancel');
-  const reopen = button(app, 'Customize folder');
+  const reopen = labeled(app, 'Folder actions for ' + folder.name);
   save.props.onPress();
   save.props.onPress();
   modal.props.onRequestClose();
@@ -438,7 +444,7 @@ test('every supported folder icon and color is selectable and round-trips throug
 
 test('renaming a customized folder preserves appearance and creation uses valid defaults', async () => {
   const app = await workspace({ initialFolders: [{ ...folder, icon: 'flask', color: 'teal' }] });
-  action(app, folder.name).props.onPress();
+  openFolderMenu(app);
   button(app, 'Rename folder').props.onPress();
   input(app).props.onChangeText('Renamed research');
   action(app, 'Save folder').props.onPress();
@@ -452,4 +458,193 @@ test('renaming a customized folder preserves appearance and creation uses valid 
   assert.equal(created.icon, 'folder');
   assert.equal(created.color, '');
   assert.equal(app.noteWrites.length, 0);
+});
+
+const folderMenu = app => elements(app.render()).find(item => item.props.testID === 'folder-actions-menu');
+const navigationOpen = app => labeled(app, 'Open notes navigation').props.accessibilityState.expanded;
+const drawerModal = app => find(app.render(), item => item.type === 'Modal' && elements(item).some(child => child.props.accessibilityLabel === 'Close notes navigation'));
+
+test('each visible folder has a separate accessible overflow button next to its note count, not shared controls', async () => {
+  const initialFolders = Array.from({ length: folders.MAX_FOLDERS }, (_, index) => ({ ...folder, id: 'folder-' + (index + 1), name: 'Folder ' + (index + 1) }));
+  const app = await workspace({ initialFolders });
+  labeled(app, 'Open notes navigation').props.onPress();
+  const triggers = () => elements(app.render()).filter(item => item.props.accessibilityLabel?.startsWith('Folder actions for '));
+  assert.equal(triggers().length, 3);
+  assert.equal(elements(app.render()).some(item => item.type === 'Pressable' && ['Rename folder', 'Customize folder', 'Delete folder'].includes(text(item))), false);
+  labeled(app, 'View all folders, 20').props.onPress();
+  assert.equal(triggers().length, folders.MAX_FOLDERS);
+  for (const item of initialFolders) {
+    const row = find(app.render(), element => element.props.testID === 'folder-row-' + item.id);
+    const children = row.props.children;
+    assert.equal(children[0].props.label, item.name);
+    assert.match(children[0].props.detail, /^\d+ notes$/);
+    assert.equal(children[0].props.fill, true);
+    assert.equal(children[1].props.accessibilityLabel, 'Folder actions for ' + item.name);
+    assert.equal(children[1].props.accessibilityRole, 'button');
+    assert.equal(children[1].props.accessibilityState.expanded, false);
+    const triggerStyle = children[1].props.style({ pressed: false }).flat().filter(Boolean);
+    assert.ok(triggerStyle.some(style => style.width >= 44 && style.minHeight >= 44));
+  }
+  openFolderMenu(app, 'Folder 20');
+  assert.equal(labeled(app, 'Folder actions for Folder 20').props.accessibilityState.expanded, true);
+  assert.equal(folderMenu(app).props.accessibilityLabel, 'Actions for folder Folder 20');
+  assert.equal(app.folderWrites.length, 0);
+  assert.equal(app.noteWrites.length, 0);
+});
+
+test('opening folder actions does not navigate, change filters or discard an editor draft', async () => {
+  const other = { ...folder, id: 'other', name: 'Other' };
+  const app = await workspace({ initialFolders: [folder, other] });
+  action(app, other.name).props.onPress();
+  openFolderMenu(app);
+  assert.equal(action(app, other.name).props.active, true);
+  assert.equal(action(app, folder.name).props.active, false);
+  assert.equal(find(app.render(), item => item.type === 'FlatList').props.data.length, 0);
+  labeled(app, 'Close folder actions').props.onPress();
+  app.controller.dispatch({ type: 'change', field: 'title', value: 'Unsaved thought' });
+  const draft = { ...app.controller.getSnapshot().state.draft };
+  openFolderMenu(app);
+  assert.deepEqual(app.controller.getSnapshot().state.draft, draft);
+  assert.equal(app.alerts.length, 0);
+  assert.equal(app.noteWrites.length, 0);
+  assert.equal(app.folderWrites.length, 0);
+});
+
+test('rename from a non-active folder menu changes only that folder and closes navigation before its dialog', async () => {
+  const other = { ...folder, id: 'other', name: 'Other', icon: 'cloud', color: 'teal' };
+  const app = await workspace({ initialFolders: [folder, other] });
+  action(app, other.name).props.onPress();
+  openFolderMenu(app);
+  labeled(app, 'Rename folder: ' + folder.name).props.onPress();
+  assert.equal(folderMenu(app), undefined);
+  assert.equal(navigationOpen(app), false);
+  assert.equal(elements(app.render()).filter(item => item.type === 'Modal' && item.props.visible).length, 1);
+  assert.equal(input(app).props.value, folder.name);
+  input(app).props.onChangeText('Renamed target');
+  action(app, 'Save folder').props.onPress();
+  await app.flush();
+  assert.deepEqual(JSON.parse(app.storedFolders).map(item => item.name), ['Renamed target', other.name]);
+  assert.deepEqual(JSON.parse(app.storedFolders)[1], other);
+  assert.equal(action(app, other.name).props.active, true);
+});
+
+test('customize from a non-active folder menu preserves the currently open folder', async () => {
+  const other = { ...folder, id: 'other', name: 'Other', icon: 'cloud', color: 'teal' };
+  const app = await workspace({ initialFolders: [folder, other] });
+  action(app, other.name).props.onPress();
+  openAppearance(app);
+  assert.equal(navigationOpen(app), false);
+  assert.equal(folderMenu(app), undefined);
+  assert.equal(elements(app.render()).filter(item => item.type === 'Modal' && item.props.visible).length, 1);
+  labeled(app, 'star folder icon').props.onPress();
+  action(app, 'Save appearance').props.onPress();
+  await app.flush();
+  const saved = JSON.parse(app.storedFolders);
+  assert.equal(saved[0].icon, 'star');
+  assert.deepEqual(saved[1], other);
+  assert.equal(action(app, other.name).props.active, true);
+  assert.equal(app.noteWrites.length, 0);
+});
+
+test('delete from a non-active folder menu confirms its name and unfiles only that folder’s notes', async () => {
+  const other = { ...folder, id: 'other', name: 'Other' };
+  const otherNote = { ...note, id: 'other-note', folderId: other.id };
+  const app = await workspace({ initialFolders: [folder, other], initialNotes: [note, otherNote] });
+  action(app, other.name).props.onPress();
+  openFolderMenu(app);
+  const remove = labeled(app, 'Delete folder: ' + folder.name).props.onPress;
+  remove();
+  remove();
+  assert.equal(app.alerts.length, 1, 'a stale second tap cannot open another confirmation');
+  assert.match(app.alerts[0][1], /Delete "Research"/);
+  assert.equal(navigationOpen(app), false);
+  assert.equal(folderMenu(app), undefined);
+  app.alerts[0][2].find(item => item.text === 'Delete folder').onPress();
+  await app.flush();
+  assert.deepEqual(JSON.parse(app.storedFolders), [other]);
+  assert.equal(app.storedNotes[0].folderId, null);
+  assert.deepEqual(app.storedNotes[1], otherNote);
+  assert.equal(action(app, other.name).props.active, true);
+  remove();
+  assert.equal(app.alerts.length, 1);
+});
+
+test('Back, outside tap, cancel and accessibility escape dismiss folder actions without closing the drawer', async () => {
+  const app = await workspace();
+  for (const dismiss of [
+    () => drawerModal(app).props.onRequestClose(),
+    () => labeled(app, 'Close folder actions').props.onPress(),
+    () => action(app, 'Cancel folder actions').props.onPress(),
+    () => folderMenu(app).props.onAccessibilityEscape(),
+  ]) {
+    openFolderMenu(app);
+    const panel = find(app.render(), item => item.props.importantForAccessibility === 'no-hide-descendants' && item.props.accessibilityElementsHidden);
+    assert.ok(panel);
+    assert.equal(folderMenu(app).props.accessibilityViewIsModal, true);
+    assert.equal(elements(app.render()).filter(item => item.type === 'Modal' && item.props.visible).length, 1);
+    dismiss();
+    assert.equal(folderMenu(app), undefined);
+    assert.equal(navigationOpen(app), true);
+    assert.equal(labeled(app, 'Folder actions for ' + folder.name).props.accessibilityState.expanded, false);
+  }
+  drawerModal(app).props.onRequestClose();
+  assert.equal(navigationOpen(app), false);
+  assert.equal(app.folderWrites.length, 0);
+  assert.equal(app.noteWrites.length, 0);
+});
+
+test('dismissed or replaced menu callbacks cannot act on the wrong folder and drawer reopen is fresh', async () => {
+  const other = { ...folder, id: 'other', name: 'Other' };
+  const app = await workspace({ initialFolders: [folder, other] });
+  openFolderMenu(app);
+  const staleRename = labeled(app, 'Rename folder: ' + folder.name).props.onPress;
+  labeled(app, 'Folder actions for ' + other.name).props.onPress();
+  staleRename();
+  assert.equal(folderMenu(app).props.accessibilityLabel, 'Actions for folder Other');
+  assert.equal(elements(app.render()).filter(item => item.type === 'Modal' && item.props.visible).length, 1);
+  const staleDelete = labeled(app, 'Delete folder: Other').props.onPress;
+  labeled(app, 'Close notes navigation').props.onPress();
+  staleDelete();
+  assert.equal(app.alerts.length, 0);
+  assert.equal(navigationOpen(app), false);
+  labeled(app, 'Open notes navigation').props.onPress();
+  assert.equal(folderMenu(app), undefined);
+  action(app, folder.name).props.onPress();
+  assert.equal(action(app, folder.name).props.active, true);
+  assert.equal(navigationOpen(app), false);
+  assert.equal(app.folderWrites.length, 0);
+});
+
+test('folder action triggers reject stale presses while a folder write is pending', async () => {
+  const pending = deferred();
+  const app = await workspace({ saveFolders: () => pending.promise });
+  const staleTrigger = labeled(app, 'Folder actions for ' + folder.name).props.onPress;
+  newFolder(app, 'Another').props.onPress();
+  staleTrigger();
+  assert.equal(folderMenu(app), undefined);
+  assert.equal(labeled(app, 'Folder actions for ' + folder.name).props.disabled, true);
+  assert.equal(labeled(app, 'Folder actions for ' + folder.name).props.accessibilityState.disabled, true);
+  pending.resolve();
+  await app.flush();
+  openFolderMenu(app);
+  assert.equal(folderMenu(app).props.accessibilityLabel, 'Actions for folder ' + folder.name);
+});
+
+test('a previous opening cannot act after the same folder is reopened or after navigation changes', async () => {
+  const app = await workspace();
+  openFolderMenu(app);
+  const staleRename = labeled(app, 'Rename folder: ' + folder.name).props.onPress;
+  labeled(app, 'Close folder actions').props.onPress();
+  openFolderMenu(app);
+  staleRename();
+  assert.ok(folderMenu(app), 'the new opening must remain intact');
+  assert.equal(navigationOpen(app), true);
+  assert.equal(elements(app.render()).filter(item => item.type === 'Modal' && item.props.visible).length, 1);
+  const staleDelete = labeled(app, 'Delete folder: ' + folder.name).props.onPress;
+  action(app, 'Archived').props.onPress();
+  staleDelete();
+  assert.equal(folderMenu(app), undefined);
+  assert.equal(navigationOpen(app), false);
+  assert.equal(app.alerts.length, 0);
+  assert.equal(app.folderWrites.length, 0);
 });
