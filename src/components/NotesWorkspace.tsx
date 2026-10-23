@@ -19,8 +19,8 @@ const categoryLabel = (category: NoteCategory) => category.charAt(0).toUpperCase
 const EDITOR_DRAFT_KEY = '@snapnotes-mobile/editor-draft';
 const EDITOR_DRAFT_VERSION = 1;
 
-function Action({ label, onPress, secondary = false, disabled = false }: {
-  label: string; onPress: () => void; secondary?: boolean; disabled?: boolean;
+function Action({ label, onPress, secondary = false, destructive = false, disabled = false }: {
+  label: string; onPress: () => void; secondary?: boolean; destructive?: boolean; disabled?: boolean;
 }) {
   return (
     <Pressable
@@ -29,11 +29,11 @@ function Action({ label, onPress, secondary = false, disabled = false }: {
       disabled={disabled}
       accessibilityState={{ disabled }}
       style={({ pressed }) => [
-        styles.button, secondary && styles.secondaryButton,
+        styles.button, secondary && styles.secondaryButton, destructive && styles.destructiveButton,
         (pressed || disabled) && styles.pressed,
       ]}
     >
-      <Text style={[styles.buttonText, secondary && styles.secondaryText]}>{label}</Text>
+      <Text style={[styles.buttonText, secondary && styles.secondaryText, destructive && styles.destructiveButtonText]}>{label}</Text>
     </Pressable>
   );
 }
@@ -487,7 +487,7 @@ export function NotesWorkspace() {
               <Text style={styles.eyebrow}>YOUR WORKSPACE</Text>
               <Text accessibilityRole="header" style={styles.screenTitle}>{view === 'trash' ? 'Trash' : view === 'archive' ? 'Archived' : categoryFilter === 'all' ? 'All notes' : categoryLabel(categoryFilter)}</Text>
             </View>
-            {view === 'trash' ? <Action label="Empty Trash" onPress={confirmEmptyTrash} disabled={saving || trashNotes.length === 0} /> : <Action label="+ New note" onPress={openNewNote} />}
+            {view === 'trash' ? <Action label="Empty Trash" destructive onPress={confirmEmptyTrash} disabled={saving || trashNotes.length === 0} /> : <Action label="+ New note" onPress={openNewNote} />}
           </View>
           <Text style={styles.libraryHint}>{view === 'trash' ? `${trashNotes.length} trashed notes. Restore within 15 days or they are permanently deleted.` : view === 'archive' ? `${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}. Restore a note to return it to your library.` : categoryFilter === 'all' ? 'Your saved notes, all in one place.' : `${categoryNotes.length} notes in ${categoryLabel(categoryFilter)}.`}</Text>
           {view === 'library' && <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryFilterBar} contentContainerStyle={styles.categoryFilterItems}>
@@ -730,6 +730,8 @@ const styles = StyleSheet.create({
   hint: { color: '#687763', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 2 },
   button: { backgroundColor: '#48a111', borderRadius: 11, paddingHorizontal: 15, paddingVertical: 12, minHeight: 46, justifyContent: 'center', alignItems: 'center' },
+  destructiveButton: { backgroundColor: '#b3261e' },
+  destructiveButtonText: { color: '#ffffff' },
   secondaryButton: { backgroundColor: '#f0f5eb', borderWidth: 1, borderColor: '#dce6d4' },
   buttonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
   secondaryText: { color: '#3b6f25' },
