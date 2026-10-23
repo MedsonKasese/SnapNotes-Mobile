@@ -1,4 +1,4 @@
-import { initialNotesState, notesReducer } from './notes.ts';
+import { initialNotesState, notesReducer, validateDraft } from './notes.ts';
 import type { Note, NotesAction, NotesState } from './notes.ts';
 
 export const TRASH_RETENTION_DAYS = 15;
@@ -66,7 +66,7 @@ export function createNotesController(storage: NotesStorage) {
     publish({ ...snapshot, state: notesReducer(snapshot.state, action) });
   }
 
-  async function updateNoteText(id: string, text: string, now: string) {
+  async function updateNoteText(id: string, text: string, now: string, html?: string) {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
     if (!previous.notes.some(note => note.id === id)) {
@@ -75,7 +75,7 @@ export function createNotesController(storage: NotesStorage) {
     }
 
     const notes = previous.notes.map(note => note.id === id
-      ? { ...note, text, updatedAt: now }
+      ? { ...note, text, ...(html !== undefined ? { html } : {}), updatedAt: now }
       : note);
     publish({ ...snapshot, status: 'saving', state: previous, storageError: null });
     try {
@@ -199,6 +199,43 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  async function duplicateNote(id: string, now: string) {
+    if (snapshot.status !== 'ready') return;
+    const previous = snapshot.state;
+    const source = previous.notes.find(note => note.id === id && note.deletedAt === null);
+    if (!source) {
+      publish({ ...snapshot, state: { ...previous, error: 'This note could not be duplicated.' } });
+      return;
+    }
+    // Follow the PWA: copies retain content/category but start unpinned, unarchived,
+    // with fresh creation/edit timestamps. Avoid collisions with imported/local IDs.
+    const ids = new Set(previous.notes.map(note => note.id));
+    let sequence = previous.notes.length + 1;
+    while (ids.has(`local-note-${sequence}`)) sequence += 1;
+    const copy: Note = {
+      ...source,
+      id: `local-note-${sequence}`,
+      title: source.title ? `Copy of ${source.title}` : 'Copy of Untitled note',
+      createdAt: now,
+      updatedAt: now,
+      pinned: false,
+      archived: false,
+      deletedAt: null,
+    };
+    if (validateDraft(copy)) {
+      publish({ ...snapshot, storageError: 'This note is too long to duplicate. Shorten it before duplicating.' });
+      return;
+    }
+    const notes = [copy, ...previous.notes];
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      publish({ state: { ...previous, notes, error: null, notice: 'Note duplicated.' }, status: 'ready', storageError: null });
+    } catch {
+      publish({ state: previous, status: 'ready', storageError: 'Could not duplicate this note. The original note has not been changed.' });
+    }
+  }
+
   async function emptyTrash() {
     if (snapshot.status !== 'ready') return;
     const previous = snapshot.state;
@@ -241,6 +278,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, emptyTrash,
+    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, emptyTrash,
   };
 }

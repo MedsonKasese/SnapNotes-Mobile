@@ -4,16 +4,28 @@ A private, standalone React Native app built with Expo SDK 58 and TypeScript. Th
 
 ## Current scope
 
-You can create and edit plain-text notes saved **on this device**. After Save succeeds, notes survive app reloads and restarts. The editor also autosaves one recovery draft on this device and restores it into the editor after a successful notes load. Recovery drafts are not saved notes, do not appear in the library, and are cleared after a successful save or an explicit discard. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
+You can create and edit notes saved **on this device**, with bold, italics, unordered and ordered lists, checkboxes, and links. The migration checklist records additional implemented features and their verification status. After Save succeeds, notes survive app reloads and restarts. The editor also autosaves one recovery draft on this device and restores it into the editor after a successful notes load. Recovery drafts are not saved notes, do not appear in the library, and are cleared after a successful save or an explicit discard. There is no cloud backup or PWA sync; storage is unencrypted, and clearing app data or uninstalling can remove notes. This remains a development slice, not a replacement for the PWA or a secure store for sensitive notes.
 
 - Optional title and body; at least one must contain non-whitespace text. Body-only notes display as “Untitled note” without storing that fallback.
-- The 1,500-character budget follows the PWA inline editor: normalized title + body, including `## ` and a line break when a title is present. The live counter and save validator use the same rule. Title/body are explicit native fields; Markdown heading parsing and rich text are not included.
+- The 1,500-character budget follows the PWA inline editor: normalized title + visible body text, including `## ` and a line break when a title is present. HTML markup is not counted. The title stays a separate native field; the offline rich body editor uses the PWA's formatting commands. Markdown heading parsing is not included.
 - Saving creates a new note at the top of the device list. Editing updates that note without changing its ID, creation time, or default `general` category; update time changes on save.
 - Draft changes do not touch a saved note until Save changes is tapped. The latest changed editor draft is autosaved to a separate device-only recovery key after a short debounce and restored after restart; changing views still asks before discarding it. Recovery is a single editor draft, not the PWA's full multi-draft library.
 
-There is no account/auth, cloud sync, migration/import from the PWA, categories UI, deletion, or notifications. The PWA repository and its users/data are untouched.
+The mobile app now also includes category assignment and filtering, pinning, archive, Trash with 15-day retention and Empty Trash, and note-actions menus. PR #19 proposes note duplication and rich formatting; device verification is pending. There is still no account/auth, cloud sync, migration/import from the PWA, or notifications. The PWA repository and its users/data are untouched.
 
 No secrets or production-data connections are needed. Deployment and over-the-air update setup are out of scope.
+
+## Migration feature status
+
+See [MIGRATION_CHECKLIST.md](MIGRATION_CHECKLIST.md) for the authoritative, actively maintained feature-by-feature status. The PWA remains the behaviour reference. PR #19 adds duplication and formatting for review; automated checks and Android/iOS JavaScript exports pass, while native device and authenticated DeepCode/Snyk verification remain required.
+
+### Formatting notes
+
+The **Note** label stays on the left; six icon-only controls sit on the right in PWA order. The toolbar can scroll horizontally on narrow screens so touch targets do not shrink. Select text to apply emphasis or a link, or choose a style before typing. With no selection, Insert link inserts the URL itself. Only complete `https://`, `http://`, and `mailto:` links are accepted. Checkbox inserts a marker at each selected logical line without replacing its text; saved checkboxes still toggle directly in the library and archive.
+
+Formatting is stored as sanitized optional HTML alongside plain text for search and character counts. Legacy plain notes need no migration; formatting survives edits, draft recovery, duplication, and restart. The editor loads no external resources, pasted content is plain text, and saved links open through the operating system. The bundled Expo Go WebView is used; saved note cards render with native text. This is feature parity for these six controls, not PWA cloud sync or arbitrary HTML import.
+
+Before approving PR #19, test every toolbar icon on an SDK-58-compatible Android/iOS device, including selected and unselected text, links and cancellation, multiline checkboxes, keyboard focus, narrow screens, large text, save/reopen, restart recovery, duplication, and failed storage writes. Keep the PR unmerged until the owner approves.
 
 ## Requirements and setup
 
@@ -86,11 +98,11 @@ The reference is PWA main at [74c3044](https://github.com/MedsonKasese/SnapNotes
 - [`js/local-library.js`](https://github.com/MedsonKasese/SnapNotes/blob/74c3044820b4cace801a4824e8c0a301e630917b/js/local-library.js): an injected storage boundary with asynchronous read/write completion. Mobile substitutes Expo-compatible AsyncStorage for browser IndexedDB/localStorage, with one versioned notes document; there is no browser fallback copy or account namespace yet.
 - [`js/app.js`](https://github.com/MedsonKasese/SnapNotes/blob/74c3044820b4cace801a4824e8c0a301e630917b/js/app.js) (`saveEditorNote`): validate the shared character budget, prepend new notes, retain creation/update metadata, and block repeat Save taps until the save finishes. Mobile deliberately keeps the draft when local storage fails rather than reporting success.
 
-This is behavior reuse, not browser-code copying or format compatibility. Existing mobile title/body fields and metadata remain unchanged. PWA draft recovery, rich text, folders, accounts and sync are not included in this saved-note persistence PR. Mobile IDs remain device-local and collision-checked; cross-device ID strategy belongs with a separately reviewed sync design.
+The original saved-note persistence slice did not include rich text or recovery; subsequent PRs added local draft recovery, and PR #19 adds the six formatting controls described above. Folders, accounts and sync are still separate work. Mobile IDs remain device-local and collision-checked; cross-device ID strategy belongs with a separately reviewed sync design.
 
 ## Known dependency advisories
 
-The SDK 58 dependency tree currently reports **22 npm audit findings (15 high, 7 moderate)**, including transitive `braces`, `node-forge`, and `uuid` advisories. A compatible `npm audit fix` did not clear them; npm's suggested forced fix would downgrade Expo to SDK 44, so it was not applied. These findings are not waived or proof of exploitability in this screen. Keep this starter for development/review only and reassess upstream fixes before any release. Do not expose the development server to untrusted networks. Run `npm audit` to see the current report.
+The PR #19 lockfile audit reports **15 high-severity npm findings**, including transitive `braces` and `node-forge` advisories. The base branch reports the same 15 affected packages; the formatting dependencies add no new audit findings. These findings are not waived or proof of exploitability in this screen. Keep this starter for development/review only and reassess upstream fixes before any release. Do not force incompatible Expo/React Native upgrades or expose the development server to untrusted networks. Run `npm audit` to see the current report; an authenticated DeepCode/Snyk code scan remains a separate owner review gate.
 
 ## Review this slice on a phone or emulator
 
@@ -105,7 +117,7 @@ The SDK 58 dependency tree currently reports **22 npm audit findings (15 high, 7
 9. With a delayed/rejecting storage backend in a development harness, verify that startup hides the editor until loading succeeds. Read errors must show Retry and never write an empty collection. A failed Save must keep the draft and original saved list, show an error, and allow retry. While saving, fields/actions are disabled and rapid Save taps cannot overlap. These paths are covered deterministically by the controller tests; native presentation still needs device review.
 10. With malformed or newer-version data in the development storage key, restart: show a load error, retain the original bytes, and block editing/saving rather than silently resetting. There is intentionally no destructive reset/recovery button in this slice.
 
-The behavior reference is the PWA at [commit 74c3044](https://github.com/MedsonKasese/SnapNotes/tree/74c3044820b4cace801a4824e8c0a301e630917b): `js/app.js` (`saveEditorNote`) and `js/notes.js` (inline edit validation/update). Mobile uses separate plain-text fields rather than the PWA rich-text composer. Native interaction checks above require a device/emulator; model tests and JavaScript bundling alone do not verify them.
+The behavior reference is the PWA at [commit 74c3044](https://github.com/MedsonKasese/SnapNotes/tree/74c3044820b4cace801a4824e8c0a301e630917b): `js/app.js` (toolbar commands and `saveEditorNote`) and `js/notes.js` (inline edit validation/update). Mobile keeps a separate title field and adapts the PWA's rich-body formatting to its native toolbar and offline WebView editor. Native interaction checks above require a device/emulator; model tests and JavaScript bundling alone do not verify them.
 
 ## PR #4: scalable on-device note storage (merged)
 

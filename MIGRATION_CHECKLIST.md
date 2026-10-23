@@ -61,12 +61,12 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 4. Note creation, editing, and formatting
 
-- [ ] Compare the native editor with the PWA editor and document supported formatting.
+- [x] Compare the native editor with the PWA editor and document supported formatting. (PR #19 reviewed PWA `js/app.js` toolbar commands and `index.html` icon order; README documents the six supported controls and native adaptations.)
 - [ ] Create, edit, and save notes reliably.
 - [ ] Support the PWA's title convention and avoid duplicate title markers.
 - [ ] Preserve note content when switching views, opening navigation, or temporarily leaving the editor.
 - [ ] Handle empty titles/bodies and whitespace consistently with the PWA.
-- [ ] Add supported formatting (headings, emphasis, lists, links, and other PWA-supported formatting) with native-friendly editing.
+- [ ] Add supported formatting (headings, emphasis, lists, links, and other PWA-supported formatting) with native-friendly editing. (PR #19 implements bold, italics, unordered/ordered lists, checkboxes and safe links using an offline rich editor. Icon-only tools replace the old checklist button opposite the Note label. Sanitized optional HTML survives save/reload, draft recovery and duplication; visible text drives the shared budget. Automated and browser-document checks pass; Android/iOS native keyboard, selection, font scaling and screen-reader verification remain required. Headings and unrelated PWA features are not part of this slice.)
 - [ ] Support checklists/task items if present in the PWA; verify checkbox alignment and interaction. (PR #11 adds native checklist insertion; PR #12 adds persisted inline toggles, compact rows, italic checked labels, and a thicker per-line strike-through. Typecheck, lint, 80 tests, Expo compatibility, and Android/iOS JavaScript exports pass locally. Android visual and interaction testing is still required before marking complete.)
 - [ ] Handle keyboard focus, multiline text, selection, paste, and scrolling while editing.
 - [ ] Warn about unsaved changes only when necessary and never discard content unexpectedly.
@@ -108,7 +108,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 - [x] Pin and unpin notes, matching PWA behaviour. (PR #14 merged; user verified the pin icon, pinned-first sorting, persistence, and clean card layout against the PWA.)
 - [ ] Compact anchored note-actions popup and tap-card-to-open behavior (PR #18 implemented; automated checks pass, Android and screen-reader verification pending). Use the reference menu design without adding new actions; preserve inline checklist interaction, the standalone pin button, and Trash-only actions. Verify popup placement near screen edges and with large text.
-- [ ] Duplicate notes if supported by the PWA.
+- [ ] Duplicate notes if supported by the PWA. (PR #19 implements PWA-style Copy of title, fresh timestamps, original category/body/formatting, unpinned/unarchived copies, storage-first saves, and regression tests. Maximum-length copies are rejected before writing with a clear message. Automated checks pass; native device and owner review remain pending. PR stays unmerged.)
 - [ ] Archive and restore notes. (PR #15 implements the initial archive library, persisted archive state, and restore action; testing required.)
 - [ ] Move notes to Trash and restore them.
 - [ ] Permanently delete notes with clear confirmation.
@@ -270,7 +270,7 @@ Update this table as PRs merge and testing results are confirmed.
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
 | Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
 | Categories and folders | **Categories implemented; user verified** | PR #13 merged; user verified category display and assignment on Android. Folders remain future work. |
-| Formatting and checklists | In progress; Android testing required | PR #11 adds insertion; PR #12 toggles and persists checklist previews without opening the editor. Compact rows and italic checked labels with a thicker strike-through are implemented. Automated checks pass; native visual, font-scaling, and touch testing remain. Full formatting remains future work. |
+| Formatting and checklists | Implemented in PR #19; native verification required | Six PWA-order icons, rich emphasis/lists/safe links and checkboxes; optional sanitized HTML with backward-compatible plain notes. Checkbox selection preserves text; checked styling and inline persistence remain. Typecheck, lint, automated tests, Expo compatibility and Android/iOS JavaScript exports pass. Native visual/keyboard/selection/font-scaling/accessibility QA and authenticated DeepCode/Snyk scanning remain owner gates; not release-ready or merged. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
 | Authentication and cloud sync | Not started | Design only after data-model/security audit |
 | Attachments and document viewer | Not started | Audit PWA rules and Android file access |

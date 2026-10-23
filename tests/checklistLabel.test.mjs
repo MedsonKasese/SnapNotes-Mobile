@@ -77,3 +77,10 @@ test('changed text never reuses stale stroke widths while awaiting native layout
   const next = render({ text: 'A longer task', checked: true });
   assert.equal(overlay(next).props.children.length, 0);
 });
+
+test('rich children are rendered in place of the plain label fallback', () => {
+  const render = renderLabel();
+  const children = { type: 'FormattedText', props: { text: 'formatted label' } };
+  const tree = render({ text: 'plain label', checked: false, children });
+  assert.equal(labelText(tree).props.children, children);
+});
