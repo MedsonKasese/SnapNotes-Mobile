@@ -527,16 +527,16 @@ export function NotesWorkspace() {
               </View>
             }
             renderItem={({ item }) => (
-              <View style={styles.card}>
-                <Pressable accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`} disabled={view === 'trash'} onPress={() => editNote(item.id)} style={styles.noteCardTop}>
+              <Pressable style={styles.card} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
+                <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
-                </Pressable>
+                </View>
                 {item.text !== '' && (
                   <View style={styles.notePreview}>
                     {item.text.split('\n').slice(0, 6).map((line, index) => {
                       const checklist = /^(\s*)(☐|☑)(\s)(.*)$/.exec(line);
-                      if (!checklist) return <Pressable key={index} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`} disabled={view === 'trash'} onPress={() => editNote(item.id)}><Text style={styles.noteText}>{line || ' '}</Text></Pressable>;
+                      if (!checklist) return <Text key={index} style={styles.noteText}>{line || ' '}</Text>;
                       const checked = checklist[2] === '☑';
                       return (
                         <Pressable key={index} accessibilityRole="checkbox"
@@ -570,7 +570,7 @@ export function NotesWorkspace() {
                     </Pressable>
                   </View>
                 </View>
-              </View>
+              </Pressable>
             )}
           />
         </View>
