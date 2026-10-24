@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { createPrivateSession } from '../src/privateSession.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_PRIVATE_SCREEN_SOURCE ?? new URL('../src/components/PrivateNotesScreen.tsx', import.meta.url), 'utf8');
@@ -74,6 +75,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
     },
     '@react-native-async-storage/async-storage': {},
     '../privateAccess': { createPrivateAccess: () => access },
+    '../privateSession': { createPrivateSession },
   };
   const exports = {};
   vm.runInNewContext(outputText, {
@@ -91,6 +93,10 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
   return {
     render, flush, calls,
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
+    replayEffects() {
+      for (const effect of effects) effect?.cleanup?.();
+      for (const effect of effects) if (effect) effect.cleanup = effect.callback();
+    },
     unmount() { mounted = false; for (const effect of effects) effect?.cleanup?.(); },
     get writesAfterUnmount() { return writesAfterUnmount; },
     get backs() { return backs; },
@@ -212,4 +218,71 @@ test('wrong password is retryable and corrupt vault status never offers password
   const corrupt = await screen({ status: async () => { throw new Error('corrupt'); } });
   assert.match(text(corrupt.render()), /No changes were made/);
   assert.equal(elements(corrupt.render()).some(item => item.type === 'TextInput'), false);
+});
+
+for (const phase of ['setup', 'locked']) {
+  test(`Cancel exits ${phase} without starting authentication and clears secure inputs`, async () => {
+    const app = await screen({ status: async () => phase });
+    if (phase === 'setup') assert.match(text(app.render()), /cancel after starting setup, it may still finish/);
+    enterPassword(app, phase === 'setup');
+    button(app, 'Cancel').props.onPress();
+    assert.equal(app.backs, 1);
+    assert.equal(app.calls.length, 0);
+    assert.equal(input(app).props.value, '');
+    if (phase === 'setup') assert.equal(input(app, 'Confirm Private Notes password').props.value, '');
+    assert.equal(isUnlocked(app), false);
+  });
+
+  for (const outcome of ['resolve', 'reject']) {
+    test(`Cancel during ${phase} ignores a late ${outcome} and leaves a fresh visit locked`, async () => {
+      const pending = deferred();
+      const app = await screen({ status: async () => phase, setup: () => pending.promise, unlock: () => pending.promise });
+      enterPassword(app, phase === 'setup');
+      button(app, phase === 'setup' ? 'Set password' : 'Unlock').props.onPress();
+      assert.equal(app.calls.length, 1);
+      const cancel = button(app, 'Cancel');
+      assert.notEqual(cancel.props.disabled, true);
+      cancel.props.onPress();
+      assert.equal(app.backs, 1);
+      assert.equal(input(app).props.value, '');
+      if (phase === 'setup') assert.equal(input(app, 'Confirm Private Notes password').props.value, '');
+      if (outcome === 'resolve') pending.resolve(); else pending.reject(new Error('cancelled authentication error'));
+      await app.flush();
+      assert.equal(isUnlocked(app), false);
+      assert.equal(text(app.render()).includes('cancelled authentication error'), false);
+      app.unmount();
+      assert.equal(app.writesAfterUnmount, 0);
+      const fresh = await screen();
+      assert.equal(isUnlocked(fresh), false);
+      assert.equal(input(fresh).props.value, '');
+      enterPassword(fresh); button(fresh, 'Unlock').props.onPress(); await fresh.flush();
+      assert.equal(isUnlocked(fresh), true);
+    });
+  }
+}
+
+for (const initialState of ['background', 'inactive']) {
+  test(`mounting ${initialState} permits authentication only after foreground activation`, async () => {
+    const app = await screen({ initialState });
+    enterPassword(app);
+    button(app, 'Unlock').props.onPress();
+    assert.equal(app.calls.length, 0);
+    app.change('active');
+    button(app, 'Unlock').props.onPress(); await app.flush();
+    assert.equal(app.calls.length, 1);
+    assert.equal(isUnlocked(app), true);
+  });
+}
+
+test('React effect replay invalidates old authentication but allows a fresh foreground attempt', async () => {
+  const pending = deferred();
+  let attempts = 0;
+  const app = await screen({ unlock: () => ++attempts === 1 ? pending.promise : Promise.resolve() });
+  enterPassword(app); button(app, 'Unlock').props.onPress();
+  app.replayEffects(); await app.flush();
+  pending.resolve(); await app.flush();
+  assert.equal(isUnlocked(app), false);
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  assert.equal(app.calls.length, 2);
+  assert.equal(isUnlocked(app), true);
 });

@@ -3,20 +3,31 @@
 export function createPrivateSession() {
   let generation = 0;
   let active = true;
-  let pending = false;
+  let pending: number | null = null;
+
+  function invalidate(): void {
+    generation += 1;
+    pending = null;
+  }
+
   return {
     begin(): number | null {
-      if (!active || pending) return null;
-      pending = true;
+      if (!active || pending !== null) return null;
+      // Each attempt owns a distinct token, even within the same foreground session.
+      generation += 1;
+      pending = generation;
       return generation;
     },
     valid(token: number): boolean {
       return active && generation === token;
     },
-    finish(): void { pending = false; },
-    invalidate(): void { generation += 1; pending = false; },
+    finish(token: number): void {
+      // A late completion must not release a newer attempt's pending guard.
+      if (pending === token) pending = null;
+    },
+    invalidate,
     setActive(value: boolean): void {
-      if (!value) this.invalidate();
+      if (!value) invalidate();
       active = value;
     },
   };

@@ -7,7 +7,7 @@ test('only one foreground unlock attempt begins at once', () => {
   const token = session.begin();
   assert.equal(typeof token, 'number');
   assert.equal(session.begin(), null);
-  session.finish();
+  session.finish(token);
   assert.equal(session.valid(token), true);
 });
 
@@ -28,4 +28,29 @@ test('manual lock and navigation invalidate stale results', () => {
   session.invalidate();
   assert.equal(session.valid(token), false);
   assert.notEqual(session.begin(), token);
+});
+
+test('starting a later attempt retires the completed attempt token', () => {
+  const session = createPrivateSession();
+  const old = session.begin();
+  session.finish(old);
+  const current = session.begin();
+  assert.notEqual(current, old);
+  assert.equal(session.valid(old), false);
+  assert.equal(session.valid(current), true);
+});
+
+test('finishing an invalidated attempt cannot release a newer pending attempt', () => {
+  const session = createPrivateSession();
+  const old = session.begin();
+  session.invalidate();
+  const current = session.begin();
+  session.finish(old);
+  assert.equal(session.begin(), null);
+  assert.equal(session.valid(old), false);
+  assert.equal(session.valid(current), true);
+  session.finish(current);
+  const next = session.begin();
+  assert.notEqual(next, null);
+  assert.notEqual(next, current);
 });

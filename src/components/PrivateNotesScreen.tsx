@@ -19,6 +19,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     const session = lifecycle.current;
     let active = true;
     session.mounted = true;
+    sessionGuard.current.setActive(AppState.currentState === 'active');
     void access.status().then(status => { if (active) setPhase(status); })
       .catch(() => { if (active) { setPhase('error'); setError('Could not read the encrypted vault. No changes were made.'); } });
     return () => {
@@ -32,7 +33,6 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     const subscription = AppState.addEventListener('change', state => {
       sessionGuard.current.setActive(state === 'active');
       if (state !== 'active') {
-        sessionGuard.current.setActive(false);
         setPhase(current => current === 'unlocked' ? 'locked' : current);
         setPassword('');
         setConfirmation('');
@@ -78,7 +78,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       }
     } finally {
       session.busy = false;
-      sessionGuard.current.finish();
+      sessionGuard.current.finish(generation);
       if (session.mounted) setBusy(false);
     }
   }
@@ -105,7 +105,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
         <>
           <Text style={styles.description}>
             {phase === 'setup'
-              ? 'Create a password with at least 12 characters. If you forget it, encrypted private content cannot be recovered.'
+              ? 'Create a password with at least 12 characters. If you forget it, encrypted private content cannot be recovered. If you cancel after starting setup, it may still finish. Keep this password to unlock later.'
               : 'Enter your Private Notes password. It is never saved on this device.'}
           </Text>
           <TextInput accessibilityLabel="Private Notes password" placeholder="Password" secureTextEntry
