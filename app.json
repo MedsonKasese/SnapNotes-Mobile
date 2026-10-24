@@ -16,11 +16,21 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.medsonkasese.snapnotes"
     },
     "platforms": [
       "ios",
       "android"
-    ]
+    ],
+    "plugins": [
+      "react-native-quick-crypto"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5ae0344f-7f18-428c-94cc-9a4b6378218c"
+      }
+    },
+    "owner": "medsonkasese"
   }
 }
