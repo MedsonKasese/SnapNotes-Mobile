@@ -48,6 +48,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
   const timers = new Map();
   const storage = { value: null, folderValue: null, libraryValue: null, reads: [...reads], getCalls: 0, sets: [], removes: [] };
   const listeners = new Set();
+  const backHandlerListeners = new Set();
   const dispatchCalls = [];
   const editorCommands = [];
   const saveCalls = [];
@@ -176,7 +177,10 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === 'react-native') return {
         ...Object.fromEntries(['BackHandler', 'FlatList', 'KeyboardAvoidingView', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(type => [type, type])),
         Alert: { alert: (...args) => alerts.push(args) },
-        BackHandler: { addEventListener: () => ({ remove() {} }) },
+        BackHandler: { addEventListener: (_event, callback) => {
+          backHandlerListeners.add(callback);
+          return { remove() { backHandlerListeners.delete(callback); } };
+        } },
         Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
@@ -198,6 +202,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === './FormattedText') return { FormattedText: 'FormattedText' };
       if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
       if (name === './RichNoteEditor') return { RichNoteEditor: 'RichNoteEditor' };
+      if (name === './PrivateNotesScreen') return { PrivateNotesScreen: 'PrivateNotesScreen' };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
@@ -248,6 +253,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
   }
   return {
     render, controller, storage, alerts, timers, slots, updateCalls, dispatchCalls, saveCalls, editorCommands,
+    pressHardwareBack() { return [...backHandlerListeners].at(-1)?.(); },
     get draftHydrated() { return slots[stateSlots.get('draftHydrated')]; },
     get draftStorageError() { return slots[stateSlots.get('draftStorageError')]; },
     flushMicrotasks, advanceTimers,
@@ -529,6 +535,49 @@ test('formatted recovery restores and persists its HTML alongside the visible te
   await persistCurrentDraft(app);
   assert.equal(JSON.parse(app.storage.sets[0]).html, html);
   assert.equal(noteHtmlToText(JSON.parse(app.storage.sets[0]).html), 'Rich only');
+});
+
+test('Private Notes navigation confirms discarding editor changes, returns to the library, and leaves notes and drafts unchanged', async () => {
+  const savedDrafts = [{ id: 'saved-draft', title: 'Saved draft', text: 'Keep this draft', category: 'work', editingId: null, savedAt: '2026-10-20T00:00:00Z' }];
+  const storedDrafts = JSON.stringify(savedDrafts);
+  const ordinaryNote = { ...savedNotes[0], pinned: false, archived: false, deletedAt: null };
+  const app = workspace({ initialNotes: [ordinaryNote] });
+  app.storage.libraryValue = storedDrafts;
+  await startRead(app);
+  await app.flushMicrotasks();
+  typeDraft(app, { title: 'Unsaved title', body: 'Unsaved body' });
+  const savedNotesBefore = app.controller.getSnapshot().state.notes;
+
+  labeled(app.render(), 'Open notes navigation').props.onPress();
+  action(app.render(), 'Private Notes').props.onPress();
+  assert.equal(app.alerts.at(-1)[0], 'Discard unsaved changes?');
+  assert.ok(find(app.render(), element => element.type === 'RichNoteEditor'));
+  assert.equal(elements(app.render()).some(element => element.type === 'PrivateNotesScreen'), false);
+  app.alerts.at(-1)[2].find(button => button.text === 'Discard changes').onPress();
+
+  let tree = app.render();
+  let privateScreen = find(tree, element => element.type === 'PrivateNotesScreen');
+  assert.equal(typeof privateScreen.props.onBack, 'function');
+  assert.deepEqual({ ...app.controller.getSnapshot().state.draft }, { title: '', text: '' });
+  assert.deepEqual(app.controller.getSnapshot().state.notes, savedNotesBefore);
+  assert.equal(app.storage.libraryValue, storedDrafts);
+  assert.equal(app.storage.sets.length, 0);
+  assert.equal(app.storage.removes.length, 0);
+
+  privateScreen.props.onBack();
+  tree = app.render();
+  assert.equal(find(tree, element => element.type === 'FlatList').props.data.length, 1);
+  assert.equal(elements(tree).some(element => element.type === 'PrivateNotesScreen'), false);
+
+  labeled(tree, 'Open notes navigation').props.onPress();
+  action(app.render(), 'Private Notes').props.onPress();
+  assert.ok(find(app.render(), element => element.type === 'PrivateNotesScreen'));
+  assert.equal(app.pressHardwareBack(), true);
+  tree = app.render();
+  assert.equal(find(tree, element => element.type === 'FlatList').props.data.length, 1);
+  assert.equal(elements(tree).some(element => element.type === 'PrivateNotesScreen'), false);
+  assert.deepEqual(app.controller.getSnapshot().state.notes, savedNotesBefore);
+  assert.equal(app.storage.libraryValue, storedDrafts);
 });
 
 test('Save waits for the rich editor snapshot before invoking the controller save', async () => {

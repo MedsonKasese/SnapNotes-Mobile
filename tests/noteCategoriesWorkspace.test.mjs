@@ -105,6 +105,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
         normalizeNoteLink: value => value,
       };
       if (name === './RichNoteEditor') return { RichNoteEditor: 'RichNoteEditor' };
+      if (name === './PrivateNotesScreen') return { PrivateNotesScreen: 'PrivateNotesScreen' };
       if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
       if (name === './FormattedText') return { FormattedText: 'FormattedText' };
       throw new Error(`Unexpected import: ${name}`);
@@ -212,8 +213,8 @@ test('empty categories explain the filter instead of claiming there are no saved
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
   const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'file-text-o', 'archive', 'trash', 'plus']);
-  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Drafts', 'Archived', 'Trash', 'New note']);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'lock', 'file-text-o', 'archive', 'trash', 'plus']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Private Notes', 'Drafts', 'Archived', 'Trash', 'New note']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');

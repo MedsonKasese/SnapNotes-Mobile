@@ -19,9 +19,10 @@ import { ChecklistLabel } from './ChecklistLabel';
 import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
 import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
+import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
-type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts';
+type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
 type NoteAction = 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 type FolderAction = 'rename' | 'customize' | 'delete';
@@ -543,6 +544,15 @@ export function NotesWorkspace() {
     }
   }
 
+  function selectPrivate() {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      closeDrawer();
+      setView('private');
+    });
+  }
+
   function selectDrafts() {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
@@ -763,7 +773,7 @@ export function NotesWorkspace() {
       dismissDrawer();
       return true;
     }
-    if (view === 'editor' || view === 'archive' || view === 'trash' || view === 'folder' || view === 'drafts') {
+    if (view === 'editor' || view === 'archive' || view === 'trash' || view === 'folder' || view === 'drafts' || view === 'private') {
       openLibrary();
       return true;
     }
@@ -928,7 +938,9 @@ export function NotesWorkspace() {
       {foldersSaving && <Text accessibilityLiveRegion="polite" style={styles.hint}>Saving folders on this device…</Text>}
       {draftLibraryError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftLibraryError}</Text>}
 
-      {view === 'editor' ? (
+      {view === 'private' ? (
+        <PrivateNotesScreen onBack={openLibrary} />
+      ) : view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
             contentContainerStyle={styles.editorContent}
@@ -1247,6 +1259,7 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
+              <MenuRow label="Private Notes" icon="lock" detail="Protected vault" active={view === 'private'} onPress={selectPrivate} />
               <MenuRow label="Drafts" icon="file-text-o" detail={`${savedDrafts.length} drafts`} active={view === 'drafts'} onPress={selectDrafts} />
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
