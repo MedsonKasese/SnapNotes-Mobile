@@ -1,4 +1,3 @@
-import * as ExpoCrypto from 'expo-crypto';
 import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { gcm } from '@noble/ciphers/aes.js';
@@ -56,9 +55,11 @@ export function validatePrivateCipherRecord(value: unknown): PrivateCipherRecord
     base64ToBytes(data.ciphertext).length < 17) throw Error('Unsupported or invalid private note format.');
   return data as PrivateCipherRecord;
 }
-export function generatePrivateSalt(cryptoProvider?: CryptoLike | null): Uint8Array {
+export async function generatePrivateSalt(cryptoProvider?: CryptoLike | null): Promise<Uint8Array> {
   if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
-  return cryptoProvider ? cryptoProvider.getRandomValues(new Uint8Array(16)) : ExpoCrypto.getRandomBytes(16);
+  if (cryptoProvider) return cryptoProvider.getRandomValues(new Uint8Array(16));
+  const { getRandomBytes } = await import('expo-crypto');
+  return getRandomBytes(16);
 }
 export async function derivePrivateKey(password: string, salt: Uint8Array, cryptoProvider?: CryptoLike | null): Promise<PrivateKey> {
   if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
@@ -78,7 +79,7 @@ export async function encryptPrivatePayload(
 ): Promise<PrivateCipherRecord> {
   if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
-  const iv = cryptoProvider ? cryptoProvider.getRandomValues(new Uint8Array(12)) : ExpoCrypto.getRandomBytes(12);
+  const iv = cryptoProvider ? cryptoProvider.getRandomValues(new Uint8Array(12)) : (await import('expo-crypto')).getRandomBytes(12);
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
   let ciphertext: Uint8Array;
   if (key instanceof Uint8Array) ciphertext = gcm(key, iv).encrypt(plaintext);
