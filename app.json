@@ -22,6 +22,9 @@
     "platforms": [
       "ios",
       "android"
+    ],
+    "plugins": [
+      "react-native-quick-crypto"
     ]
   }
 }
