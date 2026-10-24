@@ -25,6 +25,12 @@
     ],
     "plugins": [
       "react-native-quick-crypto"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5ae0344f-7f18-428c-94cc-9a4b6378218c"
+      }
+    },
+    "owner": "medsonkasese"
   }
 }
