@@ -115,12 +115,14 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
               autoCapitalize="none" autoCorrect={false} value={confirmation} onChangeText={setConfirmation} style={styles.input} />
           )}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-          <Pressable accessibilityRole="button" disabled={busy} style={styles.button} onPress={() => void submit()}>
-            <Text style={styles.buttonText}>{busy ? 'Please wait…' : phase === 'setup' ? 'Set password' : 'Unlock'}</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => { lock(); onBack(); }}>
-            <Text style={styles.back}>Cancel</Text>
-          </Pressable>
+          <View style={styles.actionRow}>
+            <Pressable accessibilityRole="button" style={styles.cancelButton} onPress={() => { lock(); onBack(); }}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={busy} style={[styles.button, styles.submitButton]} onPress={() => void submit()}>
+              <Text style={styles.buttonText}>{busy ? 'Please wait…' : phase === 'setup' ? 'Set password' : 'Unlock'}</Text>
+            </Pressable>
+          </View>
         </>
       )}
     </View>
@@ -137,4 +139,8 @@ const styles = StyleSheet.create({
   error: { color: '#a32b2b', fontSize: 14 },
   button: { padding: 16, borderRadius: 12, backgroundColor: '#3b7f16', alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cancelButton: { flex: 1, minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: '#c73333', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff2f2' },
+  cancelText: { color: '#b42323', fontSize: 16, fontWeight: '800' },
+  submitButton: { flex: 1, minHeight: 50, justifyContent: 'center' },
 });
