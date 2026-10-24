@@ -7,7 +7,7 @@ import {
 } from '../src/privateCrypto.ts';
 const crypto = webcrypto;
 test('PWA Web Crypto password derivation and AES-GCM record round trip, including Unicode', async () => {
-  const salt = generatePrivateSalt(crypto);
+  const salt = await generatePrivateSalt(crypto);
   const password = 'private-🔒-password-2026';
   const key = await derivePrivateKey(password, salt, crypto);
   const payload = { title: '旅行計画', text: '秘密 🔒', html: '<b>秘密</b>', category: 'personal' };
@@ -26,6 +26,6 @@ test('PWA Web Crypto password derivation and AES-GCM record round trip, includin
   assert.throws(() => validatePrivateCipherRecord({ ...first, iv: 'invalid' }));
 });
 test('fails closed when secure Web Crypto is unavailable', async () => {
-  assert.throws(() => generatePrivateSalt(null), /unavailable/);
+  await assert.rejects(generatePrivateSalt(null), /unavailable/);
   await assert.rejects(derivePrivateKey('password', new Uint8Array(16), null), /unavailable/);
 });
