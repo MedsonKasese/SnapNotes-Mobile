@@ -13,11 +13,17 @@ export default function App() {
     let active = true;
     (async () => {
       try {
+        const start = Date.now();
+        const report = (stage: string) => { if (active) setCryptoCheck(`Private crypto: ${stage} (${Math.round((Date.now() - start) / 1000)}s)`); };
+        report('generating salt');
         const salt = generatePrivateSalt();
+        report('deriving key — this may be slow');
         const key = await derivePrivateKey('development-only-password', salt);
+        report('encrypting');
         const encrypted = await encryptPrivatePayload({ test: 'android-crypto-check' }, key, salt);
+        report('decrypting');
         const decoded = await decryptPrivatePayload(encrypted, key) as { test?: string };
-        if (active) setCryptoCheck(decoded.test === 'android-crypto-check' ? 'Private crypto: PASS on this device' : 'Private crypto: FAIL (incorrect decrypted result)');
+        if (active) setCryptoCheck(decoded.test === 'android-crypto-check' ? `Private crypto: PASS on this device (${Math.round((Date.now() - start) / 1000)}s)` : 'Private crypto: FAIL (incorrect decrypted result)');
       } catch (error) {
         if (active) setCryptoCheck(`Private crypto: FAIL (${error instanceof Error ? error.name : 'unknown error'})`);
       }
