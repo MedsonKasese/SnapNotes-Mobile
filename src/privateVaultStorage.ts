@@ -5,6 +5,9 @@ import { validatePrivateCipherRecord, type PrivateCipherRecord } from './private
 export const PRIVATE_VAULT_INDEX_KEY = '@snapnotes-mobile/private-vault/index';
 const PRIVATE_VAULT_PREFIX = '@snapnotes-mobile/private-vault/generation/';
 const MAX_RECORD_BYTES = 1024 * 1024;
+const PRIVATE_CIPHER_FIELDS = new Set([
+  'version', 'algorithm', 'kdf', 'iterations', 'salt', 'iv', 'ciphertext',
+]);
 
 export type PrivateVaultEntry = {
   id: string;
@@ -30,7 +33,22 @@ export function validatePrivateVaultEntries(value: unknown): PrivateVaultEntry[]
       throw new Error('Invalid or duplicate private vault identifier.');
     }
     ids.add(entry.id);
-    return { id: entry.id, privateData: validatePrivateCipherRecord(entry.privateData) };
+    if (!record(entry.privateData) ||
+      Object.keys(entry.privateData).some(key => !PRIVATE_CIPHER_FIELDS.has(key))) {
+      throw new Error('Unexpected encrypted private note fields.');
+    }
+    // Copy only encrypted fields so caller prototypes and toJSON hooks cannot
+    // introduce plaintext during serialization. Validate the exact snapshot.
+    const privateData = validatePrivateCipherRecord({
+      version: entry.privateData.version,
+      algorithm: entry.privateData.algorithm,
+      kdf: entry.privateData.kdf,
+      iterations: entry.privateData.iterations,
+      salt: entry.privateData.salt,
+      iv: entry.privateData.iv,
+      ciphertext: entry.privateData.ciphertext,
+    });
+    return { id: entry.id, privateData };
   });
 }
 
@@ -71,12 +89,12 @@ export function createPrivateVaultStorage(backend: Backend) {
     load(): Promise<PrivateVaultEntry[]> {
       return serialize(backend, loadCommitted);
     },
-    save(entries: PrivateVaultEntry[]): Promise<void> {
+    async save(entries: PrivateVaultEntry[]): Promise<void> {
       // Reject plaintext and unexpected fields before writing anything.
       const safe = validatePrivateVaultEntries(entries);
       const payload = JSON.stringify({ version: 1, entries: safe });
       if (new TextEncoder().encode(payload).byteLength > MAX_RECORD_BYTES) {
-        return Promise.reject(new Error('Encrypted private vault exceeds storage limit.'));
+        throw new Error('Encrypted private vault exceeds storage limit.');
       }
       return serialize(backend, async () => {
         // Write the immutable generation first, then commit its pointer.

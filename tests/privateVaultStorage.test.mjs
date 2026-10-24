@@ -68,3 +68,58 @@ test('shared backend serializes overlapping saves without interleaving commits',
   await Promise.all([a.save([entry]), b.save([{ id: 'private-2', privateData: ciphertext }])]);
   assert.equal((await a.load())[0].id, 'private-2');
 });
+
+test('invalid saves reject asynchronously without changing committed data or blocking later saves', async () => {
+  const memory = backend();
+  const vault = createPrivateVaultStorage(memory);
+  await vault.save([entry]);
+  const committed = new Map(memory.values);
+  for (const invalid of [null, {}, [{ ...entry, title: 'plaintext' }], [entry, entry],
+    [{ ...entry, privateData: { ...ciphertext, iv: 'bad' } }]]) {
+    let pending;
+    assert.doesNotThrow(() => { pending = vault.save(invalid); });
+    assert.ok(pending instanceof Promise);
+    await assert.rejects(pending);
+    assert.deepEqual(memory.values, committed);
+  }
+  assert.deepEqual(await vault.load(), [entry]);
+  const replacement = { id: 'private-2', privateData: ciphertext };
+  await vault.save([replacement]);
+  assert.deepEqual(await vault.load(), [replacement]);
+});
+
+test('rejects nested plaintext and serialization hooks before any storage write', async () => {
+  const memory = backend();
+  const vault = createPrivateVaultStorage(memory);
+  for (const extra of [{ title: 'secret note title' }, { content: 'secret note body' },
+    { html: '<p>secret</p>' }, { attachments: ['private-file.pdf'] },
+    { toJSON() { return { plaintext: 'secret note body' }; } }]) {
+    await assert.rejects(vault.save([{ ...entry, privateData: { ...ciphertext, ...extra } }]),
+      /Unexpected encrypted private note fields/);
+    assert.equal(memory.values.size, 0);
+  }
+});
+
+test('committed records containing nested plaintext fail closed on load', async () => {
+  const memory = backend();
+  const vault = createPrivateVaultStorage(memory);
+  await vault.save([entry]);
+  const { generation } = JSON.parse(memory.values.get(PRIVATE_VAULT_INDEX_KEY));
+  const key = '@snapnotes-mobile/private-vault/generation/' + generation;
+  const payload = JSON.parse(memory.values.get(key));
+  payload.entries[0].privateData.title = 'secret note title';
+  memory.values.set(key, JSON.stringify(payload));
+  await assert.rejects(vault.load(), /Unexpected encrypted private note fields/);
+});
+
+test('queued saves snapshot encrypted fields without invoking inherited serialization hooks', async () => {
+  const memory = backend();
+  const vault = createPrivateVaultStorage(memory);
+  const privateData = Object.assign(Object.create({
+    toJSON() { throw new Error('must not serialize caller objects'); },
+  }), ciphertext);
+  const pending = vault.save([{ id: entry.id, privateData }]);
+  privateData.iv = 'bad';
+  await pending;
+  assert.deepEqual(await vault.load(), [entry]);
+});
