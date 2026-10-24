@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
+import { createPrivateSession } from '../privateSession';
 
 const access = createPrivateAccess(AsyncStorage);
 
@@ -11,25 +12,27 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const lifecycle = useRef({ mounted: false, generation: 0, busy: false });
+  const lifecycle = useRef({ mounted: false, busy: false });
+  const sessionGuard = useRef(createPrivateSession());
 
   useEffect(() => {
     const session = lifecycle.current;
     let active = true;
     session.mounted = true;
+    sessionGuard.current.setActive(AppState.currentState === 'active');
     void access.status().then(status => { if (active) setPhase(status); })
       .catch(() => { if (active) { setPhase('error'); setError('Could not read the encrypted vault. No changes were made.'); } });
     return () => {
       active = false;
       session.mounted = false;
-      session.generation += 1;
+      sessionGuard.current.setActive(false);
     };
   }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
+      sessionGuard.current.setActive(state === 'active');
       if (state !== 'active') {
-        lifecycle.current.generation += 1;
         setPhase(current => current === 'unlocked' ? 'locked' : current);
         setPassword('');
         setConfirmation('');
@@ -40,7 +43,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   }, []);
 
   function lock() {
-    lifecycle.current.generation += 1;
+    sessionGuard.current.invalidate();
     setPhase(current => current === 'unlocked' ? 'locked' : current);
     setPassword('');
     setConfirmation('');
@@ -52,8 +55,9 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     // A ref closes the double-tap gap before React renders the busy state.
     if (!session.mounted || session.busy || AppState.currentState !== 'active' ||
       (phase !== 'setup' && phase !== 'locked')) return;
+    const generation = sessionGuard.current.begin();
+    if (generation === null) return;
     session.busy = true;
-    const generation = session.generation;
     setBusy(true);
     setError(null);
     try {
@@ -65,15 +69,16 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       if (!session.mounted) return;
       // Setup may have committed while backgrounded. Offer unlock, not setup,
       // but never let a result from the old foreground session unlock the UI.
-      setPhase(session.generation === generation && AppState.currentState === 'active' ? 'unlocked' : 'locked');
+      setPhase(sessionGuard.current.valid(generation) && AppState.currentState === 'active' ? 'unlocked' : 'locked');
       setPassword('');
       setConfirmation('');
     } catch (cause) {
-      if (session.mounted && session.generation === generation && AppState.currentState === 'active') {
+      if (session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active') {
         setError(cause instanceof Error ? cause.message : 'Private Notes could not be unlocked.');
       }
     } finally {
       session.busy = false;
+      sessionGuard.current.finish(generation);
       if (session.mounted) setBusy(false);
     }
   }
@@ -100,7 +105,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
         <>
           <Text style={styles.description}>
             {phase === 'setup'
-              ? 'Create a password with at least 12 characters. If you forget it, encrypted private content cannot be recovered.'
+              ? 'Create a password with at least 12 characters. If you forget it, encrypted private content cannot be recovered. If you cancel after starting setup, it may still finish. Keep this password to unlock later.'
               : 'Enter your Private Notes password. It is never saved on this device.'}
           </Text>
           <TextInput accessibilityLabel="Private Notes password" placeholder="Password" secureTextEntry
@@ -110,9 +115,14 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
               autoCapitalize="none" autoCorrect={false} value={confirmation} onChangeText={setConfirmation} style={styles.input} />
           )}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-          <Pressable accessibilityRole="button" disabled={busy} style={styles.button} onPress={() => void submit()}>
-            <Text style={styles.buttonText}>{busy ? 'Please wait…' : phase === 'setup' ? 'Set password' : 'Unlock'}</Text>
-          </Pressable>
+          <View style={styles.actionRow}>
+            <Pressable accessibilityRole="button" style={styles.cancelButton} onPress={() => { lock(); onBack(); }}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={busy} style={[styles.button, styles.submitButton]} onPress={() => void submit()}>
+              <Text style={styles.buttonText}>{busy ? 'Please wait…' : phase === 'setup' ? 'Set password' : 'Unlock'}</Text>
+            </Pressable>
+          </View>
         </>
       )}
     </View>
@@ -129,4 +139,8 @@ const styles = StyleSheet.create({
   error: { color: '#a32b2b', fontSize: 14 },
   button: { padding: 16, borderRadius: 12, backgroundColor: '#3b7f16', alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  cancelButton: { flex: 1, minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: '#c73333', alignItems: 'center', justifyContent: 'center', backgroundColor: '#b42323' },
+  cancelText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  submitButton: { flex: 1, minHeight: 50, justifyContent: 'center' },
 });

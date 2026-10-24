@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { createPrivateSession } from '../src/privateSession.ts';
 
 const projectRoot = new URL('../', import.meta.url);
 
@@ -159,4 +160,35 @@ test('failed setup commit leaves an empty vault retryable', async () => {
   assert.equal(await access.status(), 'setup');
   await access.setup(password, password);
   await access.unlock(password);
+});
+
+test('leaving during real password setup keeps the late committed vault locked and unlockable', async () => {
+  const backend = memoryBackend();
+  for (const [key, value] of ordinaryRecords) backend.values.set(key, value);
+  let release, entered;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const cryptoStarted = new Promise(resolve => { entered = resolve; });
+  const harness = await makeHarness({ beforeDerive: async () => { entered(); await blocked; } });
+  const access = harness.createAccess(backend);
+  const session = createPrivateSession();
+  const token = session.begin();
+  const setup = access.setup(password, password);
+  await cryptoStarted;
+  // Cancel and the back action both invalidate the screen's guard. They do not
+  // roll back storage work already in progress, as explained on the setup UI.
+  session.invalidate();
+  assert.equal(session.valid(token), false);
+  release();
+  await setup;
+  session.finish(token);
+  assert.equal(session.valid(token), false);
+  assert.equal(await access.status(), 'locked');
+  const fresh = harness.createAccess(backend);
+  assert.equal(await fresh.status(), 'locked');
+  await fresh.unlock(password);
+  await assert.rejects(fresh.unlock('wrong-password-2026'), /Incorrect password/);
+  const persisted = [...backend.values.values()].join('\n');
+  assert.equal(persisted.includes(password), false);
+  assert.equal(persisted.includes(verifierText), false);
+  for (const [key, value] of ordinaryRecords) assert.equal(backend.values.get(key), value);
 });
