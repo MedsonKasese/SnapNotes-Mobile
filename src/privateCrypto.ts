@@ -1,10 +1,8 @@
-import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
-import { sha256 } from '@noble/hashes/sha2.js';
 import { gcm } from '@noble/ciphers/aes.js';
 
 // Compatible with the PWA's private-notes.js version 1 encrypted payload.
-// This module fails closed if a secure Web Crypto implementation is unavailable.
-// Do not persist decrypted private-note content in normal notes or recovery storage.
+// Native builds use Quick Crypto so PBKDF2 runs in native code rather than a
+// slow JavaScript loop. Never weaken the PWA's KDF settings or write plaintext.
 export const PRIVATE_CRYPTO_VERSION = 1;
 export const PRIVATE_KDF_ITERATIONS = 600_000;
 export const PRIVATE_MIN_PASSWORD_LENGTH = 12;
@@ -19,6 +17,41 @@ export type PrivateCipherRecord = {
 };
 type CryptoLike = Pick<Crypto, 'getRandomValues' | 'subtle'>;
 type PrivateKey = CryptoKey | Uint8Array;
+
+let nativeCryptoProviderPromise: Promise<CryptoLike> | undefined;
+
+function unavailableError(): Error {
+  return new Error(
+    'Native secure cryptography is unavailable. Private Notes encryption requires the SnapNotes development build; Expo Go does not include this native module.',
+  );
+}
+
+async function getNativeCryptoProvider(): Promise<CryptoLike> {
+  if (!nativeCryptoProviderPromise) {
+    nativeCryptoProviderPromise = (async () => {
+      try {
+        const { install } = await import('react-native-quick-crypto');
+        install();
+        const provider = globalThis.crypto as CryptoLike | undefined;
+        if (!provider?.subtle || typeof provider.getRandomValues !== 'function') {
+          throw unavailableError();
+        }
+        return provider;
+      } catch {
+        throw unavailableError();
+      }
+    })();
+  }
+  return nativeCryptoProviderPromise;
+}
+
+async function resolveCryptoProvider(cryptoProvider?: CryptoLike | null): Promise<CryptoLike> {
+  if (cryptoProvider === null) {
+    throw new Error('Secure private-note encryption is unavailable on this device. No private data was written.');
+  }
+  return cryptoProvider ?? getNativeCryptoProvider();
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let result = '';
@@ -31,8 +64,11 @@ function bytesToBase64(bytes: Uint8Array): string {
   }
   return result;
 }
+
 function base64ToBytes(value: string): Uint8Array {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw Error('Invalid private note encoding.');
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    throw Error('Invalid private note encoding.');
+  }
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   const bytes: number[] = [];
   for (let i = 0; i < value.length; i += 4) {
@@ -45,6 +81,7 @@ function base64ToBytes(value: string): Uint8Array {
   }
   return Uint8Array.from(bytes);
 }
+
 export function validatePrivateCipherRecord(value: unknown): PrivateCipherRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Invalid encrypted private note.');
   const data = value as Record<string, unknown>;
@@ -55,52 +92,77 @@ export function validatePrivateCipherRecord(value: unknown): PrivateCipherRecord
     base64ToBytes(data.ciphertext).length < 17) throw Error('Unsupported or invalid private note format.');
   return data as PrivateCipherRecord;
 }
+
 export async function generatePrivateSalt(cryptoProvider?: CryptoLike | null): Promise<Uint8Array> {
-  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
-  if (cryptoProvider) return cryptoProvider.getRandomValues(new Uint8Array(16));
-  const { getRandomBytes } = await import('expo-crypto');
-  return getRandomBytes(16);
+  const provider = await resolveCryptoProvider(cryptoProvider);
+  return provider.getRandomValues(new Uint8Array(16));
 }
-export async function derivePrivateKey(password: string, salt: Uint8Array, cryptoProvider?: CryptoLike | null): Promise<PrivateKey> {
-  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
+
+export async function derivePrivateKey(
+  password: string,
+  salt: Uint8Array,
+  cryptoProvider?: CryptoLike | null,
+): Promise<PrivateKey> {
   if (typeof password !== 'string' || !password) throw Error('Private Notes password is required.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
+  const provider = await resolveCryptoProvider(cryptoProvider);
   const encoded = new TextEncoder().encode(password);
-  if (cryptoProvider) {
-    const material = await cryptoProvider.subtle.importKey('raw', encoded, 'PBKDF2', false, ['deriveKey']);
-    return cryptoProvider.subtle.deriveKey(
-      { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
-      material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
-  }
-  return pbkdf2Async(sha256, encoded, salt, { c: PRIVATE_KDF_ITERATIONS, dkLen: 32, asyncTick: 20 });
+  const material = await provider.subtle.importKey('raw', encoded, 'PBKDF2', false, ['deriveKey']);
+  return provider.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
 }
+
 export async function encryptPrivatePayload(
-  payload: unknown, key: PrivateKey, salt: Uint8Array, cryptoProvider?: CryptoLike | null,
+  payload: unknown,
+  key: PrivateKey,
+  salt: Uint8Array,
+  cryptoProvider?: CryptoLike | null,
 ): Promise<PrivateCipherRecord> {
-  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
-  const iv = cryptoProvider ? cryptoProvider.getRandomValues(new Uint8Array(12)) : (await import('expo-crypto')).getRandomBytes(12);
+  const provider = await resolveCryptoProvider(cryptoProvider);
+  const iv = provider.getRandomValues(new Uint8Array(12));
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
-  let ciphertext: Uint8Array;
-  if (key instanceof Uint8Array) ciphertext = gcm(key, iv).encrypt(plaintext);
-  else if (cryptoProvider) ciphertext = new Uint8Array(await cryptoProvider.subtle.encrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, plaintext as BufferSource));
-  else throw Error('Invalid private encryption key.');
-  return { version: 1, algorithm: 'AES-GCM', kdf: 'PBKDF2-SHA-256', iterations: PRIVATE_KDF_ITERATIONS,
-    salt: bytesToBase64(salt), iv: bytesToBase64(iv), ciphertext: bytesToBase64(ciphertext) };
+  const ciphertext = key instanceof Uint8Array
+    ? gcm(key, iv).encrypt(plaintext)
+    : new Uint8Array(await provider.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv as BufferSource },
+      key,
+      plaintext as BufferSource,
+    ));
+  return {
+    version: 1,
+    algorithm: 'AES-GCM',
+    kdf: 'PBKDF2-SHA-256',
+    iterations: PRIVATE_KDF_ITERATIONS,
+    salt: bytesToBase64(salt),
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(ciphertext),
+  };
 }
+
 export async function decryptPrivatePayload(
-  value: unknown, key: PrivateKey, cryptoProvider?: CryptoLike | null,
+  value: unknown,
+  key: PrivateKey,
+  cryptoProvider?: CryptoLike | null,
 ): Promise<unknown> {
-  if (cryptoProvider === null) throw Error('Secure private-note encryption is unavailable on this device. No private data was written.');
   const record = validatePrivateCipherRecord(value);
-  const iv = base64ToBytes(record.iv), ciphertext = base64ToBytes(record.ciphertext);
-  let plaintext: Uint8Array;
-  if (key instanceof Uint8Array) plaintext = gcm(key, iv).decrypt(ciphertext);
-  else if (cryptoProvider) plaintext = new Uint8Array(await cryptoProvider.subtle.decrypt(
-    { name: 'AES-GCM', iv: iv as BufferSource }, key, ciphertext as BufferSource));
-  else throw Error('Invalid private encryption key.');
+  const iv = base64ToBytes(record.iv);
+  const ciphertext = base64ToBytes(record.ciphertext);
+  const plaintext = key instanceof Uint8Array
+    ? gcm(key, iv).decrypt(ciphertext)
+    : new Uint8Array(await (await resolveCryptoProvider(cryptoProvider)).subtle.decrypt(
+      { name: 'AES-GCM', iv: iv as BufferSource },
+      key,
+      ciphertext as BufferSource,
+    ));
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
+
 export function privateSaltFromRecord(value: unknown): Uint8Array {
   return base64ToBytes(validatePrivateCipherRecord(value).salt);
 }
