@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
   button: { padding: 16, borderRadius: 12, backgroundColor: '#3b7f16', alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  cancelButton: { flex: 1, minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: '#c73333', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff2f2' },
-  cancelText: { color: '#b42323', fontSize: 16, fontWeight: '800' },
+  cancelButton: { flex: 1, minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: '#c73333', alignItems: 'center', justifyContent: 'center', backgroundColor: '#b42323' },
+  cancelText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
   submitButton: { flex: 1, minHeight: 50, justifyContent: 'center' },
 });
