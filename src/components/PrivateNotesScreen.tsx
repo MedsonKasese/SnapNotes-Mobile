@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
@@ -11,49 +11,76 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const lifecycle = useRef({ mounted: false, generation: 0, busy: false });
 
   useEffect(() => {
+    const session = lifecycle.current;
     let active = true;
+    session.mounted = true;
     void access.status().then(status => { if (active) setPhase(status); })
       .catch(() => { if (active) { setPhase('error'); setError('Could not read the encrypted vault. No changes were made.'); } });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      session.mounted = false;
+      session.generation += 1;
+    };
   }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
       if (state !== 'active') {
+        lifecycle.current.generation += 1;
         setPhase(current => current === 'unlocked' ? 'locked' : current);
         setPassword('');
         setConfirmation('');
+        setError(null);
       }
     });
     return () => subscription.remove();
   }, []);
 
+  function lock() {
+    lifecycle.current.generation += 1;
+    setPhase(current => current === 'unlocked' ? 'locked' : current);
+    setPassword('');
+    setConfirmation('');
+    setError(null);
+  }
+
   async function submit() {
-    if (busy || (phase !== 'setup' && phase !== 'locked')) return;
+    const session = lifecycle.current;
+    // A ref closes the double-tap gap before React renders the busy state.
+    if (!session.mounted || session.busy || AppState.currentState !== 'active' ||
+      (phase !== 'setup' && phase !== 'locked')) return;
+    session.busy = true;
+    const generation = session.generation;
     setBusy(true);
     setError(null);
     try {
       if (phase === 'setup') {
         await access.setup(password, confirmation);
-        setPhase('unlocked');
       } else {
         await access.unlock(password);
-        setPhase('unlocked');
       }
+      if (!session.mounted) return;
+      // Setup may have committed while backgrounded. Offer unlock, not setup,
+      // but never let a result from the old foreground session unlock the UI.
+      setPhase(session.generation === generation && AppState.currentState === 'active' ? 'unlocked' : 'locked');
       setPassword('');
       setConfirmation('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Private Notes could not be unlocked.');
+      if (session.mounted && session.generation === generation && AppState.currentState === 'active') {
+        setError(cause instanceof Error ? cause.message : 'Private Notes could not be unlocked.');
+      }
     } finally {
-      setBusy(false);
+      session.busy = false;
+      if (session.mounted) setBusy(false);
     }
   }
 
   return (
     <View style={styles.container}>
-      <Pressable accessibilityRole="button" onPress={() => { setPassword(''); setConfirmation(''); onBack(); }}>
+      <Pressable accessibilityRole="button" onPress={() => { lock(); onBack(); }}>
         <Text style={styles.back}>‹ All notes</Text>
       </Pressable>
       <Text style={styles.eyebrow}>PRIVATE NOTES</Text>
@@ -65,7 +92,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       ) : phase === 'unlocked' ? (
         <>
           <Text style={styles.description}>Your private vault is protected. Moving notes into Private and viewing encrypted notes will be enabled in a later update.</Text>
-          <Pressable style={styles.button} onPress={() => { setPhase('locked'); setPassword(''); }}>
+          <Pressable style={styles.button} onPress={lock}>
             <Text style={styles.buttonText}>Lock Private Notes</Text>
           </Pressable>
         </>

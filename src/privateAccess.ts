@@ -32,7 +32,7 @@ export function createPrivateAccess(backend: Backend) {
       const key = await derivePrivateKey(password, salt);
       const privateData = await encryptPrivatePayload({ verifier: VERIFIER_TEXT }, key, salt);
       const entry: PrivateVaultEntry = { id: PRIVATE_VERIFIER_ID, privateData };
-      await vault.save([entry]);
+      if (!await vault.initializeIfEmpty([entry])) throw new Error('Private vault already exists.');
     },
     async unlock(password: string): Promise<void> {
       const entries = await vault.load();

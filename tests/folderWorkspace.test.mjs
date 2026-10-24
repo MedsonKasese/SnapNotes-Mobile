@@ -108,6 +108,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' },
     './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
+    './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },
   };
   vm.runInNewContext(outputText, {
     exports, setTimeout: () => 1, clearTimeout() {},

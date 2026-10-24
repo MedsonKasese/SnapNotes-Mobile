@@ -85,24 +85,41 @@ export function createPrivateVaultStorage(backend: Backend) {
     return validatePrivateVaultEntries(payload.entries);
   }
 
+  async function commit(payload: string): Promise<void> {
+    // Write the immutable generation first, then commit its pointer.
+    // A failed write cannot replace the previous committed vault.
+    const generation = Date.now().toString(36) + '-' + (++sequence).toString(36) +
+      '-' + Math.random().toString(36).slice(2, 10);
+    await backend.setItem(generationKey(generation), payload);
+    await backend.setItem(PRIVATE_VAULT_INDEX_KEY, JSON.stringify({ version: 1, generation }));
+  }
+
+  function prepare(entries: PrivateVaultEntry[]): string {
+    // Reject plaintext and unexpected fields before writing anything.
+    const safe = validatePrivateVaultEntries(entries);
+    const payload = JSON.stringify({ version: 1, entries: safe });
+    if (new TextEncoder().encode(payload).byteLength > MAX_RECORD_BYTES) {
+      throw new Error('Encrypted private vault exceeds storage limit.');
+    }
+    return payload;
+  }
+
   return {
     load(): Promise<PrivateVaultEntry[]> {
       return serialize(backend, loadCommitted);
     },
-    async save(entries: PrivateVaultEntry[]): Promise<void> {
-      // Reject plaintext and unexpected fields before writing anything.
-      const safe = validatePrivateVaultEntries(entries);
-      const payload = JSON.stringify({ version: 1, entries: safe });
-      if (new TextEncoder().encode(payload).byteLength > MAX_RECORD_BYTES) {
-        throw new Error('Encrypted private vault exceeds storage limit.');
-      }
+    async initializeIfEmpty(entries: PrivateVaultEntry[]): Promise<boolean> {
+      const payload = prepare(entries);
       return serialize(backend, async () => {
-        // Write the immutable generation first, then commit its pointer.
-        // A failed write cannot replace the previous committed vault.
-        const generation = Date.now().toString(36) + '-' + (++sequence).toString(36) +
-          '-' + Math.random().toString(36).slice(2, 10);
-        await backend.setItem(generationKey(generation), payload);
-        await backend.setItem(PRIVATE_VAULT_INDEX_KEY, JSON.stringify({ version: 1, generation }));
+        if ((await loadCommitted()).length !== 0) return false;
+        await commit(payload);
+        return true;
+      });
+    },
+    async save(entries: PrivateVaultEntry[]): Promise<void> {
+      const payload = prepare(entries);
+      return serialize(backend, async () => {
+        await commit(payload);
       });
     },
   };

@@ -79,6 +79,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' }, './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
+    './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },
   };
   vm.runInNewContext(outputText, {
     exports, require(name) { assert.ok(name in modules, `Unexpected import: ${name}`); return modules[name]; },
