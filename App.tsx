@@ -16,7 +16,7 @@ export default function App() {
         const start = Date.now();
         const report = (stage: string) => { if (active) setCryptoCheck(`Private crypto: ${stage} (${Math.round((Date.now() - start) / 1000)}s)`); };
         report('generating salt');
-        const salt = generatePrivateSalt();
+        const salt = await generatePrivateSalt();
         report('deriving key — this may be slow');
         const key = await derivePrivateKey('development-only-password', salt);
         report('encrypting');
