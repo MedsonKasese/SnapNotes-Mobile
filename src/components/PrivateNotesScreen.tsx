@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
+import { createPrivateSession } from '../privateSession';
 
 const access = createPrivateAccess(AsyncStorage);
 
@@ -11,7 +12,8 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const lifecycle = useRef({ mounted: false, generation: 0, busy: false });
+  const lifecycle = useRef({ mounted: false, busy: false });
+  const sessionGuard = useRef(createPrivateSession());
 
   useEffect(() => {
     const session = lifecycle.current;
@@ -22,14 +24,15 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     return () => {
       active = false;
       session.mounted = false;
-      session.generation += 1;
+      sessionGuard.current.setActive(false);
     };
   }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
+      sessionGuard.current.setActive(state === 'active');
       if (state !== 'active') {
-        lifecycle.current.generation += 1;
+        sessionGuard.current.setActive(false);
         setPhase(current => current === 'unlocked' ? 'locked' : current);
         setPassword('');
         setConfirmation('');
@@ -40,7 +43,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   }, []);
 
   function lock() {
-    lifecycle.current.generation += 1;
+    sessionGuard.current.invalidate();
     setPhase(current => current === 'unlocked' ? 'locked' : current);
     setPassword('');
     setConfirmation('');
@@ -52,8 +55,9 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     // A ref closes the double-tap gap before React renders the busy state.
     if (!session.mounted || session.busy || AppState.currentState !== 'active' ||
       (phase !== 'setup' && phase !== 'locked')) return;
+    const generation = sessionGuard.current.begin();
+    if (generation === null) return;
     session.busy = true;
-    const generation = session.generation;
     setBusy(true);
     setError(null);
     try {
@@ -65,15 +69,16 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       if (!session.mounted) return;
       // Setup may have committed while backgrounded. Offer unlock, not setup,
       // but never let a result from the old foreground session unlock the UI.
-      setPhase(session.generation === generation && AppState.currentState === 'active' ? 'unlocked' : 'locked');
+      setPhase(sessionGuard.current.valid(generation) && AppState.currentState === 'active' ? 'unlocked' : 'locked');
       setPassword('');
       setConfirmation('');
     } catch (cause) {
-      if (session.mounted && session.generation === generation && AppState.currentState === 'active') {
+      if (session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active') {
         setError(cause instanceof Error ? cause.message : 'Private Notes could not be unlocked.');
       }
     } finally {
       session.busy = false;
+      sessionGuard.current.finish();
       if (session.mounted) setBusy(false);
     }
   }
@@ -112,6 +117,9 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
           <Pressable accessibilityRole="button" disabled={busy} style={styles.button} onPress={() => void submit()}>
             <Text style={styles.buttonText}>{busy ? 'Please wait…' : phase === 'setup' ? 'Set password' : 'Unlock'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => { lock(); onBack(); }}>
+            <Text style={styles.back}>Cancel</Text>
           </Pressable>
         </>
       )}
