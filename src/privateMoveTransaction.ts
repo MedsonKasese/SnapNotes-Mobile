@@ -6,7 +6,8 @@ import { decryptPrivatePayload, encryptPrivatePayload } from './privateCrypto.ts
 // Transaction core only: the UI/controller must supply exclusive coordination
 // with ordinary-note writes, a live unlocked key, and durable storage adapters.
 // A successful vault write followed by a failed source write leaves BOTH copies;
-// never silently delete ciphertext as "rollback" (a retry must reconcile it).
+// never silently delete ciphertext as "rollback". The caller must reconcile this
+// separately; this entry point rejects existing vault IDs rather than retrying.
 type MoveDependencies = {
   loadNotes(): Promise<Note[]>;
   saveNotes(notes: Note[]): Promise<void>;
@@ -51,13 +52,18 @@ export async function moveNoteToPrivateTransaction(
     const decrypted = await deps.decrypt(ciphertext, deps.key);
     if (!sameJson(decrypted, payload)) throw new Error('Encrypted private note verification failed.');
 
-    await deps.saveVault([...vault, { id, privateData: ciphertext }]);
-    const committed = await deps.loadVault();
-    const matches = committed.filter(entry => entry.id === id);
-    if (matches.length !== 1 || !sameJson(matches[0].privateData, ciphertext) ||
-      !sameJson(await deps.decrypt(matches[0].privateData, deps.key), payload)) {
-      // The vault may have committed even when readback failed.
-      return { status: 'needs-recovery', reason: 'Private vault verification failed; original note retained.' };
+    try {
+      await deps.saveVault([...vault, { id, privateData: ciphertext }]);
+      const committed = await deps.loadVault();
+      const matches = committed.filter(entry => entry.id === id);
+      if (matches.length !== 1 || !sameJson(matches[0].privateData, ciphertext) ||
+        !sameJson(await deps.decrypt(matches[0].privateData, deps.key), payload)) {
+        return { status: 'needs-recovery', reason: 'Private vault verification failed; original note retained.' };
+      }
+    } catch {
+      // A rejected write can still have committed. Readback and authentication
+      // errors are also ambiguous: retain the source and never roll back vault data.
+      return { status: 'needs-recovery', reason: 'Private vault commit or verification failed; original note retained and recovery required.' };
     }
 
     try {
