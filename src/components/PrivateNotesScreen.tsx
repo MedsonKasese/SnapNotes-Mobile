@@ -14,18 +14,41 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const lifecycle = useRef({ mounted: false, busy: false });
   const sessionGuard = useRef(createPrivateSession());
+  const statusRequest = useRef({ generation: 0, inFlight: false, retry: null as null | (() => void) });
 
   useEffect(() => {
     const session = lifecycle.current;
+    const guard = sessionGuard.current;
+    const requestState = statusRequest.current;
     let active = true;
     session.mounted = true;
-    sessionGuard.current.setActive(AppState.currentState === 'active');
-    void access.status().then(status => { if (active) setPhase(status); })
-      .catch(() => { if (active) { setPhase('error'); setError('Could not read the encrypted vault. No changes were made.'); } });
+    guard.setActive(AppState.currentState === 'active');
+    const readStatus = () => {
+      if (!active || !session.mounted || requestState.inFlight) return;
+      requestState.inFlight = true;
+      const generation = ++requestState.generation;
+      setPhase('loading');
+      setError(null);
+      void access.status().then(status => {
+        if (active && session.mounted && requestState.generation === generation) setPhase(status);
+      }).catch(cause => {
+        if (active && session.mounted && requestState.generation === generation) {
+          setPhase('error');
+          setError(cause instanceof Error ? cause.message : 'Could not read the encrypted vault. No changes were made.');
+        }
+      }).finally(() => {
+        if (requestState.generation === generation) requestState.inFlight = false;
+      });
+    };
+    requestState.retry = readStatus;
+    readStatus();
     return () => {
       active = false;
       session.mounted = false;
-      sessionGuard.current.setActive(false);
+      requestState.generation += 1;
+      requestState.inFlight = false;
+      if (requestState.retry === readStatus) requestState.retry = null;
+      guard.setActive(false);
     };
   }, []);
 
@@ -55,23 +78,25 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     // A ref closes the double-tap gap before React renders the busy state.
     if (!session.mounted || session.busy || AppState.currentState !== 'active' ||
       (phase !== 'setup' && phase !== 'locked')) return;
+    const submittedPassword = password;
+    const submittedConfirmation = confirmation;
     const generation = sessionGuard.current.begin();
     if (generation === null) return;
     session.busy = true;
     setBusy(true);
+    setPassword('');
+    setConfirmation('');
     setError(null);
     try {
       if (phase === 'setup') {
-        await access.setup(password, confirmation);
+        await access.setup(submittedPassword, submittedConfirmation);
       } else {
-        await access.unlock(password);
+        await access.unlock(submittedPassword);
       }
       if (!session.mounted) return;
       // Setup may have committed while backgrounded. Offer unlock, not setup,
       // but never let a result from the old foreground session unlock the UI.
       setPhase(sessionGuard.current.valid(generation) && AppState.currentState === 'active' ? 'unlocked' : 'locked');
-      setPassword('');
-      setConfirmation('');
     } catch (cause) {
       if (session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active') {
         setError(cause instanceof Error ? cause.message : 'Private Notes could not be unlocked.');
@@ -92,8 +117,18 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       <Text accessibilityRole="header" style={styles.title}>
         {phase === 'setup' ? 'Protect your notes' : phase === 'unlocked' ? 'Private Notes' : 'Locked notes'}
       </Text>
-      {phase === 'loading' ? <ActivityIndicator /> : phase === 'error' ? (
-        <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
+      {phase === 'loading' ? (
+        <View accessibilityRole="progressbar" accessibilityLabel="Reading Private Notes vault status" accessibilityState={{ busy: true }}>
+          <ActivityIndicator accessibilityLabel="Reading Private Notes vault status" />
+          <Text accessibilityLiveRegion="polite">Loading Private Notes…</Text>
+        </View>
+      ) : phase === 'error' ? (
+        <>
+          <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
+          <Pressable accessibilityRole="button" style={styles.button} onPress={() => statusRequest.current.retry?.()}>
+            <Text style={styles.buttonText}>Retry</Text>
+          </Pressable>
+        </>
       ) : phase === 'unlocked' ? (
         <>
           <Text style={styles.description}>Your private vault is protected. Moving notes into Private and viewing encrypted notes will be enabled in a later update.</Text>
@@ -109,12 +144,18 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
               : 'Enter your Private Notes password. It is never saved on this device.'}
           </Text>
           <TextInput accessibilityLabel="Private Notes password" placeholder="Password" secureTextEntry
-            autoCapitalize="none" autoCorrect={false} value={password} onChangeText={setPassword} style={styles.input} />
+            autoCapitalize="none" autoCorrect={false} editable={!busy} value={password} onChangeText={setPassword} style={styles.input} />
           {phase === 'setup' && (
             <TextInput accessibilityLabel="Confirm Private Notes password" placeholder="Confirm password" secureTextEntry
-              autoCapitalize="none" autoCorrect={false} value={confirmation} onChangeText={setConfirmation} style={styles.input} />
+              autoCapitalize="none" autoCorrect={false} editable={!busy} value={confirmation} onChangeText={setConfirmation} style={styles.input} />
           )}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+          {busy && (
+            <View accessibilityRole="progressbar" accessibilityLabel="Private Notes request in progress" accessibilityState={{ busy: true }}>
+              <ActivityIndicator accessibilityLabel="Private Notes request in progress" />
+              <Text accessibilityLiveRegion="polite">Working…</Text>
+            </View>
+          )}
           <View style={styles.actionRow}>
             <Pressable accessibilityRole="button" style={styles.cancelButton} onPress={() => { lock(); onBack(); }}>
               <Text style={styles.cancelText}>Cancel</Text>

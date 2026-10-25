@@ -1,4 +1,5 @@
 import { gcm } from '@noble/ciphers/aes.js';
+import { PrivateOperationTimeoutError, waitForPrivateOperation } from './privateAsync.ts';
 
 // Compatible with the PWA's private-notes.js version 1 encrypted payload.
 // Native builds use Quick Crypto so PBKDF2 runs in native code rather than a
@@ -31,11 +32,20 @@ export class PrivatePayloadError extends Error {
 }
 
 let nativeCryptoProviderPromise: Promise<CryptoLike> | undefined;
+let nativeDerivationPending = false;
 
-function unavailableError(): Error {
-  return new Error(
-    'Native secure cryptography is unavailable. Private Notes encryption requires the SnapNotes development build; Expo Go does not include this native module.',
-  );
+export class PrivateCryptoUnavailableError extends Error {
+  constructor() {
+    super('Private Notes requires a compatible SnapNotes development APK. Expo Go does not include its native cryptography. Your encrypted vault was not changed. [PV-NATIVE]');
+    this.name = 'PrivateCryptoUnavailableError';
+  }
+}
+
+export class PrivateCryptoBusyError extends Error {
+  constructor() {
+    super('The previous native key operation is still running. Wait for it to finish or restart the app without clearing its data. [PV-BUSY]');
+    this.name = 'PrivateCryptoBusyError';
+  }
 }
 
 async function getNativeCryptoProvider(): Promise<CryptoLike> {
@@ -46,15 +56,17 @@ async function getNativeCryptoProvider(): Promise<CryptoLike> {
         install();
         const provider = globalThis.crypto as CryptoLike | undefined;
         if (!provider?.subtle || typeof provider.getRandomValues !== 'function') {
-          throw unavailableError();
+          throw new PrivateCryptoUnavailableError();
         }
         return provider;
       } catch {
-        throw unavailableError();
+        throw new PrivateCryptoUnavailableError();
       }
     })();
+    // A failed first initialization must not poison all subsequent attempts.
+    void nativeCryptoProviderPromise.catch(() => { nativeCryptoProviderPromise = undefined; });
   }
-  return nativeCryptoProviderPromise;
+  return waitForPrivateOperation(nativeCryptoProviderPromise, 10_000);
 }
 
 async function resolveCryptoProvider(cryptoProvider?: CryptoLike | null): Promise<CryptoLike> {
@@ -78,20 +90,59 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 function base64ToBytes(value: string): Uint8Array {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-    throw Error('Invalid private note encoding.');
-  }
+  const length = base64ByteLength(value);
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const bytes: number[] = [];
+  const bytes = new Uint8Array(length);
+  let offset = 0;
   for (let i = 0; i < value.length; i += 4) {
     const n = (alphabet.indexOf(value[i]) << 18) | (alphabet.indexOf(value[i + 1]) << 12) |
       ((value[i + 2] === '=' ? 0 : alphabet.indexOf(value[i + 2])) << 6) |
       (value[i + 3] === '=' ? 0 : alphabet.indexOf(value[i + 3]));
-    bytes.push((n >> 16) & 255);
-    if (value[i + 2] !== '=') bytes.push((n >> 8) & 255);
-    if (value[i + 3] !== '=') bytes.push(n & 255);
+    bytes[offset++] = (n >> 16) & 255;
+    if (offset < length) bytes[offset++] = (n >> 8) & 255;
+    if (offset < length) bytes[offset++] = n & 255;
   }
-  return Uint8Array.from(bytes);
+  return bytes;
+}
+
+// Validate encoded fields without allocating/decoding every note's ciphertext
+// when loading the locked vault. Authentication still happens before plaintext.
+function base64ByteLength(value: string): number {
+  if (value.length % 4 !== 0) throw Error('Invalid private note encoding.');
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const end = value.length - padding;
+  if ((padding === 2 && end % 4 !== 2) || (padding === 1 && end % 4 !== 3)) {
+    throw Error('Invalid private note encoding.');
+  }
+  for (let i = 0; i < end; i += 1) {
+    const c = value.charCodeAt(i);
+    if (!((c >= 65 && c <= 90) || (c >= 97 && c <= 122) ||
+      (c >= 48 && c <= 57) || c === 43 || c === 47)) {
+      throw Error('Invalid private note encoding.');
+    }
+  }
+  return value.length / 4 * 3 - padding;
+}
+
+function decodePrivateUtf8(bytes: Uint8Array): string {
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  }
+  // Some native runtimes have TextEncoder but no TextDecoder. URI decoding is
+  // strict UTF-8 (rejects truncation, overlong sequences and surrogate encodings),
+  // unlike Buffer.toString which silently replaces malformed bytes. No globals
+  // are patched and a real decoder failure is never swallowed.
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += 4096) {
+    let chunk = '';
+    for (let j = i; j < Math.min(i + 4096, bytes.length); j += 1) {
+      chunk += '%' + bytes[j].toString(16).padStart(2, '0');
+    }
+    chunks.push(chunk);
+  }
+  const text = decodeURIComponent(chunks.join(''));
+  // Match TextDecoder's default BOM handling.
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 export function validatePrivateCipherRecord(value: unknown): PrivateCipherRecord {
@@ -100,8 +151,8 @@ export function validatePrivateCipherRecord(value: unknown): PrivateCipherRecord
   if (data.version !== 1 || data.algorithm !== 'AES-GCM' || data.kdf !== 'PBKDF2-SHA-256' ||
     data.iterations !== PRIVATE_KDF_ITERATIONS || typeof data.salt !== 'string' ||
     typeof data.iv !== 'string' || typeof data.ciphertext !== 'string' ||
-    base64ToBytes(data.salt).length < 16 || base64ToBytes(data.iv).length !== 12 ||
-    base64ToBytes(data.ciphertext).length < 17) throw Error('Unsupported or invalid private note format.');
+    base64ByteLength(data.salt) < 16 || base64ByteLength(data.iv) !== 12 ||
+    base64ByteLength(data.ciphertext) < 17) throw Error('Unsupported or invalid private note format.');
   return data as PrivateCipherRecord;
 }
 
@@ -118,15 +169,31 @@ export async function derivePrivateKey(
   if (typeof password !== 'string' || !password) throw Error('Private Notes password is required.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
   const provider = await resolveCryptoProvider(cryptoProvider);
-  const encoded = new TextEncoder().encode(password);
-  const material = await provider.subtle.importKey('raw', encoded, 'PBKDF2', false, ['deriveKey']);
-  return provider.subtle.deriveKey(
-    { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
-    material,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
+  const native = cryptoProvider === undefined;
+  if (native && nativeDerivationPending) throw new PrivateCryptoBusyError();
+  if (native) nativeDerivationPending = true;
+  const work = (async () => {
+    const encoded = new TextEncoder().encode(password);
+    try {
+      const material = await provider.subtle.importKey('raw', encoded, 'PBKDF2', false, ['deriveKey']);
+      return await provider.subtle.deriveKey(
+        { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
+        material,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt'],
+      );
+    } finally {
+      encoded.fill(0);
+    }
+  })();
+  // A UI timeout does not cancel native PBKDF2. Hold the guard until the real
+  // work settles so repeated presses cannot start more expensive native jobs.
+  void work.then(
+    () => { if (native) nativeDerivationPending = false; },
+    () => { if (native) nativeDerivationPending = false; },
   );
+  return waitForPrivateOperation(work, 30_000);
 }
 
 export async function encryptPrivatePayload(
@@ -141,11 +208,11 @@ export async function encryptPrivatePayload(
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
   const ciphertext = key instanceof Uint8Array
     ? gcm(key, iv).encrypt(plaintext)
-    : new Uint8Array(await provider.subtle.encrypt(
+    : new Uint8Array(await waitForPrivateOperation(provider.subtle.encrypt(
       { name: 'AES-GCM', iv: iv as BufferSource },
       key,
       plaintext as BufferSource,
-    ));
+    ), 10_000));
   return {
     version: 1,
     algorithm: 'AES-GCM',
@@ -169,18 +236,21 @@ export async function decryptPrivatePayload(
   try {
     plaintext = key instanceof Uint8Array
       ? gcm(key, iv).decrypt(ciphertext)
-      : new Uint8Array(await (await resolveCryptoProvider(cryptoProvider)).subtle.decrypt(
+      : new Uint8Array(await waitForPrivateOperation((await resolveCryptoProvider(cryptoProvider)).subtle.decrypt(
         { name: 'AES-GCM', iv: iv as BufferSource },
         key,
         ciphertext as BufferSource,
-      ));
-  } catch {
+      ), 10_000));
+  } catch (cause) {
+    if (cause instanceof PrivateOperationTimeoutError) throw cause;
     throw new PrivatePayloadError('decrypt');
   }
   try {
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plaintext));
+    return JSON.parse(decodePrivateUtf8(plaintext));
   } catch {
     throw new PrivatePayloadError('decode');
+  } finally {
+    plaintext.fill(0);
   }
 }
 

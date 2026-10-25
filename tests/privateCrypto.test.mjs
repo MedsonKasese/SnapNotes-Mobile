@@ -70,3 +70,21 @@ test('fails closed when secure Web Crypto is unavailable', async () => {
   await assert.rejects(generatePrivateSalt(null), /unavailable/);
   await assert.rejects(derivePrivateKey('password', new Uint8Array(16), null), /unavailable/);
 });
+
+test('large locked records validate without decoding each ciphertext into byte arrays', () => {
+  const record = {
+    version: 1, algorithm: 'AES-GCM', kdf: 'PBKDF2-SHA-256', iterations: 600000,
+    salt: Buffer.alloc(16).toString('base64'), iv: Buffer.alloc(12).toString('base64'),
+    ciphertext: Buffer.alloc(700000).toString('base64'),
+  };
+  assert.equal(validatePrivateCipherRecord(record), record);
+  for (const invalid of ['A', 'AAA', 'AAAA=', 'AAAA===', 'AA=A', '====', 'AAA\n', 'AAA-', 'AAA_']) {
+    assert.throws(() => validatePrivateCipherRecord({ ...record, salt: invalid }));
+    assert.throws(() => validatePrivateCipherRecord({ ...record, ciphertext: invalid }));
+  }
+  // Bad characters anywhere in a large encoded field must still fail closed.
+  for (const position of [0, 200000, record.ciphertext.length - 1]) {
+    const invalid = record.ciphertext.slice(0, position) + '!' + record.ciphertext.slice(position + 1);
+    assert.throws(() => validatePrivateCipherRecord({ ...record, ciphertext: invalid }));
+  }
+});

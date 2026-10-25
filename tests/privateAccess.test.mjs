@@ -38,3 +38,52 @@ test('nonempty vault without verifier blocks setup instead of overwriting data',
   await assert.rejects(access.status(), /without a password verifier/);
   await assert.rejects(access.setup('long-password-123', 'long-password-123'), /already exists/);
 });
+
+test('empty password is rejected without waiting for storage', async () => {
+  let reads = 0;
+  const access = createPrivateAccess({
+    getItem() { reads += 1; return new Promise(() => {}); },
+    async setItem() { assert.fail('unlock must not write'); },
+  });
+  await assert.rejects(access.unlock(''), /Enter your Private Notes password/);
+  assert.equal(reads, 0);
+});
+
+test('read deadline fails closed, ignores a late result and permits recovery after storage settles', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release, stalled = true, writes = 0;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const access = createPrivateAccess({
+    getItem() { return stalled ? blocked : Promise.resolve(null); },
+    async setItem() { writes += 1; },
+  });
+  for (const operation of ['status', 'unlock', 'setup']) {
+    const work = operation === 'unlock' ? access.unlock('password')
+      : operation === 'setup' ? access.setup('long-password-123', 'long-password-123') : access.status();
+    const rejected = assert.rejects(work, /\[PV-TIMEOUT\]/);
+    await Promise.resolve();
+    t.mock.timers.tick(10000);
+    await rejected;
+  }
+  assert.equal(writes, 0);
+  stalled = false;
+  release(null);
+  assert.equal(await access.status(), 'setup');
+  assert.equal(writes, 0);
+});
+
+test('status redacts backend failure details and is retryable', async () => {
+  let failed = true;
+  const access = createPrivateAccess({
+    async getItem() { if (failed) throw new Error('private-storage-sentinel'); return null; },
+    async setItem() { assert.fail('status must not write'); },
+  });
+  await assert.rejects(access.status(), error => {
+    assert.match(error.message, /\[PV-STORAGE\]/);
+    assert.equal(error.message.includes('private-storage-sentinel'), false);
+    assert.equal(error.cause, undefined);
+    return true;
+  });
+  failed = false;
+  assert.equal(await access.status(), 'setup');
+});
