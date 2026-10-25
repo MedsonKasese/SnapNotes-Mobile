@@ -1,5 +1,6 @@
-import { generatePrivateSalt, derivePrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
+import { generatePrivateSalt, derivePrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PrivateCryptoUnavailableError, PrivateCryptoBusyError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
 import { createPrivateVaultStorage, type PrivateVaultEntry } from './privateVaultStorage.ts';
+import { PrivateOperationTimeoutError, waitForPrivateOperation } from './privateAsync.ts';
 
 export const PRIVATE_VERIFIER_ID = '__snapnotes-private-verifier-v1__';
 const VERIFIER_TEXT = 'snapnotes-private-vault-ready-v1';
@@ -23,7 +24,9 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
   let key: Awaited<ReturnType<typeof derivePrivateKey>>;
   try {
     key = await derivePrivateKey(password, salt);
-  } catch {
+  } catch (cause) {
+    if (cause instanceof PrivateCryptoUnavailableError || cause instanceof PrivateCryptoBusyError ||
+      cause instanceof PrivateOperationTimeoutError) throw cause;
     // Provider initialization, importKey and PBKDF2 failures are not evidence of
     // a wrong password. Never surface raw native exception details or inputs.
     throw new Error('This build could not prepare the private key. Check the native development build and try again. No changes were made. [PV-KEY]');
@@ -32,6 +35,7 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
   try {
     payload = await decryptPrivatePayload(privateData, key);
   } catch (cause) {
+    if (cause instanceof PrivateOperationTimeoutError) throw cause;
     if (cause instanceof PrivatePayloadError && cause.stage === 'decode') {
       throw new Error('The vault decrypted, but this build could not read its payload. Check the app runtime. No changes were made. [PV-DECODE]');
     }
@@ -47,9 +51,17 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
 
 export function createPrivateAccess(backend: Backend) {
   const vault = createPrivateVaultStorage(backend);
+  async function loadVault(): Promise<PrivateVaultEntry[]> {
+    try {
+      return await waitForPrivateOperation(vault.load(), 10_000);
+    } catch (cause) {
+      if (cause instanceof PrivateOperationTimeoutError) throw cause;
+      throw new Error('Could not read the encrypted vault. No changes were made. [PV-STORAGE]');
+    }
+  }
   return {
     async status(): Promise<'setup' | 'locked'> {
-      const entries = await vault.load();
+      const entries = await loadVault();
       if (entries.length === 0) return 'setup';
       if (!entries.some(item => item.id === PRIVATE_VERIFIER_ID)) {
         throw new Error('Private vault exists without a password verifier. Setup is blocked to protect existing data.');
@@ -60,7 +72,7 @@ export function createPrivateAccess(backend: Backend) {
       const error = validatePrivatePassword(password, confirmation);
       if (error) throw new Error(error);
       // Never overwrite an existing vault or silently reset a forgotten password.
-      if ((await vault.load()).length !== 0) throw new Error('Private vault already exists.');
+      if ((await loadVault()).length !== 0) throw new Error('Private vault already exists.');
       let privateData: PrivateCipherRecord;
       try {
         const salt = await generatePrivateSalt();
@@ -69,19 +81,17 @@ export function createPrivateAccess(backend: Backend) {
         // same-key round trip. Broken crypto/runtime setups must not be saved.
         privateData = JSON.parse(JSON.stringify(await encryptPrivatePayload({ verifier: VERIFIER_TEXT }, key, salt)));
         await verifyPassword(password, privateData);
-      } catch {
+      } catch (cause) {
+        if (cause instanceof PrivateCryptoUnavailableError || cause instanceof PrivateCryptoBusyError ||
+          cause instanceof PrivateOperationTimeoutError) throw cause;
         throw new Error('Private Notes setup could not be verified on this device. No vault was saved. Check the native development build. [PV-SETUP]');
       }
       const entry: PrivateVaultEntry = { id: PRIVATE_VERIFIER_ID, privateData };
       if (!await vault.initializeIfEmpty([entry])) throw new Error('Private vault already exists.');
     },
     async unlock(password: string): Promise<void> {
-      let entries: PrivateVaultEntry[];
-      try {
-        entries = await vault.load();
-      } catch {
-        throw new Error('Could not read the encrypted vault. No changes were made. [PV-STORAGE]');
-      }
+      if (!password) throw new Error('Enter your Private Notes password.');
+      const entries = await loadVault();
       const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
       if (!verifier) throw new Error('Private vault has no password verifier.');
       await verifyPassword(password, verifier.privateData);

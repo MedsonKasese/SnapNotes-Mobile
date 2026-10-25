@@ -5,6 +5,7 @@ import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { createPrivateSession } from '../src/privateSession.ts';
+import * as privateAsync from '../src/privateAsync.ts';
 
 const projectRoot = new URL('../', import.meta.url);
 
@@ -29,6 +30,7 @@ async function makeHarness(options = {}) {
 
   const cryptoExports = execute(cryptoSource, 'privateCrypto.ts', specifier => {
     if (specifier === '@noble/ciphers/aes.js') return { gcm: () => { throw new Error('Unexpected non-WebCrypto path'); } };
+    if (specifier === './privateAsync.ts') return privateAsync;
     throw new Error(`Unexpected crypto dependency: ${specifier}`);
   });
   const cryptoAdapter = {
@@ -52,6 +54,7 @@ async function makeHarness(options = {}) {
   const accessExports = execute(accessSource, 'privateAccess.ts', specifier => {
     if (specifier === './privateCrypto.ts') return cryptoAdapter;
     if (specifier === './privateVaultStorage.ts') return storageExports;
+    if (specifier === './privateAsync.ts') return privateAsync;
     throw new Error(`Unexpected access dependency: ${specifier}`);
   });
 
@@ -245,7 +248,7 @@ test('cipher authentication failure has its fixed message and performs no writes
   assert.equal(backend.writes.length, writesBeforeFailure);
 });
 
-test('TextDecoder throws and a missing TextDecoder are reported as sanitized decode failures', async t => {
+test('real decoder failures stay sanitized but a runtime missing TextDecoder can unlock', async t => {
   const backend = memoryBackend();
   await (await makeHarness()).createAccess(backend).setup(password, password);
   const writesBeforeFailure = backend.writes.length;
@@ -260,12 +263,7 @@ test('TextDecoder throws and a missing TextDecoder are reported as sanitized dec
   });
   await t.test('decoder is missing', async () => {
     const access = (await makeHarness({ decoder: undefined })).createAccess(backend);
-    await assert.rejects(access.unlock(password), error => {
-      assert.match(error.message, /\[PV-DECODE\]/);
-      assert.equal(error.message.includes('TextDecoder'), false);
-      assert.equal(error.cause, undefined);
-      return true;
-    });
+    await access.unlock(password);
   });
   assert.equal(backend.writes.length, writesBeforeFailure);
 });

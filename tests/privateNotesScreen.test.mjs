@@ -136,6 +136,52 @@ test('a pre-render double press starts only one password setup', async () => {
   assert.equal(isUnlocked(app), true);
 });
 
+test('a failed initial vault status can be retried and recovery opens the password screen', async () => {
+  let reads = 0;
+  const pending = deferred();
+  const app = await screen({ status: async () => {
+    if (++reads === 1) throw new Error('PV-STORAGE: Could not read the encrypted vault. No changes were made.');
+    return pending.promise;
+  } });
+  assert.match(text(app.render()), /PV-STORAGE/);
+  const retry = button(app, 'Retry').props.onPress;
+  retry(); retry();
+  assert.equal(reads, 2, 'double tap must not start a second status request');
+  assert.ok(find(app.render(), item => item.props.accessibilityRole === 'progressbar' && item.props.accessibilityLabel === 'Reading Private Notes vault status'));
+  pending.resolve('locked'); await app.flush();
+  assert.ok(button(app, 'Unlock'));
+});
+
+test('a pending status retry does not publish results after unmount', async () => {
+  let reads = 0;
+  const pending = deferred();
+  const app = await screen({ status: async () => {
+    if (++reads === 1) throw new Error('PV-STORAGE: unavailable');
+    return pending.promise;
+  } });
+  button(app, 'Retry').props.onPress();
+  app.unmount();
+  pending.resolve('locked'); await app.flush();
+  assert.equal(app.writesAfterUnmount, 0);
+});
+
+test('submission clears secure inputs immediately, disables editing, and keeps cancel available', async () => {
+  const pending = deferred();
+  const app = await screen({ status: async () => 'setup', setup: () => pending.promise });
+  enterPassword(app, true);
+  button(app, 'Set password').props.onPress();
+  assert.equal(input(app).props.value, '');
+  assert.equal(input(app).props.editable, false);
+  assert.equal(input(app, 'Confirm Private Notes password').props.value, '');
+  assert.equal(input(app, 'Confirm Private Notes password').props.editable, false);
+  assert.ok(button(app, 'Cancel'), 'cancel remains visible while setup is pending');
+  assert.ok(find(app.render(), item => item.props.accessibilityRole === 'progressbar' && item.props.accessibilityLabel === 'Private Notes request in progress'));
+  pending.reject(new Error('setup failed')); await app.flush();
+  assert.equal(input(app).props.value, '');
+  assert.equal(input(app).props.editable, true);
+  assert.match(text(app.render()), /setup failed/);
+});
+
 test('setup completing after backgrounding cannot unlock and shows the committed vault as locked', async () => {
   const pending = deferred();
   const app = await screen({ status: async () => 'setup', setup: () => pending.promise });
@@ -213,10 +259,12 @@ test('wrong password is retryable and corrupt vault status never offers password
   enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
   assert.equal(isUnlocked(app), false);
   assert.match(text(app.render()), /Incorrect password/);
+  enterPassword(app);
   button(app, 'Unlock').props.onPress(); await app.flush();
   assert.equal(isUnlocked(app), true);
-  const corrupt = await screen({ status: async () => { throw new Error('corrupt'); } });
-  assert.match(text(corrupt.render()), /No changes were made/);
+  const corrupt = await screen({ status: async () => { throw new Error('PV-STORAGE: Could not read the encrypted vault. No changes were made.'); } });
+  assert.match(text(corrupt.render()), /PV-STORAGE/);
+  assert.ok(button(corrupt, 'Retry'));
   assert.equal(elements(corrupt.render()).some(item => item.type === 'TextInput'), false);
 });
 
