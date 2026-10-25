@@ -18,6 +18,18 @@ export type PrivateCipherRecord = {
 type CryptoLike = Pick<Crypto, 'getRandomValues' | 'subtle'>;
 type PrivateKey = CryptoKey | Uint8Array;
 
+// Keep native exception details out of the UI: errors may contain inputs. These
+// stages distinguish authentication failures from a missing/broken text decoder.
+export class PrivatePayloadError extends Error {
+  readonly stage: 'decrypt' | 'decode';
+
+  constructor(stage: 'decrypt' | 'decode') {
+    super(stage === 'decrypt' ? 'Private payload decryption failed.' : 'Private payload decoding failed.');
+    this.name = 'PrivatePayloadError';
+    this.stage = stage;
+  }
+}
+
 let nativeCryptoProviderPromise: Promise<CryptoLike> | undefined;
 
 function unavailableError(): Error {
@@ -153,14 +165,23 @@ export async function decryptPrivatePayload(
   const record = validatePrivateCipherRecord(value);
   const iv = base64ToBytes(record.iv);
   const ciphertext = base64ToBytes(record.ciphertext);
-  const plaintext = key instanceof Uint8Array
-    ? gcm(key, iv).decrypt(ciphertext)
-    : new Uint8Array(await (await resolveCryptoProvider(cryptoProvider)).subtle.decrypt(
-      { name: 'AES-GCM', iv: iv as BufferSource },
-      key,
-      ciphertext as BufferSource,
-    ));
-  return JSON.parse(new TextDecoder().decode(plaintext));
+  let plaintext: Uint8Array;
+  try {
+    plaintext = key instanceof Uint8Array
+      ? gcm(key, iv).decrypt(ciphertext)
+      : new Uint8Array(await (await resolveCryptoProvider(cryptoProvider)).subtle.decrypt(
+        { name: 'AES-GCM', iv: iv as BufferSource },
+        key,
+        ciphertext as BufferSource,
+      ));
+  } catch {
+    throw new PrivatePayloadError('decrypt');
+  }
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(plaintext));
+  } catch {
+    throw new PrivatePayloadError('decode');
+  }
 }
 
 export function privateSaltFromRecord(value: unknown): Uint8Array {
