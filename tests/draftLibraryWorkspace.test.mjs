@@ -9,6 +9,7 @@ import * as folders from '../src/folders.ts';
 import * as drafts from '../src/draftLibrary.ts';
 import * as formatting from '../src/noteFormatting.ts';
 import { createNotesController } from '../src/notesController.ts';
+import { createPrivateWriteCoordinator } from '../src/privateWriteCoordinator.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
@@ -35,10 +36,12 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
   let storedNotes = initialNotes;
   const draftWrites = [], noteWrites = [], alerts = [], timers = new Map();
   let timerId = 0, contentCalls = 0;
-  const controller = createNotesController({
+  let controller;
+  let controllerStorage;
+  const deviceNotesStorage = {
     async load() { return storedNotes; },
     async save(next) { noteWrites.push(next); await saveNotes(next); storedNotes = next; },
-  });
+  };
   const backend = {
     async getItem(key) { return values.get(key) ?? null; },
     async setItem(key, value) {
@@ -75,7 +78,12 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     '@expo/vector-icons/FontAwesome': { __esModule: true, default: 'FontAwesome' },
     '@react-native-async-storage/async-storage': backend,
     '../notes': notes, '../folders': folders, '../draftLibrary': drafts,
-    '../notesController': { createNotesController: () => controller }, '../deviceNotesStorage': {},
+    '../notesController': { createNotesController(storage) {
+      controllerStorage = storage;
+      return (controller = createNotesController(storage));
+    } },
+    '../privateWriteCoordinator': { createPrivateWriteCoordinator },
+    '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' }, './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
@@ -103,7 +111,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
   async function flush() { for (let i = 0; i < 30; i += 1) await Promise.resolve(); }
   async function persistRecovery() { render(); for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } await flush(); }
   render(); await flush(); render();
-  return { render, flush, persistRecovery, controller, alerts, draftWrites, noteWrites,
+  return { render, flush, persistRecovery, controller, controllerStorage, alerts, draftWrites, noteWrites,
     get contentCalls() { return contentCalls; }, get storedDrafts() { return values.get(drafts.DRAFT_LIBRARY_KEY); },
     get recovery() { return values.get(recoveryKey) ?? null; }, get storedNotes() { return storedNotes; } };
 }
@@ -130,6 +138,38 @@ function typeNew(app, title = 'New title', body = 'New body') {
 }
 const saveDraft = async app => { action(app, 'Save to Drafts').props.onPress(); await app.flush(); app.render(); };
 const confirmDiscard = app => app.alerts.at(-1)[2].find(item => item.text === 'Discard changes').onPress();
+
+test('workspace passes a serialized device storage adapter to the real notes controller', async () => {
+  const pending = deferred();
+  const original = { id: 'note-1', title: 'Original', text: 'Body', category: 'work', createdAt: NOW, updatedAt: NOW, pinned: false, archived: false, deletedAt: null };
+  const firstWrite = [{ ...original, title: 'First write' }];
+  const secondWrite = [{ ...original, title: 'Second write' }];
+  const app = await workspace({ initialNotes: [original], saveNotes: next => next === firstWrite ? pending.promise : Promise.resolve() });
+  assert.deepEqual(await app.controllerStorage.load(), [original]);
+  const firstSave = app.controllerStorage.save(firstWrite);
+  const secondSave = app.controllerStorage.save(secondWrite);
+  await app.flush();
+  assert.deepEqual(app.noteWrites, [firstWrite], 'the second device write must wait for the first');
+  pending.resolve();
+  await Promise.all([firstSave, secondSave]);
+  assert.deepEqual(app.noteWrites, [firstWrite, secondWrite]);
+  assert.deepEqual(await app.controllerStorage.load(), secondWrite);
+});
+
+test('workspace device storage queue continues after a rejected write', async () => {
+  const pending = deferred();
+  let attempts = 0;
+  const app = await workspace({ saveNotes: () => ++attempts === 1 ? pending.promise : Promise.resolve() });
+  const rejected = assert.rejects(app.controllerStorage.save([]), /device full/);
+  const next = app.controllerStorage.save([]);
+  await app.flush();
+  assert.equal(attempts, 1);
+  pending.reject(new Error('device full'));
+  await rejected;
+  await next;
+  assert.equal(attempts, 2);
+  assert.deepEqual(app.storedNotes, []);
+});
 
 test('save, restart, reopen and update preserve rich formatting, category and unrelated drafts', async () => {
   const app = await workspace({ initialDrafts: [first, second] });

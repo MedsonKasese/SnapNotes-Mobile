@@ -9,6 +9,7 @@ import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 import * as formatting from '../src/noteFormatting.ts';
 import { createNotesController } from '../src/notesController.ts';
+import { createPrivateWriteCoordinator } from '../src/privateWriteCoordinator.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
@@ -36,10 +37,11 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
   const folderWrites = [];
   const noteWrites = [];
   const alerts = [];
-  const controller = createNotesController({
+  let controller;
+  const deviceNotesStorage = {
     async load() { return storedNotes; },
     async save(next) { noteWrites.push(next); await saveNotes(next); storedNotes = next; },
-  });
+  };
   const backend = {
     async getItem(key) {
       if (key === folders.FOLDERS_KEY) return storedFolders;
@@ -99,8 +101,9 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '../notes': notes,
     '../folders': folders,
     '../draftLibrary': draftLibrary,
-    '../notesController': { createNotesController: () => controller },
-    '../deviceNotesStorage': {},
+    '../notesController': { createNotesController: storage => (controller = createNotesController(storage)) },
+    '../privateWriteCoordinator': { createPrivateWriteCoordinator },
+    '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes },
     '../noteActionsMenu': { getNoteActionsMenuLayout },
     '../noteFormatting': formatting,
@@ -216,6 +219,8 @@ test('deletion blocks stale moves across both writes and preserves every note an
   confirm();
   confirm();
   staleMove();
+  assert.equal(app.controller.getSnapshot().status, 'saving');
+  await app.flush();
   assert.equal(app.noteWrites.length, 1);
   noteWrite.resolve();
   await app.flush();
