@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
 import { createPrivateSession } from '../privateSession';
@@ -10,10 +11,19 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   const [phase, setPhase] = useState<'loading' | 'setup' | 'locked' | 'unlocked' | 'error'>('loading');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmationVisible, setConfirmationVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const lifecycle = useRef({ mounted: false, busy: false });
   const sessionGuard = useRef(createPrivateSession());
+
+  function clearSensitiveInputs() {
+    setPassword('');
+    setConfirmation('');
+    setPasswordVisible(false);
+    setConfirmationVisible(false);
+  }
 
   useEffect(() => {
     const session = lifecycle.current;
@@ -34,8 +44,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       sessionGuard.current.setActive(state === 'active');
       if (state !== 'active') {
         setPhase(current => current === 'unlocked' ? 'locked' : current);
-        setPassword('');
-        setConfirmation('');
+        clearSensitiveInputs();
         setError(null);
       }
     });
@@ -45,8 +54,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   function lock() {
     sessionGuard.current.invalidate();
     setPhase(current => current === 'unlocked' ? 'locked' : current);
-    setPassword('');
-    setConfirmation('');
+    clearSensitiveInputs();
     setError(null);
   }
 
@@ -59,6 +67,8 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     if (generation === null) return;
     session.busy = true;
     setBusy(true);
+    setPasswordVisible(false);
+    setConfirmationVisible(false);
     setError(null);
     try {
       if (phase === 'setup') {
@@ -70,8 +80,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       // Setup may have committed while backgrounded. Offer unlock, not setup,
       // but never let a result from the old foreground session unlock the UI.
       setPhase(sessionGuard.current.valid(generation) && AppState.currentState === 'active' ? 'unlocked' : 'locked');
-      setPassword('');
-      setConfirmation('');
+      clearSensitiveInputs();
     } catch (cause) {
       if (session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active') {
         setError(cause instanceof Error ? cause.message : 'Private Notes could not be unlocked.');
@@ -108,11 +117,31 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
               ? 'Create a password with at least 12 characters. If you forget it, encrypted private content cannot be recovered. If you cancel after starting setup, it may still finish. Keep this password to unlock later.'
               : 'Enter your Private Notes password. It is never saved on this device.'}
           </Text>
-          <TextInput accessibilityLabel="Private Notes password" placeholder="Password" secureTextEntry
-            autoCapitalize="none" autoCorrect={false} value={password} onChangeText={setPassword} style={styles.input} />
+          <View style={styles.inputRow}>
+            <TextInput accessibilityLabel="Private Notes password" placeholder="Password" secureTextEntry={!passwordVisible}
+              autoCapitalize="none" autoCorrect={false} underlineColorAndroid="transparent"
+              value={password} onChangeText={setPassword} style={styles.input} />
+            <Pressable accessibilityRole="button"
+              accessibilityLabel={`${passwordVisible ? 'Hide' : 'Show'} Private Notes password`}
+              accessibilityHint={passwordVisible ? 'Hides the password on screen' : 'Shows the password on screen'}
+              disabled={busy} hitSlop={8} style={styles.visibilityButton}
+              onPress={() => setPasswordVisible(visible => !visible)}>
+              <MaterialCommunityIcons name={passwordVisible ? 'eye-off' : 'eye'} size={22} color="#3b7f16" />
+            </Pressable>
+          </View>
           {phase === 'setup' && (
-            <TextInput accessibilityLabel="Confirm Private Notes password" placeholder="Confirm password" secureTextEntry
-              autoCapitalize="none" autoCorrect={false} value={confirmation} onChangeText={setConfirmation} style={styles.input} />
+            <View style={styles.inputRow}>
+              <TextInput accessibilityLabel="Confirm Private Notes password" placeholder="Confirm password" secureTextEntry={!confirmationVisible}
+                autoCapitalize="none" autoCorrect={false} underlineColorAndroid="transparent"
+                value={confirmation} onChangeText={setConfirmation} style={styles.input} />
+              <Pressable accessibilityRole="button"
+                accessibilityLabel={`${confirmationVisible ? 'Hide' : 'Show'} confirmation password`}
+                accessibilityHint={confirmationVisible ? 'Hides the confirmation password on screen' : 'Shows the confirmation password on screen'}
+                disabled={busy} hitSlop={8} style={styles.visibilityButton}
+                onPress={() => setConfirmationVisible(visible => !visible)}>
+                <MaterialCommunityIcons name={confirmationVisible ? 'eye-off' : 'eye'} size={22} color="#3b7f16" />
+              </Pressable>
+            </View>
           )}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
           <View style={styles.actionRow}>
@@ -135,7 +164,9 @@ const styles = StyleSheet.create({
   eyebrow: { color: '#3b7f16', fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
   title: { color: '#20351d', fontSize: 28, fontWeight: '800' },
   description: { color: '#586851', fontSize: 15, lineHeight: 23 },
-  input: { borderColor: '#cbd9c3', borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 16, color: '#20351d' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', borderColor: '#cbd9c3', borderWidth: 1, borderRadius: 12, paddingLeft: 14 },
+  input: { flex: 1, paddingVertical: 14, paddingRight: 8, fontSize: 16, color: '#20351d' },
+  visibilityButton: { minWidth: 48, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
   error: { color: '#a32b2b', fontSize: 14 },
   button: { padding: 16, borderRadius: 12, backgroundColor: '#3b7f16', alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
