@@ -28,6 +28,8 @@ function find(tree, predicate) {
   return found;
 }
 const button = (app, label) => find(app.render(), item => item.type === 'Pressable' && text(item) === label);
+const visibilityButton = (app, label) => find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === label);
+const icon = (app, name) => find(app.render(), item => item.type === 'MaterialCommunityIcons' && item.props.name === name);
 const input = (app, label = 'Private Notes password') => find(app.render(), item => item.props.accessibilityLabel === label);
 
 // Exercise the actual JSX, hooks and async handlers. Native rendering and the
@@ -73,6 +75,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
       ...Object.fromEntries(['ActivityIndicator', 'Pressable', 'Text', 'TextInput', 'View'].map(name => [name, name])),
       AppState: appState, StyleSheet: { create: styles => styles },
     },
+    '@expo/vector-icons/MaterialCommunityIcons': { __esModule: true, default: 'MaterialCommunityIcons' },
     '@react-native-async-storage/async-storage': {},
     '../privateAccess': { createPrivateAccess: () => access },
     '../privateSession': { createPrivateSession },
@@ -108,6 +111,29 @@ function enterPassword(app, setup = false) {
 }
 const isUnlocked = app => text(app.render()).includes('Lock Private Notes');
 
+test('password visibility controls start hidden, toggle independently, and preserve entered values', async () => {
+  const app = await screen({ status: async () => 'setup' });
+  enterPassword(app, true);
+  assert.equal(input(app).props.secureTextEntry, true);
+  assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
+  assert.equal(visibilityButton(app, 'Show Private Notes password').props.accessibilityRole, 'button');
+  assert.equal(visibilityButton(app, 'Show confirmation password').props.accessibilityRole, 'button');
+
+  visibilityButton(app, 'Show Private Notes password').props.onPress();
+  assert.equal(input(app).props.secureTextEntry, false);
+  assert.equal(input(app).props.value, PASSWORD);
+  assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
+  assert.equal(icon(app, 'eye-off').props.size, 22);
+
+  visibilityButton(app, 'Show confirmation password').props.onPress();
+  assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, false);
+  assert.equal(input(app, 'Confirm Private Notes password').props.value, PASSWORD);
+  visibilityButton(app, 'Hide Private Notes password').props.onPress();
+  assert.equal(input(app).props.secureTextEntry, true);
+  assert.equal(input(app).props.value, PASSWORD);
+  assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, false);
+});
+
 test('setup and unlock clear secure inputs, while manual lock remains locked on foreground', async () => {
   const app = await screen({ status: async () => 'setup' });
   assert.equal(input(app).props.secureTextEntry, true);
@@ -125,6 +151,25 @@ test('setup and unlock clear secure inputs, while manual lock remains locked on 
   assert.equal(isUnlocked(app), true);
 });
 
+for (const state of ['background', 'inactive']) {
+  test(`moving to ${state} clears setup inputs and resets both visibility controls`, async () => {
+    const app = await screen({ status: async () => 'setup' });
+    enterPassword(app, true);
+    visibilityButton(app, 'Show Private Notes password').props.onPress();
+    visibilityButton(app, 'Show confirmation password').props.onPress();
+    assert.equal(input(app).props.secureTextEntry, false);
+    assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, false);
+
+    app.change(state);
+    assert.equal(input(app).props.value, '');
+    assert.equal(input(app).props.secureTextEntry, true);
+    assert.equal(input(app, 'Confirm Private Notes password').props.value, '');
+    assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
+    assert.ok(visibilityButton(app, 'Show Private Notes password'));
+    assert.ok(visibilityButton(app, 'Show confirmation password'));
+  });
+}
+
 test('a pre-render double press starts only one password setup', async () => {
   const pending = deferred();
   const app = await screen({ status: async () => 'setup', setup: () => pending.promise });
@@ -132,6 +177,23 @@ test('a pre-render double press starts only one password setup', async () => {
   const submit = button(app, 'Set password').props.onPress;
   submit(); submit();
   assert.equal(app.calls.length, 1);
+  pending.resolve(); await app.flush();
+  assert.equal(isUnlocked(app), true);
+});
+
+test('visibility controls are masked and disabled while setup is pending', async () => {
+  const pending = deferred();
+  const app = await screen({ status: async () => 'setup', setup: () => pending.promise });
+  enterPassword(app, true);
+  visibilityButton(app, 'Show Private Notes password').props.onPress();
+  visibilityButton(app, 'Show confirmation password').props.onPress();
+  button(app, 'Set password').props.onPress();
+
+  assert.equal(button(app, 'Please wait…').props.disabled, true);
+  assert.equal(input(app).props.secureTextEntry, true);
+  assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
+  assert.equal(visibilityButton(app, 'Show Private Notes password').props.disabled, true);
+  assert.equal(visibilityButton(app, 'Show confirmation password').props.disabled, true);
   pending.resolve(); await app.flush();
   assert.equal(isUnlocked(app), true);
 });
@@ -199,10 +261,14 @@ for (const outcome of ['resolve', 'reject']) {
 test('back navigation clears passwords and invalidates an in-flight unlock before unmount', async () => {
   const pending = deferred();
   const app = await screen({ unlock: () => pending.promise });
-  enterPassword(app); button(app, 'Unlock').props.onPress();
+  enterPassword(app);
+  visibilityButton(app, 'Show Private Notes password').props.onPress();
+  button(app, 'Unlock').props.onPress();
   button(app, '‹ All notes').props.onPress();
   assert.equal(app.backs, 1);
   assert.equal(input(app).props.value, '');
+  assert.equal(input(app).props.secureTextEntry, true);
+  assert.ok(visibilityButton(app, 'Show Private Notes password'));
   pending.resolve(); await app.flush();
   assert.equal(isUnlocked(app), false);
 });
@@ -210,9 +276,14 @@ test('back navigation clears passwords and invalidates an in-flight unlock befor
 test('wrong password is retryable and corrupt vault status never offers password setup', async () => {
   let attempts = 0;
   const app = await screen({ unlock: async () => { if (++attempts === 1) throw new Error('Incorrect password or damaged private vault.'); } });
-  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  enterPassword(app);
+  visibilityButton(app, 'Show Private Notes password').props.onPress();
+  button(app, 'Unlock').props.onPress(); await app.flush();
   assert.equal(isUnlocked(app), false);
   assert.match(text(app.render()), /Incorrect password/);
+  assert.equal(input(app).props.value, PASSWORD);
+  assert.equal(input(app).props.secureTextEntry, true);
+  assert.ok(visibilityButton(app, 'Show Private Notes password'));
   button(app, 'Unlock').props.onPress(); await app.flush();
   assert.equal(isUnlocked(app), true);
   const corrupt = await screen({ status: async () => { throw new Error('corrupt'); } });
@@ -225,11 +296,17 @@ for (const phase of ['setup', 'locked']) {
     const app = await screen({ status: async () => phase });
     if (phase === 'setup') assert.match(text(app.render()), /cancel after starting setup, it may still finish/);
     enterPassword(app, phase === 'setup');
+    visibilityButton(app, 'Show Private Notes password').props.onPress();
+    if (phase === 'setup') visibilityButton(app, 'Show confirmation password').props.onPress();
     button(app, 'Cancel').props.onPress();
     assert.equal(app.backs, 1);
     assert.equal(app.calls.length, 0);
     assert.equal(input(app).props.value, '');
+    assert.equal(input(app).props.secureTextEntry, true);
+    assert.ok(visibilityButton(app, 'Show Private Notes password'));
     if (phase === 'setup') assert.equal(input(app, 'Confirm Private Notes password').props.value, '');
+    if (phase === 'setup') assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
+    if (phase === 'setup') assert.ok(visibilityButton(app, 'Show confirmation password'));
     assert.equal(isUnlocked(app), false);
   });
 
