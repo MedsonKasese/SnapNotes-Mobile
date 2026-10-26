@@ -9,7 +9,7 @@ import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 import * as formatting from '../src/noteFormatting.ts';
 import { createNotesController } from '../src/notesController.ts';
-import { createPrivateWriteCoordinator } from '../src/privateWriteCoordinator.ts';
+import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
@@ -102,7 +102,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '../folders': folders,
     '../draftLibrary': draftLibrary,
     '../notesController': { createNotesController: storage => (controller = createNotesController(storage)) },
-    '../privateWriteCoordinator': { createPrivateWriteCoordinator },
+    '../privateSharedCoordinator': { privateSharedCoordinator },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes },
     '../noteActionsMenu': { getNoteActionsMenuLayout },

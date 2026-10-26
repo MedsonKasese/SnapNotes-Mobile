@@ -5,6 +5,7 @@ import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { createPrivateSession } from '../src/privateSession.ts';
+import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
 
 const projectRoot = new URL('../', import.meta.url);
 
@@ -52,6 +53,7 @@ async function makeHarness(options = {}) {
   const accessExports = execute(accessSource, 'privateAccess.ts', specifier => {
     if (specifier === './privateCrypto.ts') return cryptoAdapter;
     if (specifier === './privateVaultStorage.ts') return storageExports;
+    if (specifier === './privateSharedCoordinator.ts') return { privateSharedCoordinator };
     throw new Error(`Unexpected access dependency: ${specifier}`);
   });
 
