@@ -30,7 +30,7 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
     if (typeof data.title !== 'string' || typeof data.text !== 'string' || typeof data.html !== 'string' ||
       typeof data.category !== 'string' ||
       !NOTE_CATEGORIES.includes(data.category as Note['category']) ||
-      noteHtmlToText(data.html).trim() !== data.text.replace(/\\r/g, '').trim()) {
+      noteHtmlToText(data.html).trim() !== data.text.replace(/\r/g, '').trim()) {
       throw Error('Unsupported private note payload.');
     }
     const now = new Date().toISOString();
