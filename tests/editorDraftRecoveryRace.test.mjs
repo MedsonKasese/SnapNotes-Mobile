@@ -6,6 +6,8 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as notes from '../src/notes.ts';
 import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
+import { createPrivateOrdinarySaveGuard } from '../src/privateOrdinarySaveGuard.ts';
+import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
@@ -194,6 +196,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };
       if (name === '../privateSharedCoordinator') return { privateSharedCoordinator };
+      if (name === '../privateOrdinarySaveGuard') return { createPrivateOrdinarySaveGuard };
+      if (name === '../privateVaultStorage') return { createPrivateVaultStorage };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };

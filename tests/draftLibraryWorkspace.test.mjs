@@ -10,6 +10,8 @@ import * as drafts from '../src/draftLibrary.ts';
 import * as formatting from '../src/noteFormatting.ts';
 import { createNotesController } from '../src/notesController.ts';
 import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
+import { createPrivateOrdinarySaveGuard } from '../src/privateOrdinarySaveGuard.ts';
+import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
@@ -83,6 +85,8 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
       return (controller = createNotesController(storage));
     } },
     '../privateSharedCoordinator': { privateSharedCoordinator },
+    '../privateOrdinarySaveGuard': { createPrivateOrdinarySaveGuard },
+    '../privateVaultStorage': { createPrivateVaultStorage },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },
