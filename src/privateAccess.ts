@@ -92,6 +92,13 @@ export function createPrivateAccess(backend: Backend) {
       if (!verifier) throw new Error('Private vault has no password verifier.');
       await verifyPassword(password, verifier.privateData);
     },
+    async withAuthenticatedKey<T>(password: string, operation: (key: Awaited<ReturnType<typeof derivePrivateKey>>, salt: Uint8Array) => Promise<T>): Promise<T> {
+      const entries = await vault.load();
+      const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
+      if (!verifier) throw new Error('Private vault has no password verifier.');
+      const key = await verifyPassword(password, verifier.privateData);
+      return operation(key, privateSaltFromRecord(verifier.privateData));
+    },
     async readUnlocked(password: string) {
       const entries = await vault.load();
       const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
