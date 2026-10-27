@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { createPrivateSession } from '../src/privateSession.ts';
+import { sanitizeNoteHtml } from '../src/noteFormatting.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_PRIVATE_SCREEN_SOURCE ?? new URL('../src/components/PrivateNotesScreen.tsx', import.meta.url), 'utf8');
@@ -100,6 +101,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
       deleteDevicePrivateNote(id, session) { mutationCalls.push(['delete', id]); return remove(id, session); },
     },
     '../notes': { validateDraft: () => null },
+    '../noteFormatting': { sanitizeNoteHtml },
     '../noteActionsMenu': { getNoteActionsMenuLayout: () => ({ left: 0, top: 0, width: 216, maxHeight: 500 }) },
     './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
   };

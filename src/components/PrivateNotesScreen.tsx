@@ -10,6 +10,7 @@ import { createPrivateSession } from '../privateSession';
 import { restoreDevicePrivateNoteWithKey } from '../privateRestoreService';
 import { deleteDevicePrivateNote, updateDevicePrivateNote } from '../privateNoteManagementService';
 import { validateDraft } from '../notes';
+import { sanitizeNoteHtml } from '../noteFormatting';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import type { PrivateNotePreview } from '../privateNoteReader';
 import { RichNoteEditor, type RichNoteEditorHandle } from './RichNoteEditor';
@@ -349,7 +350,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
                       <TextInput accessibilityLabel="Edit private note title" autoCapitalize="sentences" autoCorrect
                         value={editingNote.title} onChangeText={title => setEditingNote(current => current ? { ...current, title } : current)}
                         placeholder="Note title" style={styles.titleInput} />
-                      <RichNoteEditor ref={bodyEditor} accessibilityLabel="Edit private note body" text={editingNote.text} html={editingNote.html}
+                      <RichNoteEditor ref={bodyEditor} accessibilityLabel="Edit private note body" text={editingNote.text} html={sanitizeNoteHtml(editingNote.html)}
                         editable={!busy} onReady={setEditorReady}
                         onChange={content => setEditingNote(current => current ? { ...current, ...content } : current)}
                         onSelection={() => undefined} />
