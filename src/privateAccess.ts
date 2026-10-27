@@ -1,6 +1,6 @@
 import { generatePrivateSalt, derivePrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
-import { createPrivateVaultStorage, type PrivateVaultEntry } from './privateVaultStorage.ts';
-import { privateSharedCoordinator } from './privateSharedCoordinator.ts';
+import type { PrivateVaultEntry } from './privateVaultStorage.ts';
+import { createPrivateSharedVaultStorage } from './privateSharedVaultStorage.ts';
 
 export const PRIVATE_VERIFIER_ID = '__snapnotes-private-verifier-v1__';
 const VERIFIER_TEXT = 'snapnotes-private-vault-ready-v1';
@@ -47,7 +47,7 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
 }
 
 export function createPrivateAccess(backend: Backend) {
-  const vault = createPrivateVaultStorage(backend);
+  const vault = createPrivateSharedVaultStorage(backend);
   return {
     async status(): Promise<'setup' | 'locked'> {
       const entries = await vault.load();
@@ -76,7 +76,7 @@ export function createPrivateAccess(backend: Backend) {
       const entry: PrivateVaultEntry = { id: PRIVATE_VERIFIER_ID, privateData };
       // Coordinate the atomic initialize-if-empty commit with ordinary note writes.
       // The expensive password derivation stays outside the shared queue.
-      if (!await privateSharedCoordinator.exclusive(() => vault.initializeIfEmpty([entry]))) {
+      if (!await vault.initializeIfEmpty([entry])) {
         throw new Error('Private vault already exists.');
       }
     },
