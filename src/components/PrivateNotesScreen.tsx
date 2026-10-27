@@ -5,7 +5,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
 import { createPrivateSession } from '../privateSession';
 import { restoreDevicePrivateNote } from '../privateRestoreService';
-import { restoreDevicePrivateNote } from '../privateRestoreService';
 import type { PrivateNotePreview } from '../privateNoteReader';
 
 const access = createPrivateAccess(AsyncStorage);
@@ -20,8 +19,6 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
   const [busy, setBusy] = useState(false);
   const [privateNotes, setPrivateNotes] = useState<PrivateNotePreview[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [restoreId, setRestoreId] = useState<string | null>(null);
-  const [restorePassword, setRestorePassword] = useState('');
   const [restoreId, setRestoreId] = useState<string | null>(null);
   const [restorePassword, setRestorePassword] = useState('');
   const lifecycle = useRef({ mounted: false, busy: false });
@@ -116,34 +113,6 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 
   async function restoreSelected() {
     if (!restoreId || busy || phase !== 'unlocked' || AppState.currentState !== 'active') return;
-    const token = sessionGuard.current.begin();
-    if (token === null) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await restoreDevicePrivateNote(restoreId, restorePassword);
-      if (!sessionGuard.current.valid(token) || !lifecycle.current.mounted || AppState.currentState !== 'active') return;
-      setRestorePassword('');
-      setRestoreId(null);
-      if (result === 'needs-recovery') {
-        setError('Restore needs recovery. Both copies may exist; do not delete either one.');
-      } else {
-        setPrivateNotes(current => current.filter(note => note.id !== restoreId));
-        setSelectedNoteId(null);
-        if (onRestored) await onRestored();
-      }
-    } catch (cause) {
-      if (sessionGuard.current.valid(token) && lifecycle.current.mounted) {
-        setError(cause instanceof Error ? cause.message : 'Could not restore private note.');
-      }
-    } finally {
-      sessionGuard.current.finish(token);
-      if (lifecycle.current.mounted) setBusy(false);
-    }
-  }
-
-  async function restoreSelected() {
-    if (!restoreId || busy || phase !== 'unlocked' || AppState.currentState !== 'active') return;
     const id = restoreId;
     const generation = sessionGuard.current.begin();
     if (generation === null) return;
@@ -157,6 +126,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
         setSelectedNoteId(null);
         setRestoreId(null);
         setRestorePassword('');
+        if (onRestored) await onRestored();
       } else {
         setError('Restore needs recovery. Both copies may exist. Do not delete either copy.');
       }
@@ -198,17 +168,6 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
               </View>}
             </View>
           ))}
-          {restoreId !== null && <View style={{ gap: 10 }}>
-            <Text style={styles.description}>Confirm your password to restore this note. Its contents will become visible in ordinary notes.</Text>
-            <TextInput accessibilityLabel="Private Notes password for restore" secureTextEntry
-              autoCapitalize="none" autoCorrect={false} value={restorePassword}
-              onChangeText={setRestorePassword} placeholder="Private Notes password" style={styles.input} />
-            <Pressable style={styles.button} disabled={busy} onPress={() => void restoreSelected()}>
-              <Text style={styles.buttonText}>{busy ? 'Restoring…' : 'Confirm restore'}</Text>
-            </Pressable>
-            <Pressable disabled={busy} onPress={() => { setRestoreId(null); setRestorePassword(''); }}><Text style={styles.back}>Cancel restore</Text></Pressable>
-          </View>}
-          {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
           {restoreId !== null && <View style={{ gap: 10 }}>
             <Text style={styles.description}>Confirm your Private Notes password to restore this note.</Text>
             <TextInput accessibilityLabel="Confirm password to restore private note" secureTextEntry
