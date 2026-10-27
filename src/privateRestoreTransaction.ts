@@ -1,4 +1,5 @@
-import type { Note } from './notes.ts';
+import { NOTE_CATEGORIES, type Note } from './notes.ts';
+import { noteHtmlToText } from './noteFormatting.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
@@ -27,7 +28,11 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw Error('Invalid decrypted private note.');
     const data = payload as Record<string, unknown>;
     if (typeof data.title !== 'string' || typeof data.text !== 'string' || typeof data.html !== 'string' ||
-      typeof data.category !== 'string') throw Error('Unsupported private note payload.');
+      typeof data.category !== 'string' ||
+      !NOTE_CATEGORIES.includes(data.category as Note['category']) ||
+      noteHtmlToText(data.html).trim() !== data.text.replace(/\\r/g, '').trim()) {
+      throw Error('Unsupported private note payload.');
+    }
     const now = new Date().toISOString();
     const note: Note = { id, title: data.title, text: data.text, html: data.html,
       category: data.category as Note['category'], createdAt: now, updatedAt: now,
