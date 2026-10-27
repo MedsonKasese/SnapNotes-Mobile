@@ -304,12 +304,24 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  // Reconcile after an external encrypted-vault transfer. Never replace an
+  // active editor draft or overwrite a write in progress.
+  async function refreshAfterPrivateTransfer(): Promise<void> {
+    if (snapshot.status !== 'ready' || snapshot.state.editingId !== null ||
+      snapshot.state.draft.title !== '' || snapshot.state.draft.text !== '') {
+      throw new Error('Close the editor before refreshing notes after a private transfer.');
+    }
+    const notes = await storage.load();
+    if (snapshot.status !== 'ready') throw new Error('Notes changed while refreshing.');
+    publish({ ...snapshot, state: { ...snapshot.state, notes }, storageError: null });
+  }
+
   return {
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
+    load, refreshAfterPrivateTransfer, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }
