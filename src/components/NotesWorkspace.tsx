@@ -975,7 +975,7 @@ export function NotesWorkspace() {
       {draftLibraryError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftLibraryError}</Text>}
 
       {view === 'private' ? (
-        <PrivateNotesScreen onBack={openLibrary} />
+        <PrivateNotesScreen onBack={openLibrary} onRestored={() => controller.refreshAfterPrivateTransfer()} />
       ) : view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
