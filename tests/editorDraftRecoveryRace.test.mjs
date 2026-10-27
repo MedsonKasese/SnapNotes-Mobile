@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as notes from '../src/notes.ts';
-import { createPrivateWriteCoordinator } from '../src/privateWriteCoordinator.ts';
+import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
@@ -193,7 +193,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '@react-native-async-storage/async-storage') return AsyncStorage;
       if (name === '../notes') return notes;
       if (name === '../notesController') return { createNotesController: () => controller };
-      if (name === '../privateWriteCoordinator') return { createPrivateWriteCoordinator };
+      if (name === '../privateSharedCoordinator') return { privateSharedCoordinator };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };

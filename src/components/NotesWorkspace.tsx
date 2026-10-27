@@ -10,7 +10,7 @@ import {
   characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
-import { createPrivateWriteCoordinator } from '../privateWriteCoordinator';
+import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { DRAFT_LIBRARY_KEY, newDraftId, parseDraftLibrary, removeDraft, upsertDraft, type SavedDraft } from '../draftLibrary';
 import { FOLDERS_KEY, FOLDER_ICON_NAMES, FOLDER_COLOR_VALUES, normalizeFolderIcon, normalizeFolderColor, type FolderIcon, type FolderColor, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
@@ -104,11 +104,10 @@ function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAct
 
 // One queue for this workspace's ordinary-note mutations. The encrypted vault
 // must join this same queue before Move to Private can be enabled.
-const workspaceWriteCoordinator = createPrivateWriteCoordinator();
 const coordinatedDeviceNotesStorage = {
   load: () => deviceNotesStorage.load(),
   save: (notes: Parameters<typeof deviceNotesStorage.save>[0]) =>
-    workspaceWriteCoordinator.exclusive(() => deviceNotesStorage.save(notes)),
+    privateSharedCoordinator.exclusive(() => deviceNotesStorage.save(notes)),
 };
 
 export function NotesWorkspace() {

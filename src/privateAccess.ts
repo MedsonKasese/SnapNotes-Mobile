@@ -1,5 +1,6 @@
 import { generatePrivateSalt, derivePrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
 import { createPrivateVaultStorage, type PrivateVaultEntry } from './privateVaultStorage.ts';
+import { privateSharedCoordinator } from './privateSharedCoordinator.ts';
 
 export const PRIVATE_VERIFIER_ID = '__snapnotes-private-verifier-v1__';
 const VERIFIER_TEXT = 'snapnotes-private-vault-ready-v1';
@@ -73,7 +74,11 @@ export function createPrivateAccess(backend: Backend) {
         throw new Error('Private Notes setup could not be verified on this device. No vault was saved. Check the native development build. [PV-SETUP]');
       }
       const entry: PrivateVaultEntry = { id: PRIVATE_VERIFIER_ID, privateData };
-      if (!await vault.initializeIfEmpty([entry])) throw new Error('Private vault already exists.');
+      // Coordinate the atomic initialize-if-empty commit with ordinary note writes.
+      // The expensive password derivation stays outside the shared queue.
+      if (!await privateSharedCoordinator.exclusive(() => vault.initializeIfEmpty([entry]))) {
+        throw new Error('Private vault already exists.');
+      }
     },
     async unlock(password: string): Promise<void> {
       let entries: PrivateVaultEntry[];
