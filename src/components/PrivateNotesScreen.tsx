@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
 import { createPrivateSession } from '../privateSession';
 import { restoreDevicePrivateNote } from '../privateRestoreService';
+import { restoreDevicePrivateNote } from '../privateRestoreService';
 import type { PrivateNotePreview } from '../privateNoteReader';
 
 const access = createPrivateAccess(AsyncStorage);
@@ -19,6 +20,8 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
   const [busy, setBusy] = useState(false);
   const [privateNotes, setPrivateNotes] = useState<PrivateNotePreview[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [restoreId, setRestoreId] = useState<string | null>(null);
+  const [restorePassword, setRestorePassword] = useState('');
   const [restoreId, setRestoreId] = useState<string | null>(null);
   const [restorePassword, setRestorePassword] = useState('');
   const lifecycle = useRef({ mounted: false, busy: false });
@@ -139,6 +142,34 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     }
   }
 
+  async function restoreSelected() {
+    if (!restoreId || busy || phase !== 'unlocked' || AppState.currentState !== 'active') return;
+    const id = restoreId;
+    const generation = sessionGuard.current.begin();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await restoreDevicePrivateNote(id, restorePassword);
+      if (!sessionGuard.current.valid(generation) || !lifecycle.current.mounted || AppState.currentState !== 'active') return;
+      if (result === 'restored') {
+        setPrivateNotes(notes => notes.filter(note => note.id !== id));
+        setSelectedNoteId(null);
+        setRestoreId(null);
+        setRestorePassword('');
+      } else {
+        setError('Restore needs recovery. Both copies may exist. Do not delete either copy.');
+      }
+    } catch (cause) {
+      if (sessionGuard.current.valid(generation) && lifecycle.current.mounted) {
+        setError(cause instanceof Error ? cause.message : 'Restore failed.');
+      }
+    } finally {
+      sessionGuard.current.finish(generation);
+      if (lifecycle.current.mounted) setBusy(false);
+    }
+  }
+
   return (
     <View style={styles.container}>
       <Pressable accessibilityRole="button" onPress={() => { lock(); onBack(); }}>
@@ -178,6 +209,19 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
             <Pressable disabled={busy} onPress={() => { setRestoreId(null); setRestorePassword(''); }}><Text style={styles.back}>Cancel restore</Text></Pressable>
           </View>}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+          {restoreId !== null && <View style={{ gap: 10 }}>
+            <Text style={styles.description}>Confirm your Private Notes password to restore this note.</Text>
+            <TextInput accessibilityLabel="Confirm password to restore private note" secureTextEntry
+              autoCapitalize="none" autoCorrect={false} value={restorePassword}
+              onChangeText={setRestorePassword} placeholder="Private Notes password" style={styles.input} />
+            {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+            <Pressable accessibilityRole="button" disabled={busy} style={styles.button} onPress={() => void restoreSelected()}>
+              <Text style={styles.buttonText}>{busy ? 'Restoring…' : 'Restore note'}</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setRestoreId(null); setRestorePassword(''); }}>
+              <Text style={styles.back}>Cancel restore</Text>
+            </Pressable>
+          </View>}
           <Pressable style={styles.button} onPress={lock}>
             <Text style={styles.buttonText}>Lock Private Notes</Text>
           </Pressable>
