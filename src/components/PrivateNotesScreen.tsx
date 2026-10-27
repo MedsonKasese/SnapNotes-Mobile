@@ -4,6 +4,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createPrivateAccess } from '../privateAccess';
 import { createPrivateSession } from '../privateSession';
+import type { PrivateNotePreview } from '../privateNoteReader';
 
 const access = createPrivateAccess(AsyncStorage);
 
@@ -15,6 +16,8 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
   const [confirmationVisible, setConfirmationVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [privateNotes, setPrivateNotes] = useState<PrivateNotePreview[]>([]);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const lifecycle = useRef({ mounted: false, busy: false });
   const sessionGuard = useRef(createPrivateSession());
 
@@ -36,6 +39,7 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       active = false;
       session.mounted = false;
       sessionGuard.current.setActive(false);
+      setPrivateNotes([]);
     };
   }, []);
 
@@ -45,6 +49,8 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
       if (state !== 'active') {
         setPhase(current => current === 'unlocked' ? 'locked' : current);
         clearSensitiveInputs();
+        setPrivateNotes([]);
+        setSelectedNoteId(null);
         setError(null);
       }
     });
@@ -55,6 +61,8 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     sessionGuard.current.invalidate();
     setPhase(current => current === 'unlocked' ? 'locked' : current);
     clearSensitiveInputs();
+    setPrivateNotes([]);
+    setSelectedNoteId(null);
     setError(null);
   }
 
@@ -71,15 +79,19 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
     setConfirmationVisible(false);
     setError(null);
     try {
+      let unlockedNotes: PrivateNotePreview[] = [];
       if (phase === 'setup') {
         await access.setup(password, confirmation);
       } else {
-        await access.unlock(password);
+        unlockedNotes = await access.readUnlocked(password);
       }
       if (!session.mounted) return;
       // Setup may have committed while backgrounded. Offer unlock, not setup,
       // but never let a result from the old foreground session unlock the UI.
-      setPhase(sessionGuard.current.valid(generation) && AppState.currentState === 'active' ? 'unlocked' : 'locked');
+      const valid = sessionGuard.current.valid(generation) && AppState.currentState === 'active';
+      setPrivateNotes(valid ? unlockedNotes : []);
+      setSelectedNoteId(null);
+      setPhase(valid ? 'unlocked' : 'locked');
       clearSensitiveInputs();
     } catch (cause) {
       if (session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active') {
@@ -105,7 +117,16 @@ export function PrivateNotesScreen({ onBack }: { onBack: () => void }) {
         <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
       ) : phase === 'unlocked' ? (
         <>
-          <Text style={styles.description}>Your private vault is protected. Moving notes into Private and viewing encrypted notes will be enabled in a later update.</Text>
+          <Text style={styles.description}>Your encrypted notes are available only while this vault is unlocked.</Text>
+          {privateNotes.length === 0 ? <Text style={styles.description}>No private notes yet.</Text> : privateNotes.map(note => (
+            <View key={note.id}>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Open private note ${note.title || 'Untitled'}`}
+                onPress={() => setSelectedNoteId(current => current === note.id ? null : note.id)}>
+                <Text style={styles.privateNoteTitle}>{note.title || 'Untitled note'}</Text>
+              </Pressable>
+              {selectedNoteId === note.id && <Text style={styles.description}>{note.text}</Text>}
+            </View>
+          ))}
           <Pressable style={styles.button} onPress={lock}>
             <Text style={styles.buttonText}>Lock Private Notes</Text>
           </Pressable>
@@ -164,6 +185,7 @@ const styles = StyleSheet.create({
   eyebrow: { color: '#3b7f16', fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
   title: { color: '#20351d', fontSize: 28, fontWeight: '800' },
   description: { color: '#586851', fontSize: 15, lineHeight: 23 },
+  privateNoteTitle: { color: '#20351d', fontSize: 17, fontWeight: '700', paddingVertical: 12 },
   inputRow: { flexDirection: 'row', alignItems: 'center', borderColor: '#cbd9c3', borderWidth: 1, borderRadius: 12, paddingLeft: 14 },
   input: { flex: 1, paddingVertical: 14, paddingRight: 8, fontSize: 16, color: '#20351d' },
   visibilityButton: { minWidth: 48, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
