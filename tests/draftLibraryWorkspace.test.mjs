@@ -87,6 +87,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     '../privateSharedCoordinator': { privateSharedCoordinator },
     '../privateOrdinarySaveGuard': { createPrivateOrdinarySaveGuard },
     '../privateVaultStorage': { createPrivateVaultStorage },
+    '../privateMoveService': { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },

@@ -33,16 +33,16 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 
   useEffect(() => {
     const session = lifecycle.current;
+    const activeGuard = sessionGuard.current;
     let active = true;
     session.mounted = true;
-    sessionGuard.current.setActive(AppState.currentState === 'active');
+    activeGuard.setActive(AppState.currentState === 'active');
     void access.status().then(status => { if (active) setPhase(status); })
       .catch(() => { if (active) { setPhase('error'); setError('Could not read the encrypted vault. No changes were made.'); } });
     return () => {
       active = false;
       session.mounted = false;
-      sessionGuard.current.setActive(false);
-      setPrivateNotes([]);
+      activeGuard.setActive(false);
     };
   }, []);
 

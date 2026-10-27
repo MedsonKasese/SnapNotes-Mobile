@@ -198,6 +198,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../privateSharedCoordinator') return { privateSharedCoordinator };
       if (name === '../privateOrdinarySaveGuard') return { createPrivateOrdinarySaveGuard };
       if (name === '../privateVaultStorage') return { createPrivateVaultStorage };
+      if (name === '../privateMoveService') return { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };

@@ -107,6 +107,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '../privateSharedCoordinator': { privateSharedCoordinator },
     '../privateOrdinarySaveGuard': { createPrivateOrdinarySaveGuard },
     '../privateVaultStorage': { createPrivateVaultStorage },
+    '../privateMoveService': { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes },
     '../noteActionsMenu': { getNoteActionsMenuLayout },

@@ -98,6 +98,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === '../privateSharedCoordinator') return { privateSharedCoordinator };
       if (name === '../privateOrdinarySaveGuard') return { createPrivateOrdinarySaveGuard };
       if (name === '../privateVaultStorage') return { createPrivateVaultStorage };
+      if (name === '../privateMoveService') return { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return {};
@@ -139,7 +140,8 @@ const list = tree => find(tree, element => element.type === 'FlatList');
 const text = tree => Array.isArray(tree) ? tree.map(text).join('') : tree?.props ? text(tree.props.children) : typeof tree === 'string' || typeof tree === 'number' ? String(tree) : '';
 const chip = (tree, label) => find(tree, element => element.type === 'Pressable' && text(element) === label);
 const action = (tree, label) => find(tree, element => element.props.label === label);
-const actionsModal = tree => find(tree, element => element.type === 'Modal' && element.props.transparent === true);
+const actionsModal = tree => find(tree, element => element.type === 'Modal' &&
+  elements(element).some(child => child.props.testID === 'note-actions-layer'));
 const sheetActions = (tree, title) => elements(actionsModal(tree)).filter(element =>
   element.type === 'Pressable' && element.props.accessibilityLabel?.endsWith(`: ${title}`));
 function openNoteActions(app, item, {
@@ -234,7 +236,7 @@ test('drawer icons retain their names and remain decorative within labelled butt
 test('library, archive, and trash expose exactly their available note actions in the popup', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, expected] of [
-    ['library', savedNotes[0], ['Open note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
+    ['library', savedNotes[0], ['Open note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
     ['archive', archivedNote, ['Open note: Archived project', 'Duplicate note: Archived project', 'Move to folder: Archived project', 'Restore from archive: Archived project', 'Move to Trash: Archived project']],
     ['trash', { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' }, ['Restore note: Deleted project', 'Delete forever: Deleted project']],
   ]) {
@@ -267,7 +269,7 @@ test('note actions are disabled while saving', () => {
   app.setStatus('saving');
   const { sheet } = openNoteActions(app, savedNotes[0]);
   const buttons = sheetActions(sheet, savedNotes[0].title);
-  assert.equal(buttons.length, 5);
+  assert.equal(buttons.length, 6);
   for (const button of buttons) {
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
@@ -579,7 +581,7 @@ test('pin and unpin stay on one independent card button, never in the action men
 
     const { sheet } = openNoteActions(app, item);
     assert.deepEqual(sheetActions(sheet, item.title).map(button => button.props.accessibilityLabel), [
-      'Open note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
+      'Open note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
     ]);
   }
 });
@@ -616,10 +618,10 @@ test('the contextual popup stays compact and accessible with its duplicate, fold
   assert.equal(menu.props.pointerEvents, 'auto');
   assert.equal(menu.props.accessibilityViewIsModal, true);
   assert.equal(menu.props.accessibilityElementsHidden, false);
-  assert.deepEqual(elements(menu).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), ['file-text-o', 'clone', 'folder-o', 'archive', 'trash-o']);
+  assert.deepEqual(elements(menu).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), ['file-text-o', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']);
   assert.equal(elements(menu).some(element => element.props.accessibilityRole === 'header'), false);
   assert.doesNotMatch(text(menu), /Cancel|Share|history|private|Pin|Unpin/);
-  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Open note', 'Duplicate note', 'Move to folder', 'Archive note', 'Move to Trash']);
+  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Open note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
   const danger = find(menu, element => element.type === 'Text' && text(element) === 'Move to Trash');
   assert.equal(flatStyle(danger.props.style).color, '#b3261e');
   for (const button of sheetActions(sheet, savedNotes[0].title)) {
@@ -699,7 +701,7 @@ test('old measurements and an old onShow cannot move the menu to a previous note
   popup(app.render()).props.onLayout({ nativeEvent: { layout: { height: 150 } } });
   for (const finish of pendingFirst) finish(20, 700, 40, 40);
   tree = app.render();
-  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Open note', 'Duplicate note', 'Move to folder', 'Archive note', 'Move to Trash']);
+  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Open note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
   const expected = getNoteActionsMenuLayout({ x: 290, y: 300, width: 40, height: 40 }, { x: 0, y: 30, width: 380, height: 740 }, 150);
   const style = flatStyle(popup(tree).props.style);
   assert.equal(style.left, expected.left);
@@ -727,7 +729,7 @@ test('viewport changes remeasure the trigger and keep tall menu content inside t
 test('all existing library, archive, and trash menu actions retain their original decorative icons', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, icons] of [
-    ['library', savedNotes[0], ['file-text-o', 'clone', 'folder-o', 'archive', 'trash-o']],
+    ['library', savedNotes[0], ['file-text-o', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']],
     ['archive', archivedNote, ['file-text-o', 'clone', 'folder-o', 'undo', 'trash-o']],
     ['trash', trashedNote, ['undo', 'trash']],
   ]) {

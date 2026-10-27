@@ -13,7 +13,7 @@ export async function inspectAuthenticatedPrivateRecovery(
   decrypt: typeof decryptPrivatePayload = decryptPrivatePayload,
 ) {
   const findings = inspectPrivateMoveRecovery(notes as Note[], vault as PrivateVaultEntry[]);
-  const results: Array<{ id: string; status: 'verified-duplicate' | 'conflict' | 'unreadable' }> = [];
+  const results: { id: string; status: 'verified-duplicate' | 'conflict' | 'unreadable' }[] = [];
   for (const finding of findings) {
     if (finding.kind !== 'duplicate') continue;
     const note = notes.find(item => item.id === finding.id);

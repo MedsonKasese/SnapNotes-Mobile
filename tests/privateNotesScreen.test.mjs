@@ -34,8 +34,9 @@ const input = (app, label = 'Private Notes password') => find(app.render(), item
 
 // Exercise the actual JSX, hooks and async handlers. Native rendering and the
 // access boundary are mocked; crypto/storage have separate integration tests.
-async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => {}, initialState = 'active' } = {}) {
+async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => [], restore = async () => 'restored', onRestored = async () => {}, initialState = 'active' } = {}) {
   const slots = [], effects = [], calls = [], listeners = new Map();
+  const restoreCalls = [];
   let cursor = 0, mounted = true, writesAfterUnmount = 0, backs = 0;
   const appState = {
     currentState: initialState,
@@ -67,7 +68,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
   const access = {
     status,
     setup(...args) { calls.push(['setup', ...args]); return setup(...args); },
-    unlock(...args) { calls.push(['unlock', ...args]); return unlock(...args); },
+    readUnlocked(...args) { calls.push(['unlock', ...args]); return Promise.resolve(unlock(...args)).then(notes => notes ?? []); },
   };
   const modules = {
     react, 'react/jsx-runtime': require('react/jsx-runtime'),
@@ -79,6 +80,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
     '@react-native-async-storage/async-storage': {},
     '../privateAccess': { createPrivateAccess: () => access },
     '../privateSession': { createPrivateSession },
+    '../privateRestoreService': { restoreDevicePrivateNote(id, password) { restoreCalls.push([id, password]); return restore(id, password); } },
   };
   const exports = {};
   vm.runInNewContext(outputText, {
@@ -87,14 +89,14 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
   });
   function render() {
     cursor = 0;
-    const tree = exports.PrivateNotesScreen({ onBack() { backs += 1; } });
+    const tree = exports.PrivateNotesScreen({ onBack() { backs += 1; }, onRestored });
     for (const effect of effects) if (effect?.pending) { effect.pending = false; effect.cleanup = effect.callback(); }
     return tree;
   }
   async function flush() { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }
   render(); await flush();
   return {
-    render, flush, calls,
+    render, flush, calls, restoreCalls,
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
     replayEffects() {
       for (const effect of effects) effect?.cleanup?.();
@@ -110,6 +112,32 @@ function enterPassword(app, setup = false) {
   if (setup) input(app, 'Confirm Private Notes password').props.onChangeText(PASSWORD);
 }
 const isUnlocked = app => text(app.render()).includes('Lock Private Notes');
+
+test('unlock displays authenticated previews and locking clears decrypted note content', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general' };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  assert.deepEqual(app.calls, [['unlock', PASSWORD]]);
+  assert.match(text(app.render()), /Private title/);
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
+  assert.match(text(app.render()), /Sensitive body/);
+  button(app, 'Lock Private Notes').props.onPress();
+  assert.doesNotMatch(text(app.render()), /Sensitive body/);
+});
+
+test('restoring a selected private note confirms the password and refreshes the ordinary library', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general' };
+  let refreshes = 0;
+  const app = await screen({ unlock: async () => [preview], onRestored: async () => { refreshes += 1; } });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
+  button(app, 'Move back to ordinary notes').props.onPress();
+  input(app, 'Confirm password to restore private note').props.onChangeText(PASSWORD);
+  button(app, 'Restore note').props.onPress(); await app.flush();
+  assert.deepEqual(app.restoreCalls, [['private-1', PASSWORD]]);
+  assert.equal(refreshes, 1);
+  assert.doesNotMatch(text(app.render()), /Sensitive body/);
+});
 
 test('password visibility controls start hidden, toggle independently, and preserve entered values', async () => {
   const app = await screen({ status: async () => 'setup' });
