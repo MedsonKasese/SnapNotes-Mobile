@@ -16,6 +16,7 @@ async function makeHarness(options = {}) {
   const cryptoSource = await readFile(new URL('src/privateCrypto.ts', projectRoot), 'utf8');
   const storageSource = await readFile(new URL('src/privateVaultStorage.ts', projectRoot), 'utf8');
   const accessSource = await readFile(new URL('src/privateAccess.ts', projectRoot), 'utf8');
+  const sharedVaultSource = await readFile(new URL('src/privateSharedVaultStorage.ts', projectRoot), 'utf8');
 
   function execute(source, filename, resolve) {
     const output = ts.transpileModule(source, {
@@ -50,10 +51,15 @@ async function makeHarness(options = {}) {
     if (specifier === './privateCrypto.ts') return cryptoExports;
     throw new Error(`Unexpected storage dependency: ${specifier}`);
   });
+  const sharedVaultExports = execute(sharedVaultSource, 'privateSharedVaultStorage.ts', specifier => {
+    if (specifier === './privateVaultStorage.ts') return storageExports;
+    if (specifier === './privateSharedCoordinator.ts') return { privateSharedCoordinator };
+    throw new Error(`Unexpected shared vault dependency: ${specifier}`);
+  });
   const accessExports = execute(accessSource, 'privateAccess.ts', specifier => {
     if (specifier === './privateCrypto.ts') return cryptoAdapter;
     if (specifier === './privateVaultStorage.ts') return storageExports;
-    if (specifier === './privateSharedCoordinator.ts') return { privateSharedCoordinator };
+    if (specifier === './privateSharedVaultStorage.ts') return sharedVaultExports;
     throw new Error(`Unexpected access dependency: ${specifier}`);
   });
 
