@@ -13,7 +13,7 @@ export function validatePrivatePassword(password: string, confirmation: string):
   return null;
 }
 
-async function verifyPassword(password: string, privateData: PrivateCipherRecord): Promise<void> {
+async function verifyPassword(password: string, privateData: PrivateCipherRecord): Promise<Awaited<ReturnType<typeof derivePrivateKey>>> {
   if (!password) throw new Error('Enter your Private Notes password.');
   let salt: Uint8Array;
   try {
@@ -44,6 +44,7 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
     (payload as { verifier?: unknown }).verifier !== VERIFIER_TEXT) {
     throw new Error('The decrypted password verifier was not recognized. No changes were made. [PV-VERIFY]');
   }
+  return key;
 }
 
 export function createPrivateAccess(backend: Backend) {
@@ -90,6 +91,14 @@ export function createPrivateAccess(backend: Backend) {
       const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
       if (!verifier) throw new Error('Private vault has no password verifier.');
       await verifyPassword(password, verifier.privateData);
+    },
+    async readUnlocked(password: string) {
+      const entries = await vault.load();
+      const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
+      if (!verifier) throw new Error('Private vault has no password verifier.');
+      const key = await verifyPassword(password, verifier.privateData);
+      const { readPrivateNotes } = await import('./privateNoteReader.ts');
+      return readPrivateNotes(entries, key);
     },
   };
 }
