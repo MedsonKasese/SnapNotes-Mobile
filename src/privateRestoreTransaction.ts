@@ -52,7 +52,7 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
     const now = new Date().toISOString();
     const note: Note = { id, title: data.title, text: data.text, html: data.html,
       category: data.category as Note['category'], createdAt: now, updatedAt: now,
-      pinned: false, archived: false, deletedAt: null,
+      pinned: typeof data.pinned === 'boolean' ? data.pinned : false, archived: false, deletedAt: null,
       folderId: typeof data.folderId === 'string' ? data.folderId : null };
     try {
       await deps.saveNotes([...ordinary, note]);

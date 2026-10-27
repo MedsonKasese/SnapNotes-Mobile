@@ -5,6 +5,7 @@ import { createPrivateVaultStorage } from './privateVaultStorage.ts';
 import { privateSharedCoordinator } from './privateSharedCoordinator.ts';
 import { decryptPrivatePayload } from './privateCrypto.ts';
 import { restorePrivateNoteTransaction } from './privateRestoreTransaction.ts';
+import type { AuthenticatedPrivateSession } from './privateAccess.ts';
 
 const access = createPrivateAccess(AsyncStorage);
 const vault = createPrivateVaultStorage(AsyncStorage);
@@ -14,14 +15,21 @@ const vault = createPrivateVaultStorage(AsyncStorage);
 // and verifies the ordinary copy before deleting ciphertext.
 export function restoreDevicePrivateNote(id: string, password: string) {
   return access.withAuthenticatedKey(password, key =>
-    restorePrivateNoteTransaction(id, {
-      loadNotes: () => deviceNotesStorage.load(),
-      saveNotes: notes => deviceNotesStorage.save(notes),
-      loadVault: () => vault.load(),
-      saveVault: entries => vault.save(entries),
-      decrypt: decryptPrivatePayload,
-      key,
-      withExclusiveRestore: operation => privateSharedCoordinator.exclusive(operation),
-    }),
+    restoreDevicePrivateNoteWithKey(id, key),
   );
+}
+
+export function restoreDevicePrivateNoteWithKey(
+  id: string,
+  key: AuthenticatedPrivateSession['key'],
+) {
+  return restorePrivateNoteTransaction(id, {
+    loadNotes: () => deviceNotesStorage.load(),
+    saveNotes: notes => deviceNotesStorage.save(notes),
+    loadVault: () => vault.load(),
+    saveVault: entries => vault.save(entries),
+    decrypt: decryptPrivatePayload,
+    key,
+    withExclusiveRestore: operation => privateSharedCoordinator.exclusive(operation),
+  });
 }

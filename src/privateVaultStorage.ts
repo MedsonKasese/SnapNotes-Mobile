@@ -1,7 +1,7 @@
 import { validatePrivateCipherRecord, type PrivateCipherRecord } from './privateCrypto.ts';
 
-// Separate from ordinary notes, drafts and search. Only ciphertext and opaque
-// identifiers may be written here. No Private Notes UI is enabled by this PR.
+// Separate from ordinary notes, drafts and search. Persist only ciphertext and
+// opaque identifiers; decrypted Private Notes previews remain in memory.
 export const PRIVATE_VAULT_INDEX_KEY = '@snapnotes-mobile/private-vault/index';
 const PRIVATE_VAULT_PREFIX = '@snapnotes-mobile/private-vault/generation/';
 const MAX_RECORD_BYTES = 1024 * 1024;

@@ -17,6 +17,7 @@ async function makeHarness(options = {}) {
   const storageSource = await readFile(new URL('src/privateVaultStorage.ts', projectRoot), 'utf8');
   const accessSource = await readFile(new URL('src/privateAccess.ts', projectRoot), 'utf8');
   const sharedVaultSource = await readFile(new URL('src/privateSharedVaultStorage.ts', projectRoot), 'utf8');
+  const noteReaderSource = await readFile(new URL('src/privateNoteReader.ts', projectRoot), 'utf8');
 
   function execute(source, filename, resolve) {
     const output = ts.transpileModule(source, {
@@ -56,12 +57,21 @@ async function makeHarness(options = {}) {
     if (specifier === './privateSharedCoordinator.ts') return { privateSharedCoordinator };
     throw new Error(`Unexpected shared vault dependency: ${specifier}`);
   });
-  const accessExports = execute(accessSource, 'privateAccess.ts', specifier => {
+  let accessExports;
+  const privateAccessExports = {};
+  const noteReaderExports = execute(noteReaderSource, 'privateNoteReader.ts', specifier => {
+    if (specifier === './privateCrypto.ts') return cryptoAdapter;
+    if (specifier === './privateAccess.ts') return privateAccessExports;
+    throw new Error(`Unexpected private-note reader dependency: ${specifier}`);
+  });
+  accessExports = execute(accessSource, 'privateAccess.ts', specifier => {
     if (specifier === './privateCrypto.ts') return cryptoAdapter;
     if (specifier === './privateVaultStorage.ts') return storageExports;
     if (specifier === './privateSharedVaultStorage.ts') return sharedVaultExports;
+    if (specifier === './privateNoteReader.ts') return noteReaderExports;
     throw new Error(`Unexpected access dependency: ${specifier}`);
   });
+  Object.assign(privateAccessExports, accessExports);
 
   return {
     createAccess: backend => accessExports.createPrivateAccess(backend),
@@ -363,6 +373,29 @@ test('a persisted pre-existing cipher record still unlocks unchanged', async () 
   assert.equal(await freshAccess.status(), 'locked');
   await freshAccess.unlock(password);
   assert.deepEqual(backend.values, beforeUnlock, 'unlock must not rewrite an existing encrypted record');
+});
+
+test('unlocked session returns its live key and decrypts private previews without persisting plaintext', async () => {
+  const backend = memoryBackend();
+  const harness = await makeHarness();
+  const access = harness.createAccess(backend);
+  await access.setup(password, password);
+  const initial = await access.readUnlockedSession(password);
+  assert.deepEqual(JSON.parse(JSON.stringify(initial.notes)), []);
+  assert.ok(initial.key);
+  assert.equal(initial.salt.length, 16);
+
+  const privatePayload = { title: 'In-memory title', text: 'In-memory body', html: '<p>In-memory body</p>', category: 'personal', pinned: true };
+  const privateData = await harness.createVaultRecord(privatePayload, initial.key, initial.salt);
+  const vault = harness.createVault(backend);
+  await vault.save([...await vault.load(), { id: 'private-1', privateData }]);
+  const unlocked = await access.readUnlockedSession(password);
+  assert.deepEqual(JSON.parse(JSON.stringify(unlocked.notes)), [{
+    id: 'private-1', title: 'In-memory title', text: 'In-memory body',
+    html: '<p>In-memory body</p>', category: 'personal', pinned: true,
+  }]);
+  assert.equal([...backend.values.values()].join('\n').includes('In-memory title'), false);
+  assert.equal([...backend.values.values()].join('\n').includes('In-memory body'), false);
 });
 
 test('failed setup commit leaves an empty vault retryable', async () => {

@@ -2,7 +2,7 @@ import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 
-export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string };
+export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string; pinned: boolean };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -26,7 +26,8 @@ export async function readPrivateNotes(
       throw new Error('Encrypted private note has an unsupported payload. No changes were made.');
     }
     results.push({ id: entry.id, title: payload.title, text: payload.text,
-      html: payload.html, category: payload.category });
+      html: payload.html, category: payload.category,
+      pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false });
   }
   return results;
 }

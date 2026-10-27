@@ -1,11 +1,18 @@
 import { generatePrivateSalt, derivePrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 import { createPrivateSharedVaultStorage } from './privateSharedVaultStorage.ts';
+import type { PrivateNotePreview } from './privateNoteReader.ts';
 
 export const PRIVATE_VERIFIER_ID = '__snapnotes-private-verifier-v1__';
 const VERIFIER_TEXT = 'snapnotes-private-vault-ready-v1';
 
 type Backend = { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void> };
+
+export type AuthenticatedPrivateSession = {
+  key: Awaited<ReturnType<typeof derivePrivateKey>>;
+  salt: Uint8Array;
+  notes: PrivateNotePreview[];
+};
 
 export function validatePrivatePassword(password: string, confirmation: string): string | null {
   if (password.length < PRIVATE_MIN_PASSWORD_LENGTH) return 'Use at least 12 characters.';
@@ -49,6 +56,15 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
 
 export function createPrivateAccess(backend: Backend) {
   const vault = createPrivateSharedVaultStorage(backend);
+  async function readUnlockedSession(password: string): Promise<AuthenticatedPrivateSession> {
+    const entries = await vault.load();
+    const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
+    if (!verifier) throw new Error('Private vault has no password verifier.');
+    const key = await verifyPassword(password, verifier.privateData);
+    const salt = privateSaltFromRecord(verifier.privateData);
+    const { readPrivateNotes } = await import('./privateNoteReader.ts');
+    return { notes: await readPrivateNotes(entries, key), key, salt };
+  }
   return {
     async status(): Promise<'setup' | 'locked'> {
       const entries = await vault.load();
@@ -99,13 +115,7 @@ export function createPrivateAccess(backend: Backend) {
       const key = await verifyPassword(password, verifier.privateData);
       return operation(key, privateSaltFromRecord(verifier.privateData));
     },
-    async readUnlocked(password: string) {
-      const entries = await vault.load();
-      const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
-      if (!verifier) throw new Error('Private vault has no password verifier.');
-      const key = await verifyPassword(password, verifier.privateData);
-      const { readPrivateNotes } = await import('./privateNoteReader.ts');
-      return readPrivateNotes(entries, key);
-    },
+    readUnlockedSession,
+    async readUnlocked(password: string) { return (await readUnlockedSession(password)).notes; },
   };
 }

@@ -34,9 +34,10 @@ const input = (app, label = 'Private Notes password') => find(app.render(), item
 
 // Exercise the actual JSX, hooks and async handlers. Native rendering and the
 // access boundary are mocked; crypto/storage have separate integration tests.
-async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => [], restore = async () => 'restored', onRestored = async () => {}, initialState = 'active' } = {}) {
+async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => [], restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }), remove = async () => {}, onRestored = async () => {}, initialState = 'active' } = {}) {
   const slots = [], effects = [], calls = [], listeners = new Map();
-  const restoreCalls = [];
+  const restoreCalls = [], mutationCalls = [], alerts = [];
+  const unlockedKey = { token: 'authenticated-test-key' };
   let cursor = 0, mounted = true, writesAfterUnmount = 0, backs = 0;
   const appState = {
     currentState: initialState,
@@ -57,6 +58,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
       }];
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+    useMemo(factory) { cursor++; return factory(); },
     useEffect(callback, deps) {
       const index = cursor++;
       if (!effects[index] || deps.some((dep, i) => dep !== effects[index].deps[i])) {
@@ -68,25 +70,45 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
   const access = {
     status,
     setup(...args) { calls.push(['setup', ...args]); return setup(...args); },
-    readUnlocked(...args) { calls.push(['unlock', ...args]); return Promise.resolve(unlock(...args)).then(notes => notes ?? []); },
+    readUnlockedSession(...args) {
+      calls.push(['unlock', ...args]);
+      return Promise.resolve(unlock(...args)).then(notes => {
+        lastUnlockedNotes = notes ?? [];
+        return { notes: lastUnlockedNotes, key: unlockedKey, salt: new Uint8Array([1]) };
+      });
+    },
   };
   const modules = {
     react, 'react/jsx-runtime': require('react/jsx-runtime'),
     'react-native': {
-      ...Object.fromEntries(['ActivityIndicator', 'Pressable', 'Text', 'TextInput', 'View'].map(name => [name, name])),
+      ...Object.fromEntries(['ActivityIndicator', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(name => [name, name])),
       AppState: appState, StyleSheet: { create: styles => styles },
+      Alert: { alert(...args) { alerts.push(args); } },
     },
+    '@expo/vector-icons/FontAwesome': { __esModule: true, default: 'FontAwesome' },
     '@expo/vector-icons/MaterialCommunityIcons': { __esModule: true, default: 'MaterialCommunityIcons' },
     '@react-native-async-storage/async-storage': {},
     '../privateAccess': { createPrivateAccess: () => access },
     '../privateSession': { createPrivateSession },
-    '../privateRestoreService': { restoreDevicePrivateNote(id, password) { restoreCalls.push([id, password]); return restore(id, password); } },
+    '../privateRestoreService': { restoreDevicePrivateNoteWithKey(id, key) { restoreCalls.push([id, key]); return restore(id, key); } },
+    '../privateNoteManagementService': {
+      updateDevicePrivateNote(id, session, changes) {
+        mutationCalls.push(['update', id, changes]);
+        const note = (lastUnlockedNotes ?? []).find(item => item.id === id) ?? {};
+        return update(id, session, changes, note);
+      },
+      deleteDevicePrivateNote(id, session) { mutationCalls.push(['delete', id]); return remove(id, session); },
+    },
+    '../notes': { validateDraft: () => null },
+    '../noteActionsMenu': { getNoteActionsMenuLayout: () => ({ left: 0, top: 0, width: 216, maxHeight: 500 }) },
+    './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
   };
   const exports = {};
   vm.runInNewContext(outputText, {
     exports, Error,
     require(name) { assert.ok(name in modules, `Unexpected import: ${name}`); return modules[name]; },
   });
+  let lastUnlockedNotes = [];
   function render() {
     cursor = 0;
     const tree = exports.PrivateNotesScreen({ onBack() { backs += 1; }, onRestored });
@@ -96,7 +118,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
   async function flush() { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }
   render(); await flush();
   return {
-    render, flush, calls, restoreCalls,
+    render, flush, calls, restoreCalls, mutationCalls, alerts, unlockedKey,
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
     replayEffects() {
       for (const effect of effects) effect?.cleanup?.();
@@ -125,18 +147,78 @@ test('unlock displays authenticated previews and locking clears decrypted note c
   assert.doesNotMatch(text(app.render()), /Sensitive body/);
 });
 
-test('restoring a selected private note confirms the password and refreshes the ordinary library', async () => {
+test('moving a private note out asks for one confirmation and refreshes the ordinary library', async () => {
   const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general' };
   let refreshes = 0;
   const app = await screen({ unlock: async () => [preview], onRestored: async () => { refreshes += 1; } });
   enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
-  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
-  button(app, 'Move back to ordinary notes').props.onPress();
-  input(app, 'Confirm password to restore private note').props.onChangeText(PASSWORD);
-  button(app, 'Restore note').props.onPress(); await app.flush();
-  assert.deepEqual(app.restoreCalls, [['private-1', PASSWORD]]);
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Note actions for Private title').props.onPress();
+  button(app, 'Move out of Private Notes').props.onPress();
+  assert.equal(app.alerts.length, 1);
+  assert.equal(app.restoreCalls.length, 0);
+  app.alerts[0][2][1].onPress(); await app.flush();
+  assert.deepEqual(app.restoreCalls, [['private-1', app.unlockedKey]]);
+  assert.equal(elements(app.render()).some(item => item.props.accessibilityLabel === 'Confirm password to restore private note'), false);
   assert.equal(refreshes, 1);
   assert.doesNotMatch(text(app.render()), /Sensitive body/);
+});
+
+test('private note cards expose only edit, move-out, and delete actions; pin remains a separate card button', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general', pinned: false };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  assert.ok(find(app.render(), item => item.props.accessibilityLabel === 'Pin private note Private title'));
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Note actions for Private title').props.onPress();
+  const menu = find(app.render(), item => item.props.testID === 'private-note-actions-menu');
+  const menuText = text(menu);
+  assert.match(menuText, /Edit note/);
+  assert.match(menuText, /Move out of Private Notes/);
+  assert.match(menuText, /Delete private note/);
+  for (const unsupported of ['Duplicate note', 'Share note', 'edit history', 'Move to folder', 'Archive note', 'Pin note']) {
+    assert.doesNotMatch(menuText, new RegExp(unsupported));
+  }
+  assert.equal(app.alerts.length, 0);
+});
+
+test('editing a private note saves without confirmation', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general', pinned: false };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Note actions for Private title').props.onPress();
+  button(app, 'Edit note').props.onPress();
+  assert.equal(app.alerts.length, 0);
+  input(app, 'Edit private note title').props.onChangeText('Updated private title');
+  const editor = find(app.render(), item => item.type === 'RichNoteEditor');
+  editor.props.onReady(true);
+  let snapshotCalls = 0;
+  editor.props.ref.current = { async getContent() { snapshotCalls += 1; return { text: 'Updated body', html: '<p>Updated body</p>' }; } };
+  button(app, 'Save note').props.onPress(); await app.flush();
+  assert.equal(snapshotCalls, 1, 'save waits for the authoritative WebView snapshot');
+  assert.deepEqual(JSON.parse(JSON.stringify(app.mutationCalls[0])), ['update', 'private-1', {
+    title: 'Updated private title', text: 'Updated body', html: '<p>Updated body</p>',
+  }]);
+  assert.match(text(app.render()), /Updated private title/);
+  assert.equal(app.alerts.length, 0);
+});
+
+test('deleting a private note is immediate and does not show a confirmation', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general', pinned: false };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Note actions for Private title').props.onPress();
+  button(app, 'Delete private note').props.onPress(); await app.flush();
+  assert.deepEqual(app.mutationCalls[0], ['delete', 'private-1']);
+  assert.equal(app.alerts.length, 0);
+  assert.doesNotMatch(text(app.render()), /Private title|Sensitive body/);
+});
+
+test('pinning a private note updates the separate card button without putting pin in the menu', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general', pinned: false };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  visibilityButton(app, 'Pin private note Private title').props.onPress(); await app.flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.mutationCalls[0])), ['update', 'private-1', { pinned: true }]);
+  assert.equal(app.alerts.length, 0);
 });
 
 test('password visibility controls start hidden, toggle independently, and preserve entered values', async () => {

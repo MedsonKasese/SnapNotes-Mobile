@@ -11,6 +11,7 @@ export function buildMobilePrivatePayload(note: Note) {
     text: note.text || '',
     html: note.html || '',
     category: note.category || 'general',
+    pinned: Boolean(note.pinned),
     tags: [],
     time: '',
     folderId: note.folderId || null,

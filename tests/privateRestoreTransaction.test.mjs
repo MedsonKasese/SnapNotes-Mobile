@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { restorePrivateNoteTransaction } from '../src/privateRestoreTransaction.ts';
 import { createNotesStorage } from '../src/notesStorage.ts';
 
-const payload = { title: 'Private', text: 'Secret', html: '<p>Secret</p>', category: 'general', folderId: null };
+const payload = { title: 'Private', text: 'Secret', html: '<p>Secret</p>', category: 'general', folderId: null, pinned: true };
 function notesBackend() {
   const values = new Map();
   return {
@@ -32,6 +32,7 @@ test('restores ordinary copy and only then removes ciphertext', async () => {
   const h = harness();
   assert.equal(await restorePrivateNoteTransaction('n1', h.deps), 'restored');
   assert.equal(h.state().notes.length, 1);
+  assert.equal(h.state().notes[0].pinned, true);
   assert.equal(h.state().vault.length, 0);
 });
 
@@ -52,6 +53,7 @@ test('restore verifies the saved note through the real notes storage adapter', a
   assert.equal(restored.title, payload.title);
   assert.equal(restored.text, payload.text);
   assert.equal(restored.html, payload.html);
+  assert.equal(restored.pinned, true);
   assert.equal(vault.length, 0);
 });
 

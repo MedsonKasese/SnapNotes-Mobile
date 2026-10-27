@@ -10,10 +10,15 @@ test('reader skips verifier and returns authenticated note content', async () =>
   let calls = 0;
   const results = await readPrivateNotes(encrypted, key, async () => {
     calls++;
-    return { title: 'Private', text: 'Sensitive', html: '', category: 'general' };
+    return { title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true };
   });
   assert.equal(calls, 1);
-  assert.deepEqual(results, [{ id: 'note-1', title: 'Private', text: 'Sensitive', html: '', category: 'general' }]);
+  assert.deepEqual(results, [{ id: 'note-1', title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true }]);
+});
+
+test('reader defaults older encrypted payloads to unpinned', async () => {
+  const results = await readPrivateNotes(encrypted, key, async () => ({ title: 'Legacy', text: 'Body', html: '', category: 'general' }));
+  assert.equal(results[0].pinned, false);
 });
 
 test('reader fails closed on unrecognized decrypted payload', async () => {
