@@ -93,6 +93,21 @@ test('failed create keeps draft and saved collection, then retries successfully'
   assert.equal(controller.getSnapshot().storageError, null);
 });
 
+test('private-vault save failures show redacted security guidance and retain the editor draft', async () => {
+  const controller = createNotesController({
+    async load() { return []; },
+    async save() { throw Error('Corrupt private vault index. do not show this detail'); },
+  });
+  await controller.load();
+  draft(controller, 'Still available');
+  await controller.save(LATER);
+  const snapshot = controller.getSnapshot();
+  assert.match(snapshot.storageError, /Private Notes storage could not be verified/);
+  assert.doesNotMatch(snapshot.storageError, /do not show this detail/);
+  assert.equal(snapshot.state.draft.text, 'Still available');
+  assert.deepEqual(snapshot.state.notes, []);
+});
+
 test('failed edit retains editing target and original saved metadata until retry', async () => {
   let fail = true;
   const controller = createNotesController({ async load() { return [note]; }, async save() { if (fail) throw Error('full'); } });

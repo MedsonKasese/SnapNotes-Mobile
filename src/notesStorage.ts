@@ -179,29 +179,33 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
     }
   }
 
+  async function loadIndexed(): Promise<Note[] | null> {
+    const rawIndex = await backend.getItem(INDEX_KEY);
+    if (rawIndex === null) return null;
+    const index = parseObject(rawIndex);
+    if (index.version !== 2 || typeof index.generation !== 'string' ||
+      !/^[a-z0-9-]+$/.test(index.generation) || !Array.isArray(index.ids) ||
+      index.ids.some(id => typeof id !== 'string')) {
+      throw new Error('Unsupported or corrupt notes index.');
+    }
+    const records: unknown[] = [];
+    for (let i = 0; i < index.ids.length; i++) {
+      const raw = await backend.getItem(noteKey(index.generation, i));
+      if (raw === null) throw new Error('A saved note is missing.');
+      const record = parseObject(raw);
+      if (record.id !== index.ids[i]) throw new Error('Saved note ID mismatch.');
+      records.push(record);
+    }
+    const notes = validateNotes(records);
+    await cleanupExcept(index.generation);
+    return notes;
+  }
+
   return {
     load(): Promise<Note[]> {
       return enqueue(backend, async () => {
-        const rawIndex = await backend.getItem(INDEX_KEY);
-        if (rawIndex !== null) {
-          const index = parseObject(rawIndex);
-          if (index.version !== 2 || typeof index.generation !== 'string' ||
-            !/^[a-z0-9-]+$/.test(index.generation) || !Array.isArray(index.ids) ||
-            index.ids.some(id => typeof id !== 'string')) {
-            throw new Error('Unsupported or corrupt notes index.');
-          }
-          const records: unknown[] = [];
-          for (let i = 0; i < index.ids.length; i++) {
-            const raw = await backend.getItem(noteKey(index.generation, i));
-            if (raw === null) throw new Error('A saved note is missing.');
-            const record = parseObject(raw);
-            if (record.id !== index.ids[i]) throw new Error('Saved note ID mismatch.');
-            records.push(record);
-          }
-          const notes = validateNotes(records);
-          await cleanupExcept(index.generation);
-          return notes;
-        }
+        const indexed = await loadIndexed();
+        if (indexed !== null) return indexed;
         // Legacy PR #3 snapshot is retained and never overwritten during migration.
         const legacy = await backend.getItem(NOTES_STORAGE_KEY);
         if (legacy === null) {
@@ -222,21 +226,44 @@ export function createNotesStorage(backend: AsyncKeyValueBackend) {
     async save(notes: Note[]): Promise<void> {
       const validated = validateNotes(notes);
       return enqueue(backend, async () => {
-        const generation = Date.now().toString(36) + '-' +
-          (++generationCounter).toString(36) + '-' + Math.random().toString(36).slice(2, 12);
-        const index = bounded(JSON.stringify({
-          version: 2, generation, ids: validated.map(note => note.id),
-        }), 'Notes index');
+        async function writeGeneration(): Promise<void> {
+          const generation = Date.now().toString(36) + '-' +
+            (++generationCounter).toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+          const index = bounded(JSON.stringify({
+            version: 2, generation, ids: validated.map(note => note.id),
+          }), 'Notes index');
 
-        // Write a complete immutable generation before switching the committed pointer.
-        for (let i = 0; i < validated.length; i++) {
-          await backend.setItem(noteKey(generation, i),
-            bounded(JSON.stringify(validated[i]), 'Note'));
+          // Write a complete immutable generation before switching the committed pointer.
+          for (let i = 0; i < validated.length; i++) {
+            await backend.setItem(noteKey(generation, i),
+              bounded(JSON.stringify(validated[i]), 'Note'));
+          }
+          await backend.setItem(INDEX_KEY, index);
+
+          // The index is now committed. Only now is it safe to remove older generations.
+          await cleanupExcept(generation);
         }
-        await backend.setItem(INDEX_KEY, index);
+        async function committedSnapshotMatches(): Promise<boolean> {
+          try {
+            const committed = await loadIndexed();
+            return committed !== null && JSON.stringify(committed) === JSON.stringify(validated);
+          } catch {
+            return false;
+          }
+        }
 
-        // The index is now committed. Only now is it safe to remove older generations.
-        await cleanupExcept(generation);
+        try {
+          await writeGeneration();
+        } catch {
+          // AsyncStorage can reject after committing a key. Confirm the pointer before retrying.
+          if (await committedSnapshotMatches()) return;
+          try {
+            await writeGeneration();
+          } catch (retryError) {
+            if (await committedSnapshotMatches()) return;
+            throw retryError;
+          }
+        }
       });
     },
   };
