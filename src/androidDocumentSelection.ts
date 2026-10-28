@@ -8,7 +8,7 @@ export type NativeDocumentAsset = {
   mimeType?: string | null;
 };
 export type NativeDocumentSelection =
-  | { canceled: true; assets?: never }
+  | { canceled: true; assets: null }
   | { canceled: false; assets: NativeDocumentAsset[] };
 
 export const ANDROID_DOCUMENT_PICKER_MIME_TYPES = [

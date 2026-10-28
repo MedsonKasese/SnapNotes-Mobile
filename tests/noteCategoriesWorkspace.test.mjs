@@ -117,6 +117,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === './PrivateNotesScreen') return { PrivateNotesScreen: 'PrivateNotesScreen' };
       if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
       if (name === './FormattedText') return { FormattedText: 'FormattedText' };
+      if (name === './NoteAttachments') return { NoteAttachments: 'NoteAttachments' };
       throw new Error(`Unexpected import: ${name}`);
     },
   });

@@ -5,7 +5,7 @@ import { ANDROID_DOCUMENT_PICKER_MIME_TYPES, normalizeDocumentSelection } from '
 const pdf = { uri: 'content://documents/12', name: 'lecture.pdf', size: 100, mimeType: 'application/pdf' };
 
 test('handles cancel without mutating attachments', () => {
-  assert.deepEqual(normalizeDocumentSelection({ canceled: true }, 0), []);
+  assert.deepEqual(normalizeDocumentSelection({ canceled: true, assets: null }, 0), []);
 });
 
 test('normalizes permitted Android document picker assets', () => {

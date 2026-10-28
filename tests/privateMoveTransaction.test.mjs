@@ -23,6 +23,7 @@ function fixture(overrides = {}) {
     saveNotes: async next => { events.push('notes-save'); notes = structuredClone(next); },
     loadVault: async () => structuredClone(vault),
     saveVault: async next => { events.push('vault-save'); vault = structuredClone(next); },
+    assertNoUnencryptedAttachments: async () => {},
     encrypt: async payload => { encryptedPayload = structuredClone(payload); events.push('encrypt'); return cipher; },
     decrypt: async () => structuredClone(encryptedPayload),
     key: new Uint8Array(32), salt: new Uint8Array(16),
@@ -38,6 +39,27 @@ test('encrypts and verifies durable vault before removing source', async () => {
   assert.deepEqual(f.events, ['encrypt', 'vault-save', 'notes-save']);
   assert.equal(f.getNotes().length, 0);
   assert.equal(f.getVault().length, 1);
+});
+
+test('refuses to move a note with plaintext attachments before crypto or storage writes', async () => {
+  let locked = false;
+  const f = fixture({
+    assertNoUnencryptedAttachments: async noteId => {
+      assert.equal(locked, true);
+      assert.equal(noteId, 'n1');
+      throw new Error('Remove local attachments before moving this note to Private.');
+    },
+    withExclusiveMove: async operation => {
+      locked = true;
+      try { return await operation(); }
+      finally { locked = false; }
+    },
+  });
+  await assert.rejects(moveNoteToPrivateTransaction('n1', f.deps), /local attachments/);
+  assert.equal(f.getNotes().length, 1);
+  assert.equal(f.getVault().length, 0);
+  assert.deepEqual(f.events, []);
+  assert.equal(locked, false);
 });
 
 test('failed vault write reports recovery and retains ordinary note', async () => {
@@ -165,6 +187,7 @@ test('real encryption and vault storage preserve content and unrelated records u
     saveNotes: async next => { guarded(); notes = structuredClone(next); },
     loadVault: async () => { guarded(); return storage.load(); },
     saveVault: async next => { guarded(); await storage.save(next); },
+    assertNoUnencryptedAttachments: async () => { guarded(); },
     encrypt: async (...args) => { guarded(); return encryptPrivatePayload(...args, webcrypto); },
     decrypt: async (...args) => { guarded(); return decryptPrivatePayload(...args, webcrypto); },
     key, salt,

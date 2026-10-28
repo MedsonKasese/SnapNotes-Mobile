@@ -14,10 +14,9 @@ export function createAttachmentOperationQueue() {
       const task = previous.then(operation);
       const settled = task.then(() => undefined, () => undefined);
       pending.set(noteId, settled);
-      void settled.then(() => {
+      return task.finally(() => {
         if (pending.get(noteId) === settled) pending.delete(noteId);
       });
-      return task;
     },
     pendingCount(): number { return pending.size; },
   };

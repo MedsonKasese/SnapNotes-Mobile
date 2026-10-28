@@ -12,16 +12,17 @@ Source inspected: `MedsonKasese/SnapNotes` on `main`, especially `js/attachments
 
 ## Mobile state and security decisions
 - Mobile currently has **device-local notes** and no equivalent signed-in attachment upload service. Do not attach a working-looking upload button that silently stores unsynced references.
-- First commit introduces only **pure validation and preview-type routing** with no changes to persisted note schema. This is deliberately safe for existing notes.
-- Next implementation must choose a durable Android file storage model, note↔file transaction/recovery semantics, orphan cleanup, permission handling, and account boundary before enabling picker/upload.
-- For **Private Notes**, plaintext file paths, cached previews, sharing, exports, and recent-app snapshots are sensitive. Do not add private attachments until encrypted storage and lock-time cleanup are designed and tested.
+- The initial foundation added pure MIME/count/size rules without changing the persisted note schema. The current branch also supports local-only picker selection and add/list/remove controls for saved ordinary notes, with a versioned metadata manifest and app-private file storage; attachments are not synced or uploaded.
+- The copy-first transaction verifies stored byte size before committing metadata and rolls back on commit failure. Orphan cleanup/retry, permanent-note-deletion coordination, missing-file and permission handling, and Android device verification remain open work.
+- For **Private Notes**, plaintext file paths, cached previews, sharing, exports, and recent-app snapshots are sensitive. Notes with local attachments are currently blocked from **Move to Private**; encrypted attachment storage and lock-time cleanup are required before private attachments can be supported.
 - Avoid placing file bytes in AsyncStorage or storing transient picker URIs as permanent references.
 
-## Delivery gates (not yet implemented)
+## Delivery gates
 - [x] Inspect PWA types/limits/sign-in rules and viewer architecture.
 - [x] Add pure MIME/count/size rules and automated unit tests.
-- [ ] Durable Android file selection, copy, metadata and storage transactions.
-- [ ] Editor attachment UI, list/remove/rename, and note-card display.
+- [x] Add Android picker selection, durable app-private copies, manifest persistence, and transactional copy/verification coverage.
+- [x] Add editor add/list/remove controls for saved ordinary notes.
+- [ ] Add rename and note-card display.
 - [ ] In-app image, PDF and text previews, safe fallback for unsupported files.
 - [ ] Handle offline, permission denial, missing files, restart and orphan cleanup.
 - [ ] Audit authenticated cloud uploads and ownership boundaries.

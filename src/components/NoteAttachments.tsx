@@ -7,12 +7,29 @@ import { pickAndroidAttachments } from '../androidAttachmentPicker';
 import { createAttachmentManifestStorage } from '../attachmentManifestStorage';
 import { createAttachmentService } from '../attachmentService';
 import type { StoredAttachment } from '../attachmentManifest';
+import { deviceNotesStorage } from '../deviceNotesStorage';
+import { privateSharedCoordinator } from '../privateSharedCoordinator';
+import { createPrivateVaultStorage } from '../privateVaultStorage';
 
 const files = createAndroidAttachmentFiles();
+const manifest = createAttachmentManifestStorage(AsyncStorage);
+const vault = createPrivateVaultStorage(AsyncStorage);
+async function assertOrdinaryNote(noteId: string): Promise<void> {
+  const [notes, privateNotes] = await Promise.all([deviceNotesStorage.load(), vault.load()]);
+  if (privateNotes.some(entry => entry.id === noteId)) {
+    throw new Error('Attachments are not available in Private Notes.');
+  }
+  if (!notes.some(note => note.id === noteId)) {
+    throw new Error('This note is no longer available in ordinary notes.');
+  }
+}
+
 const service = createAttachmentService(
   files,
-  createAttachmentManifestStorage(AsyncStorage),
+  manifest,
   () => Crypto.randomUUID().replace(/-/g, ''),
+  privateSharedCoordinator,
+  assertOrdinaryNote,
 );
 
 /** Local-only attachments for SAVED ordinary notes. No cloud sync or private vault. */
@@ -24,15 +41,26 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
     try { setItems(await service.list(noteId)); setError(null); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to read attachments.'); }
   }, [noteId]);
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    void service.list(noteId).then(items => {
+      if (active) { setItems(items); setError(null); }
+    }).catch(reason => {
+      if (active) setError(reason instanceof Error ? reason.message : 'Unable to read attachments.');
+    });
+    return () => { active = false; };
+  }, [noteId]);
 
   async function add() {
     if (busy) return;
     setBusy(true);
     try {
       const selected = await pickAndroidAttachments((await service.list(noteId)).length);
-      for (const file of selected) await service.add(noteId, file);
-      await refresh();
+      try {
+        for (const file of selected) await service.add(noteId, file);
+      } finally {
+        await refresh();
+      }
     } catch (reason) {
       Alert.alert('Attachment not added', reason instanceof Error ? reason.message : 'Please try again.');
     } finally { setBusy(false); }
