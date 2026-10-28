@@ -25,6 +25,7 @@ import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { moveDeviceNoteToPrivate } from '../privateMoveService';
+import { NoteAttachments } from './NoteAttachments';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
@@ -1059,6 +1060,7 @@ export function NotesWorkspace() {
                 onReady={setEditorReady}
                 onSelection={setFormattingState}
               />
+              {state.editingId !== null && <NoteAttachments key={state.editingId} noteId={state.editingId} />}
               <Text style={[styles.hint, count > MAX_NOTE_CHARACTERS && styles.error]}>
                 {count}/{MAX_NOTE_CHARACTERS} characters
               </Text>
