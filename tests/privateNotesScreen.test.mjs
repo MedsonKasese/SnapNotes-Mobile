@@ -256,14 +256,35 @@ test('editing a private note saves without confirmation', async () => {
   assert.equal(app.alerts.length, 0);
 });
 
-test('deleting a private note is immediate and does not show a confirmation', async () => {
+test('deleting a private note requires explicit permanent-deletion confirmation', async () => {
   const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general', pinned: false };
   const app = await screen({ unlock: async () => [preview] });
   enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
   find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Note actions for Private title').props.onPress();
   button(app, 'Delete private note').props.onPress(); await app.flush();
-  assert.deepEqual(app.mutationCalls[0], ['delete', 'private-1']);
-  assert.equal(app.alerts.length, 0);
+  assert.equal(app.alerts.length, 1);
+  assert.equal(app.alerts[0][0], 'Delete private note?');
+  assert.match(app.alerts[0][1], /permanently deletes the encrypted note.*cannot be undone/i);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.alerts[0][2].map(({ text, style }) => ({ text, style })))), [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Delete permanently', style: 'destructive' },
+  ]);
+  assert.equal(app.alerts[0][2][0].onPress, undefined, 'Cancel must only dismiss the confirmation');
+  assert.equal(app.mutationCalls.length, 0, 'opening the confirmation must not mutate vault storage');
+  assert.match(text(app.render()), /Private title|Sensitive body/);
+});
+
+test('confirming permanent deletion removes the selected private note', async () => {
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general', pinned: false };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Note actions for Private title').props.onPress();
+  button(app, 'Delete private note').props.onPress(); await app.flush();
+  const destructiveAction = app.alerts[0][2][1];
+  assert.equal(destructiveAction.style, 'destructive');
+  destructiveAction.onPress(); await app.flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.mutationCalls[0])), ['delete', 'private-1']);
+  assert.equal(app.alerts.length, 1);
   assert.doesNotMatch(text(app.render()), /Private title|Sensitive body/);
 });
 
