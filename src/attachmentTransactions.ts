@@ -45,10 +45,8 @@ export async function addPickedAttachment(
   if (existing.some(item => item.id === id || item.fileKey === fileKey) || id === fileKey) {
     throw new Error('Attachment ID collision.');
   }
-  let copied = false;
   try {
     await files.copyIntoPrivateStorage(picked.uri, fileKey);
-    copied = true;
     const size = await files.storedFileSize(fileKey);
     if (size !== picked.size) throw new Error('Copied attachment could not be verified.');
     await manifest.save(noteId, [...existing, entry]);
