@@ -966,7 +966,7 @@ export function NotesWorkspace() {
             <Text style={styles.countLabel}>{(view === 'trash' ? trashNotes.length : view === 'archive' ? archiveNotes.length : activeNotes.length) === 1 ? 'note' : 'notes'}</Text>
           </View>
         </View>
-        <View style={styles.searchRow}>
+        {view !== 'private' && <View style={styles.searchRow}>
           <Text style={styles.searchGlyph} accessibilityElementsHidden>⌕</Text>
           <TextInput
             accessibilityLabel="Search saved notes"
@@ -988,7 +988,7 @@ export function NotesWorkspace() {
               <Text style={styles.clearSearchText}>×</Text>
             </Pressable>
           )}
-        </View>
+        </View>}
         {searching && view === 'library' && (
           <Text accessibilityLiveRegion="polite" style={styles.searchSummary}>
             {visibleNotes.length} of {categoryNotes.length} notes match
