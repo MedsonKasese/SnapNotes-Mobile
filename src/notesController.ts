@@ -13,6 +13,7 @@ export function isExpiredTrash(note: Note, now: number): boolean {
 export type NotesStorage = {
   load(): Promise<Note[]>;
   save(notes: Note[]): Promise<void>;
+  allocateNoteId?(usedIds: readonly string[]): Promise<string>;
 };
 export type NotesSnapshot = {
   state: NotesState;
@@ -307,13 +308,22 @@ export function createNotesController(storage: NotesStorage) {
     const ids = new Set(previous.notes.map(note => note.id));
     let sequence = previous.notes.length + 1;
     while (ids.has(`local-note-${sequence}`)) sequence += 1;
-    const next = notesReducer(previous, { type: 'save', id: `local-note-${sequence}`, now });
-    if (next.notes === previous.notes) {
-      publish({ ...snapshot, state: next, storageError: null });
+    const fallbackId = `local-note-${sequence}`;
+    const preflight = notesReducer(previous, { type: 'save', id: fallbackId, now });
+    if (preflight.notes === previous.notes) {
+      publish({ ...snapshot, state: preflight, storageError: null });
       return;
     }
     publish({ state: previous, status: 'saving', storageError: null });
     try {
+      // The encrypted vault shares the opaque note-ID namespace. Ask the guarded
+      // adapter to skip private IDs; the save guard still checks under its lock.
+      const id = storage.allocateNoteId ? await storage.allocateNoteId([...ids]) : fallbackId;
+      const next = notesReducer(previous, { type: 'save', id, now });
+      if (next.notes === previous.notes) {
+        publish({ state: next, status: 'ready', storageError: null });
+        return;
+      }
       await storage.save(next.notes);
       publish({ state: { ...next, notice: previous.editingId === null ? 'Note saved on this device.' : 'Changes saved on this device.' }, status: 'ready', storageError: null });
     } catch (cause) {

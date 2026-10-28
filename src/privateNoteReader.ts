@@ -2,7 +2,7 @@ import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 
-export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string; pinned: boolean; createdAt?: string; updatedAt?: string };
+export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string; pinned: boolean; time?: string; createdAt?: string; updatedAt?: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -34,6 +34,7 @@ export async function readPrivateNotes(
     results.push({ id: entry.id, title: payload.title, text: payload.text,
       html: payload.html, category: payload.category,
       pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false,
+      ...(typeof payload.time === 'string' ? { time: payload.time } : {}),
       ...(typeof payload.createdAt === 'string' ? { createdAt: payload.createdAt } : {}),
       ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}) });
   }

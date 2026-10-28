@@ -38,6 +38,7 @@ function asPreview(id: string, payload: Record<string, unknown>): PrivateNotePre
     html: payload.html as string,
     category: payload.category as string,
     pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false,
+    ...(typeof payload.time === 'string' ? { time: payload.time } : {}),
     ...(typeof payload.createdAt === 'string' ? { createdAt: payload.createdAt } : {}),
     ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}),
   };

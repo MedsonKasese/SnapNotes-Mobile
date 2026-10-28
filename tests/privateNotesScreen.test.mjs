@@ -139,7 +139,7 @@ const isUnlocked = app => text(app.render()).includes('Lock Private Notes');
 
 test('unlock displays authenticated previews and locking clears decrypted note content', async () => {
   const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general',
-    updatedAt: '2026-01-02T00:00:00.000Z' };
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' };
   const app = await screen({ unlock: async () => [preview] });
   enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
   assert.deepEqual(app.calls, [['unlock', PASSWORD]]);
@@ -147,11 +147,25 @@ test('unlock displays authenticated previews and locking clears decrypted note c
   const privateCount = find(app.render(), item => item.props.testID === 'private-note-count');
   assert.equal(privateCount.props.children[0], 1);
   assert.match(text(privateCount), /private note/);
-  assert.match(text(app.render()), /Updated /);
+  assert.ok(text(app.render()).includes('1 Jan 2026'));
+  assert.doesNotMatch(text(app.render()), /Updated /);
   find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
   assert.match(text(app.render()), /Sensitive body/);
   button(app, 'Lock Private Notes').props.onPress();
   assert.doesNotMatch(text(app.render()), /Sensitive body/);
+});
+
+test('private card time follows PWA explicit-time precedence and labels legacy missing dates', async () => {
+  const timed = { id: 'private-time', title: 'Timed', text: 'Body', html: '<p>Body</p>', category: 'general',
+    time: '9:30 AM', createdAt: '2026-01-01T00:00:00.000Z' };
+  const timedApp = await screen({ unlock: async () => [timed] });
+  enterPassword(timedApp); button(timedApp, 'Unlock').props.onPress(); await timedApp.flush();
+  assert.ok(text(timedApp.render()).includes('9:30 AM'));
+  assert.ok(!text(timedApp.render()).includes('1 Jan 2026'));
+
+  const legacyApp = await screen({ unlock: async () => [{ ...timed, id: 'legacy', time: undefined, createdAt: undefined }] });
+  enterPassword(legacyApp); button(legacyApp, 'Unlock').props.onPress(); await legacyApp.flush();
+  assert.ok(text(legacyApp.render()).includes('No date'));
 });
 
 test('moving a private note out asks for one confirmation and refreshes the ordinary library', async () => {

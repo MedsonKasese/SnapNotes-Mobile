@@ -11,10 +11,12 @@ test('reader skips verifier and returns authenticated note content', async () =>
   const results = await readPrivateNotes(encrypted, key, async () => {
     calls++;
     return { title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true,
+      time: '9:30 AM',
       createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' };
   });
   assert.equal(calls, 1);
   assert.deepEqual(results, [{ id: 'note-1', title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true,
+    time: '9:30 AM',
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' }]);
 });
 

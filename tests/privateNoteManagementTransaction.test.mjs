@@ -10,6 +10,7 @@ const UPDATED_AT = '2026-01-02T00:00:00.000Z';
 const EDITED_AT = '2026-02-01T00:00:00.000Z';
 const payload = {
   title: 'Private title', text: 'Private body', html: '<p>Private body</p>', category: 'personal',
+  time: '9:30 AM',
   createdAt: CREATED_AT, updatedAt: UPDATED_AT,
   tags: ['keep'], attachments: [{ id: 'encrypted-attachment-reference' }], pinned: false,
 };
@@ -55,6 +56,7 @@ test('editing changes the encrypted title/body while retaining other private pay
   });
   assert.equal(updated.createdAt, CREATED_AT);
   assert.equal(updated.updatedAt, EDITED_AT);
+  assert.equal(updated.time, '9:30 AM');
   assert.deepEqual(payload, before);
   assert.deepEqual(f.events, ['exclusive', 'encrypt', 'save']);
 });

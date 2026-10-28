@@ -24,11 +24,12 @@ const PRIVATE_ACTIONS: { label: string; icon: FontAwesomeName }[] = [
   { label: 'Move out of Private Notes', icon: 'sign-out' },
   { label: 'Delete private note', icon: 'trash' },
 ];
-
-function formatUpdatedAt(timestamp?: string): string | null {
-  if (!timestamp || !Number.isFinite(Date.parse(timestamp))) return null;
-  const date = new Date(timestamp);
-  return `Updated ${date.toLocaleDateString()} · ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+function formatNoteTime(time?: string, createdAt?: string): string {
+  if (time) return time;
+  if (!createdAt) return 'No date';
+  const date = new Date(createdAt);
+  if (!Number.isFinite(date.getTime())) return 'No date';
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void; onRestored?: () => Promise<void> }) {
@@ -343,7 +344,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
             {orderedNotes.length === 0 ? <Text style={styles.description}>No private notes yet.</Text> : orderedNotes.map(note => {
               const expanded = selectedNoteId === note.id;
               const editing = editingNote?.id === note.id;
-              const updatedAtLabel = formatUpdatedAt(note.updatedAt);
+              const noteTimeLabel = formatNoteTime(note.time, note.createdAt);
               return (
                 <View key={note.id} style={[styles.privateCard, note.pinned && styles.privateCardPinned]}>
                   <View style={styles.noteCardTop}>
@@ -377,7 +378,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
                       <Text numberOfLines={expanded ? undefined : 5} style={styles.noteText}>{note.text || 'No note text.'}</Text>
                     </Pressable>
                   )}
-                  {updatedAtLabel && <Text numberOfLines={1} style={styles.noteTime}>{updatedAtLabel}</Text>}
+                  <Text numberOfLines={1} style={styles.noteTime}>{noteTimeLabel}</Text>
                   <View style={styles.noteFooter}>
                     <Text numberOfLines={1} style={styles.noteCategory}>{note.category || 'General'}</Text>
                     <View style={styles.footerActions}>
