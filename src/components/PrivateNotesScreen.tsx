@@ -256,6 +256,14 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     if (updated) setPrivateNotes(notes => notes.map(item => item.id === updated.id ? updated : item));
   }
 
+  function confirmDeletePrivateNote(id: string) {
+    closeActionsMenu();
+    Alert.alert('Delete private note?', 'This permanently deletes the encrypted note from this device. This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete permanently', style: 'destructive', onPress: () => { void deletePrivateNote(id); } },
+    ]);
+  }
+
   async function deletePrivateNote(id: string) {
     closeActionsMenu();
     const deleted = await performPrivateMutation(async session => {
@@ -478,7 +486,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
                   const note = activeActionNote;
                   if (action.label === 'Edit note') beginEdit(note);
                   else if (action.label === 'Move out of Private Notes') confirmMoveOut(note.id);
-                  else void deletePrivateNote(note.id);
+                  else confirmDeletePrivateNote(note.id);
                 }} style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
                 <FontAwesome name={action.icon} size={18} color={action.label === 'Delete private note' ? '#b3261e' : '#52634b'} accessible={false} />
                 <Text style={[styles.actionsMenuText, action.label === 'Delete private note' && styles.actionsMenuDanger]}>{action.label}</Text>
@@ -492,7 +500,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 22, gap: 16, backgroundColor: '#f7f9f5' },
+  container: { flex: 1, minHeight: 0, width: '100%', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 8, gap: 12, backgroundColor: '#f7f9f5' },
   back: { color: '#3b7f16', fontSize: 16, fontWeight: '700', marginBottom: 4 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   title: { flex: 1, color: '#20351d', fontSize: 28, fontWeight: '800' },
@@ -500,8 +508,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, borderWidth: 1, borderColor: '#cbd9c3', borderRadius: 12, backgroundColor: '#ffffff' },
   headerLockText: { color: '#3b7f16', fontSize: 14, fontWeight: '800' },
   description: { color: '#586851', fontSize: 15, lineHeight: 23 },
-  noteScroll: { flex: 1, minHeight: 0 },
-  noteList: { gap: 14, paddingBottom: 8 },
+  noteScroll: { flex: 1, minHeight: 0, width: '100%' },
+  noteList: { gap: 14, paddingBottom: 90, flexGrow: 1 },
   privateCard: { backgroundColor: '#ffffff', borderColor: '#dfe7d9', borderWidth: 1, borderRadius: 16, padding: 15, gap: 10, shadowColor: '#213a1b', shadowOpacity: 0.035, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 1 },
   privateCardPinned: { borderColor: '#d1a722', borderWidth: 1.5 },
   noteCardTop: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
