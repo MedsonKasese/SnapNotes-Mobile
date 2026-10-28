@@ -338,10 +338,20 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
       <Pressable accessibilityRole="button" onPress={() => { lock(); onBack(); }}>
         <Text style={styles.back}>‹ All notes</Text>
       </Pressable>
-      <Text style={styles.eyebrow}>PRIVATE NOTES</Text>
-      <Text accessibilityRole="header" style={styles.title}>
-        {phase === 'setup' ? 'Protect your notes' : phase === 'unlocked' ? 'Private Notes' : 'Locked notes'}
-      </Text>
+      <View testID="private-notes-title-row" style={styles.titleRow}>
+        <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>
+          {phase === 'setup' ? 'Protect your notes' : phase === 'unlocked' ? 'Private Notes' : 'Locked notes'}
+        </Text>
+        {phase === 'unlocked' && (
+          <Pressable accessibilityRole="button" accessibilityLabel="Lock Private Notes"
+            accessibilityHint="Clears decrypted notes and locks the vault" accessibilityState={{ disabled: busy }}
+            disabled={busy} onPress={lock}
+            style={({ pressed }) => [styles.headerLockButton, pressed && styles.pressed, busy && styles.disabledButton]}>
+            <MaterialCommunityIcons name="lock" size={17} color="#3b7f16" accessible={false} />
+            <Text style={styles.headerLockText}>Lock</Text>
+          </Pressable>
+        )}
+      </View>
       {phase === 'loading' ? <ActivityIndicator /> : phase === 'error' ? (
         <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
       ) : phase === 'unlocked' ? (
@@ -409,9 +419,6 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
               );
             })}
           </ScrollView>
-          <Pressable accessibilityRole="button" disabled={busy} style={[styles.button, busy && styles.disabledButton]} onPress={lock}>
-            <Text style={styles.buttonText}>Lock Private Notes</Text>
-          </Pressable>
         </>
       ) : (
         <>
@@ -487,8 +494,11 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 22, gap: 16, backgroundColor: '#f7f9f5' },
   back: { color: '#3b7f16', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  eyebrow: { color: '#3b7f16', fontSize: 12, fontWeight: '800', letterSpacing: 1.5 },
-  title: { color: '#20351d', fontSize: 28, fontWeight: '800' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  title: { flex: 1, color: '#20351d', fontSize: 28, fontWeight: '800' },
+  headerLockButton: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingHorizontal: 10, borderWidth: 1, borderColor: '#cbd9c3', borderRadius: 12, backgroundColor: '#ffffff' },
+  headerLockText: { color: '#3b7f16', fontSize: 14, fontWeight: '800' },
   description: { color: '#586851', fontSize: 15, lineHeight: 23 },
   noteScroll: { flex: 1, minHeight: 0 },
   noteList: { gap: 14, paddingBottom: 8 },

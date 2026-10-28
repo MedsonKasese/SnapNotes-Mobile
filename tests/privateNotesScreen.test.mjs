@@ -30,6 +30,7 @@ function find(tree, predicate) {
 }
 const button = (app, label) => find(app.render(), item => item.type === 'Pressable' && text(item) === label);
 const visibilityButton = (app, label) => find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === label);
+const lockButton = app => find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Lock Private Notes');
 const icon = (app, name) => find(app.render(), item => item.type === 'MaterialCommunityIcons' && item.props.name === name);
 const input = (app, label = 'Private Notes password') => find(app.render(), item => item.props.accessibilityLabel === label);
 
@@ -135,7 +136,7 @@ function enterPassword(app, setup = false) {
   input(app).props.onChangeText(PASSWORD);
   if (setup) input(app, 'Confirm Private Notes password').props.onChangeText(PASSWORD);
 }
-const isUnlocked = app => text(app.render()).includes('Lock Private Notes');
+const isUnlocked = app => elements(app.render()).some(item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Lock Private Notes');
 
 test('unlock displays authenticated previews and locking clears decrypted note content', async () => {
   const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general',
@@ -147,13 +148,23 @@ test('unlock displays authenticated previews and locking clears decrypted note c
   const privateCount = find(app.render(), item => item.props.testID === 'private-note-count');
   assert.equal(privateCount.props.children[0], 1);
   assert.match(text(privateCount), /private note/);
+  const tree = app.render();
+  const titleRow = find(tree, item => item.props.testID === 'private-notes-title-row');
+  const lockControl = find(tree, item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Lock Private Notes');
+  assert.equal(text(titleRow.props.children[0]), 'Private Notes');
+  assert.equal(titleRow.props.children[0].props.accessibilityRole, 'header');
+  assert.equal(titleRow.props.children[1], lockControl);
+  assert.equal(text(lockControl), 'Lock');
+  assert.equal(elements(tree).filter(item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Lock Private Notes').length, 1);
+  assert.equal(elements(tree).some(item => item.type === 'Text' && text(item) === 'PRIVATE NOTES'), false);
   const updatedAt = new Date('2026-01-02T00:00:00.000Z');
   const expectedUpdated = `Updated ${updatedAt.toLocaleDateString()} · ${updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
   assert.ok(text(app.render()).includes(expectedUpdated));
   find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
   assert.match(text(app.render()), /Sensitive body/);
-  button(app, 'Lock Private Notes').props.onPress();
+  lockButton(app).props.onPress();
   assert.doesNotMatch(text(app.render()), /Sensitive body/);
+  assert.equal(isUnlocked(app), false);
 });
 
 test('private card time follows PWA explicit-time precedence and labels legacy missing dates', async () => {
@@ -296,7 +307,7 @@ test('setup and unlock clear secure inputs, while manual lock remains locked on 
   button(app, 'Set password').props.onPress(); await app.flush();
   assert.deepEqual(app.calls, [['setup', PASSWORD, PASSWORD]]);
   assert.equal(isUnlocked(app), true);
-  button(app, 'Lock Private Notes').props.onPress();
+  lockButton(app).props.onPress();
   assert.equal(input(app).props.value, '');
   app.change('background'); app.change('active');
   assert.equal(isUnlocked(app), false);
