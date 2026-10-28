@@ -13,12 +13,15 @@ test('private payload follows PWA field schema without mutating source', () => {
   const before = structuredClone(note);
   const payload = buildMobilePrivatePayload(note);
   assert.deepEqual(Object.keys(payload), [
-    'title', 'text', 'html', 'category', 'tags', 'time', 'folderId',
+    'title', 'text', 'html', 'category', 'createdAt', 'updatedAt', 'pinned', 'tags', 'time', 'folderId',
     'reminderAt', 'reminderNotified', 'reminderRepeat', 'attachments', 'history',
   ]);
   assert.equal(payload.title, note.title);
   assert.equal(payload.html, note.html);
+  assert.equal(payload.createdAt, note.createdAt);
+  assert.equal(payload.updatedAt, note.updatedAt);
   assert.equal(payload.folderId, note.folderId);
+  assert.equal(payload.pinned, note.pinned);
   assert.deepEqual(note, before);
 });
 

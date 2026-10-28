@@ -139,6 +139,8 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 - [x] PR #26 crypto core: AES-256-GCM/PBKDF2-SHA-256 (600k iterations) verified in a native Android development build with nine successful device smoke tests; encrypted PWA↔Android fixture compatibility still needs verification.
 - [ ] PR #27 ciphertext-only private vault storage (in progress): isolated versioned vault, validated encrypted records, atomic generation/pointer commits and failure regression tests. No UI, no migration of ordinary notes, no cloud sync. Requires automated and Android verification before checking complete.
 
+- [ ] PR #38 follow-up (testing required): moving a note into Private Notes retains its created/updated timestamps inside the encrypted payload; restore preserves them, and the Private Notes screen plus drawer show an accurate count without decrypting for navigation. Automated regressions pass. The owner must verify the change on Android before the next migration stage.
+
 - [ ] Audit PWA Private Notes entry, unlock, move, and lock behaviour.
 - [ ] Implement Private Notes as a distinct, reliable experience.
 - [ ] Use a suitable native security mechanism and clearly document its limits.

@@ -183,7 +183,8 @@ test('real encryption and vault storage preserve content and unrelated records u
   assert.deepEqual(vault[0], existing);
   assert.deepEqual(await decryptPrivatePayload(vault[1].privateData, key, webcrypto), {
     title: note.title, text: note.text, html: note.html, category: note.category,
-    tags: [], time: '', folderId: note.folderId, reminderAt: null,
+    createdAt: note.createdAt, updatedAt: note.updatedAt,
+    pinned: note.pinned, tags: [], time: '', folderId: note.folderId, reminderAt: null,
     reminderNotified: false, reminderRepeat: null, attachments: [], history: [],
   });
   const persisted = JSON.stringify([...data]);

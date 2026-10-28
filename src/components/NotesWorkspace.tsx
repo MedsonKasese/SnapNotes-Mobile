@@ -13,6 +13,7 @@ import { createNotesController } from '../notesController';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { createPrivateOrdinarySaveGuard } from '../privateOrdinarySaveGuard';
 import { createPrivateVaultStorage } from '../privateVaultStorage';
+import { countPrivateVaultNotes } from '../privateNoteReader';
 import { DRAFT_LIBRARY_KEY, newDraftId, parseDraftLibrary, removeDraft, upsertDraft, type SavedDraft } from '../draftLibrary';
 import { FOLDERS_KEY, FOLDER_ICON_NAMES, FOLDER_COLOR_VALUES, normalizeFolderIcon, normalizeFolderColor, type FolderIcon, type FolderColor, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
@@ -23,10 +24,11 @@ import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, 
 import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { PrivateNotesScreen } from './PrivateNotesScreen';
+import { moveDeviceNoteToPrivate } from '../privateMoveService';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
-type NoteAction = 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
+type NoteAction = 'move-private' | 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 type FolderAction = 'rename' | 'customize' | 'delete';
 const FOLDER_ACTIONS: { action: FolderAction; label: string; icon: FontAwesomeName }[] = [
@@ -106,8 +108,9 @@ function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAct
 
 // One queue for this workspace's ordinary-note mutations. The encrypted vault
 // must join this same queue before Move to Private can be enabled.
+const privateVaultStorage = createPrivateVaultStorage(AsyncStorage);
 const coordinatedDeviceNotesStorage = createPrivateOrdinarySaveGuard(
-  privateSharedCoordinator, deviceNotesStorage, createPrivateVaultStorage(AsyncStorage),
+  privateSharedCoordinator, deviceNotesStorage, privateVaultStorage,
 );
 
 export function NotesWorkspace() {
@@ -116,6 +119,7 @@ export function NotesWorkspace() {
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
+  const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ id: string; revision: number } | null>(null);
   const folderActionsTarget = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
@@ -134,6 +138,10 @@ export function NotesWorkspace() {
   const [appearanceColor, setAppearanceColor] = useState<FolderColor>('');
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
+  const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
+  const [privateMovePassword, setPrivateMovePassword] = useState('');
+  const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
+  const [privateMoveBusy, setPrivateMoveBusy] = useState(false);
   const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
   const [actionsViewport, setActionsViewport] = useState<MenuRect | null>(null);
   const [actionsMenuHeight, setActionsMenuHeight] = useState(0);
@@ -163,6 +171,22 @@ export function NotesWorkspace() {
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const refreshPrivateNoteCount = useCallback(async () => {
+    try {
+      setPrivateNoteCount(countPrivateVaultNotes(await privateVaultStorage.load()));
+    } catch {
+      setPrivateNoteCount(null);
+    }
+  }, []);
+  useEffect(() => {
+    let active = true;
+    void privateVaultStorage.load().then(entries => {
+      if (active) setPrivateNoteCount(countPrivateVaultNotes(entries));
+    }).catch(() => {
+      if (active) setPrivateNoteCount(null);
+    });
+    return () => { active = false; };
+  }, []);
   function trackOpenedDraft(id: string | null) {
     openedDraftIdRef.current = id;
     setOpenedDraftId(id);
@@ -214,6 +238,7 @@ export function NotesWorkspace() {
     : [
         { label: 'Duplicate note', icon: 'clone', action: 'duplicate' },
         { label: 'Move to folder', icon: 'folder-o', action: 'move-folder' },
+        ...(!inArchive ? [{ label: 'Move to Private', icon: 'lock' as FontAwesomeName, action: 'move-private' as NoteAction }] : []),
         { label: inArchive ? 'Restore from archive' : 'Archive note', icon: inArchive ? 'undo' : 'archive', action: inArchive ? 'restore-archive' : 'archive' },
         { label: 'Move to Trash', icon: 'trash-o', destructive: true, action: 'trash' },
       ];
@@ -763,6 +788,11 @@ export function NotesWorkspace() {
     if (!selected) return;
     const now = new Date().toISOString();
     switch (action) {
+      case 'move-private':
+        setPrivateMovePassword('');
+        setPrivateMovePasswordVisible(false);
+        setPrivateMoveId(id);
+        break;
       case 'move-folder': chooseFolder(id); break;
       case 'duplicate': void controller.duplicateNote(id, now); break;
       case 'archive': void controller.setArchived(id, true, now); break;
@@ -770,6 +800,29 @@ export function NotesWorkspace() {
       case 'trash': confirmTrash(id, selected.title); break;
       case 'restore-trash': void controller.restoreFromTrash(id, now); break;
       case 'delete': confirmPermanentDelete(id, selected.title); break;
+    }
+  }
+
+  async function confirmPrivateMove() {
+    if (!privateMoveId || privateMoveBusy || controller.getSnapshot().status !== 'ready') return;
+    const id = privateMoveId;
+    setPrivateMoveBusy(true);
+    try {
+      const result = await moveDeviceNoteToPrivate(id, privateMovePassword);
+      setPrivateMovePassword('');
+      setPrivateMovePasswordVisible(false);
+      setPrivateMoveId(null);
+      await controller.refreshAfterPrivateTransfer();
+      if (result.status === 'needs-recovery') {
+        Alert.alert('Private transfer needs attention', result.reason + ' Do not delete either copy.');
+      } else {
+        Alert.alert('Moved to Private', 'Your note was encrypted and moved into Private Notes.');
+      }
+    } catch (cause) {
+      Alert.alert('Could not move note', cause instanceof Error ? cause.message : 'Your note was not moved.');
+    } finally {
+      void refreshPrivateNoteCount();
+      setPrivateMoveBusy(false);
     }
   }
 
@@ -913,7 +966,7 @@ export function NotesWorkspace() {
             <Text style={styles.countLabel}>{(view === 'trash' ? trashNotes.length : view === 'archive' ? archiveNotes.length : activeNotes.length) === 1 ? 'note' : 'notes'}</Text>
           </View>
         </View>
-        <View style={styles.searchRow}>
+        {view !== 'private' && <View style={styles.searchRow}>
           <Text style={styles.searchGlyph} accessibilityElementsHidden>⌕</Text>
           <TextInput
             accessibilityLabel="Search saved notes"
@@ -935,7 +988,7 @@ export function NotesWorkspace() {
               <Text style={styles.clearSearchText}>×</Text>
             </Pressable>
           )}
-        </View>
+        </View>}
         {searching && view === 'library' && (
           <Text accessibilityLiveRegion="polite" style={styles.searchSummary}>
             {visibleNotes.length} of {categoryNotes.length} notes match
@@ -948,7 +1001,8 @@ export function NotesWorkspace() {
       {draftLibraryError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftLibraryError}</Text>}
 
       {view === 'private' ? (
-        <PrivateNotesScreen onBack={openLibrary} />
+        <PrivateNotesScreen onBack={() => { void refreshPrivateNoteCount(); openLibrary(); }}
+          onRestored={async () => { await controller.refreshAfterPrivateTransfer(); await refreshPrivateNoteCount(); }} />
       ) : view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
@@ -1136,6 +1190,37 @@ export function NotesWorkspace() {
         </View>
       )}
 
+      <Modal testID="move-private-modal" visible={privateMoveId !== null} transparent animationType="fade"
+        onRequestClose={() => { if (!privateMoveBusy) { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); } }}>
+        <View style={{ flex: 1, backgroundColor: '#0009', justifyContent: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 14 }}>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#20351d' }}>Move to Private</Text>
+            <Text>Enter your Private Notes password to encrypt and move this note.</Text>
+            <View style={styles.movePasswordRow}>
+              <TextInput accessibilityLabel="Private Notes password for transfer" secureTextEntry={!privateMovePasswordVisible}
+                autoCapitalize="none" autoCorrect={false} placeholder="Private Notes password"
+                value={privateMovePassword} onChangeText={setPrivateMovePassword}
+                style={styles.movePasswordInput} />
+              <Pressable accessibilityRole="button"
+                accessibilityLabel={`${privateMovePasswordVisible ? 'Hide' : 'Show'} Private Notes transfer password`}
+                accessibilityHint={privateMovePasswordVisible ? 'Hides the password on screen' : 'Shows the password on screen'}
+                disabled={privateMoveBusy} hitSlop={8} style={styles.movePasswordVisibilityButton}
+                onPress={() => setPrivateMovePasswordVisible(visible => !visible)}>
+                <FontAwesome name={privateMovePasswordVisible ? 'eye-slash' : 'eye'} size={19} color="#3b7f16" accessible={false} />
+              </Pressable>
+            </View>
+            <Pressable accessibilityRole="button" disabled={privateMoveBusy} onPress={() => void confirmPrivateMove()}
+              style={{ backgroundColor: '#3b7f16', padding: 14, borderRadius: 10 }}>
+              <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '700' }}>{privateMoveBusy ? 'Encrypting…' : 'Move to Private'}</Text>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={privateMoveBusy}
+              onPress={() => { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); }}>
+              <Text style={{ textAlign: 'center', color: '#a32b2b', padding: 8 }}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={actionsNoteId !== null} transparent animationType="fade"
         onShow={() => measureActionsMenu(actionsNoteId)} onRequestClose={closeNoteActions}>
         <SafeAreaProvider>
@@ -1268,7 +1353,9 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
-              <MenuRow label="Private Notes" icon="lock" detail="Protected vault" active={view === 'private'} onPress={selectPrivate} />
+              <MenuRow label="Private Notes" icon="lock"
+                detail={privateNoteCount === null ? 'Protected vault' : `${privateNoteCount} private ${privateNoteCount === 1 ? 'note' : 'notes'}`}
+                active={view === 'private'} onPress={selectPrivate} />
               <MenuRow label="Drafts" icon="file-text-o" detail={`${savedDrafts.length} drafts`} active={view === 'drafts'} onPress={selectDrafts} />
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
@@ -1380,6 +1467,9 @@ const styles = StyleSheet.create({
   editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
   input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
+  movePasswordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#cbd9c3', borderRadius: 10 },
+  movePasswordInput: { flex: 1, minWidth: 0, padding: 12, color: '#20351d', fontSize: 16 },
+  movePasswordVisibilityButton: { width: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   categoryButton: { padding: 12, borderRadius: 11, backgroundColor: '#eff7e9', borderWidth: 1, borderColor: '#dce6d4' },
   categoryButtonText: { color: '#304728', fontSize: 14, fontWeight: '700' },
   categoryOptions: { gap: 2, borderRadius: 11, borderWidth: 1, borderColor: '#dce6d4' },

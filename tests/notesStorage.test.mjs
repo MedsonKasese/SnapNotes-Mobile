@@ -78,6 +78,43 @@ test('failed index commit keeps prior generation readable', async () => {
   assert.deepEqual(await store.load(), [note('safe')]);
 });
 
+test('a single transient local write failure is retried without changing the committed snapshot', async () => {
+  const db = backend();
+  let failOnce = true;
+  const flaky = {
+    getItem: db.getItem,
+    async setItem(key, value) {
+      if (failOnce) { failOnce = false; throw Error('temporary device write failure'); }
+      await db.setItem(key, value);
+    },
+    getAllKeys: db.getAllKeys,
+    multiRemove: db.multiRemove,
+  };
+  const store = createNotesStorage(flaky);
+  await store.save([note('retry')]);
+  assert.deepEqual(await store.load(), [note('retry')]);
+});
+
+test('a write that commits before rejecting is accepted only after exact readback verification', async () => {
+  const db = backend();
+  let rejectCommittedIndexOnce = true;
+  const ambiguous = {
+    getItem: db.getItem,
+    async setItem(key, value) {
+      await db.setItem(key, value);
+      if (key === '@snapnotes-mobile/notes-index' && rejectCommittedIndexOnce) {
+        rejectCommittedIndexOnce = false;
+        throw Error('lost write acknowledgement');
+      }
+    },
+    getAllKeys: db.getAllKeys,
+    multiRemove: db.multiRemove,
+  };
+  const store = createNotesStorage(ambiguous);
+  await store.save([note('confirmed')]);
+  assert.deepEqual(await store.load(), [note('confirmed')]);
+});
+
 test('corrupt index or missing note refuses to silently replace existing data', async () => {
   const db = backend();
   const store = createNotesStorage(db);

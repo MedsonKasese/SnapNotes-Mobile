@@ -18,7 +18,7 @@ test('saved notes load successfully before an editor draft is restored', () => {
 });
 
 test('startup restores React state only after notes loading completes', async () => {
-  const effect = source.match(/useEffect\(\(\) => \{([\s\S]*?)\}, \[controller, restoreEditorDraft\]\);/);
+  const effect = source.match(/useEffect\(\(\) => \{\s*\/\/ Restore React state from the storage completion callback, not the effect body\.\s*([\s\S]*?)\s*\}, \[controller, restoreEditorDraft\]\);/);
   assert.ok(effect, 'startup effect must subscribe to notes-load completion');
   let finishLoad;
   const loading = new Promise(resolve => { finishLoad = resolve; });

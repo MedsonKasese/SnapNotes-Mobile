@@ -13,12 +13,30 @@ export function isExpiredTrash(note: Note, now: number): boolean {
 export type NotesStorage = {
   load(): Promise<Note[]>;
   save(notes: Note[]): Promise<void>;
+  allocateNoteId?(usedIds: readonly string[]): Promise<string>;
 };
 export type NotesSnapshot = {
   state: NotesState;
   status: 'loading' | 'ready' | 'saving' | 'load-error';
   storageError: string | null;
 };
+
+function saveFailureGuidance(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (message.includes('encrypted vault id')) {
+    return 'Private-note protection blocked this write to avoid saving encrypted content as an ordinary note.';
+  }
+  if (message.includes('private vault') || message.includes('encrypted private vault')) {
+    return 'Private Notes storage could not be verified, so this save was blocked to protect private data.';
+  }
+  if (/quota|disk full|no space|storage full|\bfull\b/.test(message)) {
+    return 'Device storage may be full or temporarily unavailable.';
+  }
+  if (/invalid note|visible text does not match|unsupported or corrupt notes/.test(message)) {
+    return 'The saved note data did not pass local validation; your draft remains available.';
+  }
+  return 'The device did not confirm the local write; your draft remains available.';
+}
 
 // Write through on explicit Save, never from an effect or while hydrating. A save
 // is acknowledged only after storage succeeds; failures retain the original draft.
@@ -290,18 +308,39 @@ export function createNotesController(storage: NotesStorage) {
     const ids = new Set(previous.notes.map(note => note.id));
     let sequence = previous.notes.length + 1;
     while (ids.has(`local-note-${sequence}`)) sequence += 1;
-    const next = notesReducer(previous, { type: 'save', id: `local-note-${sequence}`, now });
-    if (next.notes === previous.notes) {
-      publish({ ...snapshot, state: next, storageError: null });
+    const fallbackId = `local-note-${sequence}`;
+    const preflight = notesReducer(previous, { type: 'save', id: fallbackId, now });
+    if (preflight.notes === previous.notes) {
+      publish({ ...snapshot, state: preflight, storageError: null });
       return;
     }
     publish({ state: previous, status: 'saving', storageError: null });
     try {
+      // The encrypted vault shares the opaque note-ID namespace. Ask the guarded
+      // adapter to skip private IDs; the save guard still checks under its lock.
+      const id = storage.allocateNoteId ? await storage.allocateNoteId([...ids]) : fallbackId;
+      const next = notesReducer(previous, { type: 'save', id, now });
+      if (next.notes === previous.notes) {
+        publish({ state: next, status: 'ready', storageError: null });
+        return;
+      }
       await storage.save(next.notes);
       publish({ state: { ...next, notice: previous.editingId === null ? 'Note saved on this device.' : 'Changes saved on this device.' }, status: 'ready', storageError: null });
-    } catch {
-      publish({ state: previous, status: 'ready', storageError: 'Could not save on this device. Your draft is still here. Try Save again before closing the app.' });
+    } catch (cause) {
+      publish({ state: previous, status: 'ready', storageError: `Could not save on this device. Your draft is still here. ${saveFailureGuidance(cause)} Try Save again before closing the app.` });
     }
+  }
+
+  // Reconcile after an external encrypted-vault transfer. Never replace an
+  // active editor draft or overwrite a write in progress.
+  async function refreshAfterPrivateTransfer(): Promise<void> {
+    if (snapshot.status !== 'ready' || snapshot.state.editingId !== null ||
+      snapshot.state.draft.title !== '' || snapshot.state.draft.text !== '') {
+      throw new Error('Close the editor before refreshing notes after a private transfer.');
+    }
+    const notes = await storage.load();
+    if (snapshot.status !== 'ready') throw new Error('Notes changed while refreshing.');
+    publish({ ...snapshot, state: { ...snapshot.state, notes }, storageError: null });
   }
 
   return {
@@ -310,6 +349,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
+    load, refreshAfterPrivateTransfer, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }

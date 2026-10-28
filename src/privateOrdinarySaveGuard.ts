@@ -12,6 +12,12 @@ export function createPrivateOrdinarySaveGuard(
 ): NotesStorage {
   return {
     load: () => ordinary.load(),
+    allocateNoteId: usedIds => coordinator.exclusive(async () => {
+      const unavailable = new Set([...usedIds, ...(await vault.load()).map(entry => entry.id)]);
+      let sequence = usedIds.length + 1;
+      while (unavailable.has(`local-note-${sequence}`)) sequence += 1;
+      return `local-note-${sequence}`;
+    }),
     save: notes => coordinator.exclusive(async () => {
       const encryptedIds = new Set((await vault.load()).map(entry => entry.id));
       if (notes.some(note => encryptedIds.has(note.id))) {

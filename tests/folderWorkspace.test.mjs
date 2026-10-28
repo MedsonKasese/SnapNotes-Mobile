@@ -12,6 +12,7 @@ import { createNotesController } from '../src/notesController.ts';
 import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
 import { createPrivateOrdinarySaveGuard } from '../src/privateOrdinarySaveGuard.ts';
 import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
+import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
@@ -107,6 +108,8 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '../privateSharedCoordinator': { privateSharedCoordinator },
     '../privateOrdinarySaveGuard': { createPrivateOrdinarySaveGuard },
     '../privateVaultStorage': { createPrivateVaultStorage },
+    '../privateNoteReader': { countPrivateVaultNotes },
+    '../privateMoveService': { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes },
     '../noteActionsMenu': { getNoteActionsMenuLayout },
