@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readPrivateNotes } from '../src/privateNoteReader.ts';
+import { countPrivateVaultNotes, readPrivateNotes } from '../src/privateNoteReader.ts';
 import { PRIVATE_VERIFIER_ID } from '../src/privateAccess.ts';
 
 const key = {};
@@ -10,10 +10,17 @@ test('reader skips verifier and returns authenticated note content', async () =>
   let calls = 0;
   const results = await readPrivateNotes(encrypted, key, async () => {
     calls++;
-    return { title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true };
+    return { title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true,
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' };
   });
   assert.equal(calls, 1);
-  assert.deepEqual(results, [{ id: 'note-1', title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true }]);
+  assert.deepEqual(results, [{ id: 'note-1', title: 'Private', text: 'Sensitive', html: '', category: 'general', pinned: true,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' }]);
+});
+
+test('vault count excludes the verifier without decrypting note records', () => {
+  assert.equal(countPrivateVaultNotes(encrypted), 1);
+  assert.equal(countPrivateVaultNotes([encrypted[0]]), 0);
 });
 
 test('reader defaults older encrypted payloads to unpinned', async () => {

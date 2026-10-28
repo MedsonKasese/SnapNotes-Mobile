@@ -7,7 +7,8 @@ import ts from 'typescript';
 import * as notes from '../src/notes.ts';
 import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
 import { createPrivateOrdinarySaveGuard } from '../src/privateOrdinarySaveGuard.ts';
-import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
+import { createPrivateVaultStorage, PRIVATE_VAULT_INDEX_KEY } from '../src/privateVaultStorage.ts';
+import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
@@ -118,6 +119,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
     getItem(key) {
       if (key === folders.FOLDERS_KEY) return Promise.resolve(storage.folderValue);
       if (key === draftLibrary.DRAFT_LIBRARY_KEY) return Promise.resolve(storage.libraryValue ?? null);
+      if (key === PRIVATE_VAULT_INDEX_KEY) return Promise.resolve(null);
       assert.equal(key, DRAFT_KEY);
       storage.getCalls += 1;
       const read = storage.reads.shift();
@@ -198,6 +200,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../privateSharedCoordinator') return { privateSharedCoordinator };
       if (name === '../privateOrdinarySaveGuard') return { createPrivateOrdinarySaveGuard };
       if (name === '../privateVaultStorage') return { createPrivateVaultStorage };
+      if (name === '../privateNoteReader') return { countPrivateVaultNotes };
       if (name === '../privateMoveService') return { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;

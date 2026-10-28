@@ -25,6 +25,12 @@ const PRIVATE_ACTIONS: { label: string; icon: FontAwesomeName }[] = [
   { label: 'Delete private note', icon: 'trash' },
 ];
 
+function formatUpdatedAt(timestamp?: string): string | null {
+  if (!timestamp || !Number.isFinite(Date.parse(timestamp))) return null;
+  const date = new Date(timestamp);
+  return `Updated ${date.toLocaleDateString()} · ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void; onRestored?: () => Promise<void> }) {
   const [phase, setPhase] = useState<'loading' | 'setup' | 'locked' | 'unlocked' | 'error'>('loading');
   const [password, setPassword] = useState('');
@@ -331,11 +337,13 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
       ) : phase === 'unlocked' ? (
         <>
           <Text style={styles.description}>Your encrypted notes are available only while this vault is unlocked.</Text>
+          <Text testID="private-note-count" style={styles.description}>{orderedNotes.length} private {orderedNotes.length === 1 ? 'note' : 'notes'}</Text>
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
           <ScrollView style={styles.noteScroll} contentContainerStyle={styles.noteList} keyboardShouldPersistTaps="handled">
             {orderedNotes.length === 0 ? <Text style={styles.description}>No private notes yet.</Text> : orderedNotes.map(note => {
               const expanded = selectedNoteId === note.id;
               const editing = editingNote?.id === note.id;
+              const updatedAtLabel = formatUpdatedAt(note.updatedAt);
               return (
                 <View key={note.id} style={[styles.privateCard, note.pinned && styles.privateCardPinned]}>
                   <View style={styles.noteCardTop}>
@@ -369,6 +377,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
                       <Text numberOfLines={expanded ? undefined : 5} style={styles.noteText}>{note.text || 'No note text.'}</Text>
                     </Pressable>
                   )}
+                  {updatedAtLabel && <Text numberOfLines={1} style={styles.noteTime}>{updatedAtLabel}</Text>}
                   <View style={styles.noteFooter}>
                     <Text numberOfLines={1} style={styles.noteCategory}>{note.category || 'General'}</Text>
                     <View style={styles.footerActions}>
@@ -480,6 +489,7 @@ const styles = StyleSheet.create({
   titlePressable: { flex: 1, justifyContent: 'center', minHeight: 30 },
   noteTitle: { color: '#20351d', fontSize: 18, fontWeight: '800', lineHeight: 24 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
+  noteTime: { color: '#778372', fontSize: 12 },
   noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
   noteCategory: { color: '#687567', fontSize: 12, fontWeight: '700', textTransform: 'capitalize', flex: 1 },
   footerActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },

@@ -13,6 +13,7 @@ type Dependencies = {
   encrypt: typeof encryptPrivatePayload;
   key: Key;
   salt: Uint8Array;
+  now?: () => string;
   withExclusiveMutation<T>(operation: () => Promise<T>): Promise<T>;
 };
 
@@ -37,6 +38,8 @@ function asPreview(id: string, payload: Record<string, unknown>): PrivateNotePre
     html: payload.html as string,
     category: payload.category as string,
     pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false,
+    ...(typeof payload.createdAt === 'string' ? { createdAt: payload.createdAt } : {}),
+    ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}),
   };
 }
 
@@ -68,6 +71,7 @@ export async function updatePrivateNoteTransaction(
       next.title = normalized.title;
       next.text = normalized.text;
       next.html = normalized.html ?? '';
+      next.updatedAt = deps.now?.() ?? new Date().toISOString();
     }
     if (changes.pinned !== undefined) {
       if (typeof changes.pinned !== 'boolean') throw new Error('Invalid private note pin state.');

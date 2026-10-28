@@ -11,8 +11,23 @@ export type PrivateRestoreDependencies = {
   saveVault(entries: PrivateVaultEntry[]): Promise<void>;
   decrypt: typeof decryptPrivatePayload;
   key: Parameters<typeof decryptPrivatePayload>[1];
+  now?: () => string;
   withExclusiveRestore<T>(operation: () => Promise<T>): Promise<T>;
 };
+
+function isIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, zone] = match;
+  const y = Number(year), m = Number(month), d = Number(day);
+  const h = Number(hour), min = Number(minute), sec = Number(second);
+  const daysInMonth = m === 2 ? (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28)
+    : ([4, 6, 9, 11].includes(m) ? 30 : 31);
+  const offset = zone === 'Z' ? [0, 0] : zone.slice(1).split(':').map(Number);
+  return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth && h <= 23 && min <= 59 && sec <= 59 &&
+    offset[0] <= 23 && offset[1] <= 59 && Number.isFinite(Date.parse(value));
+}
 
 function matchesRestoredNote(actual: Note | undefined, expected: Note): boolean {
   if (!actual) return false;
@@ -45,13 +60,17 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
     const data = payload as Record<string, unknown>;
     if (typeof data.title !== 'string' || typeof data.text !== 'string' || typeof data.html !== 'string' ||
       typeof data.category !== 'string' ||
+      (data.createdAt !== undefined && !isIsoTimestamp(data.createdAt)) ||
+      (data.updatedAt !== undefined && !isIsoTimestamp(data.updatedAt)) ||
       !NOTE_CATEGORIES.includes(data.category as Note['category']) ||
       noteHtmlToText(data.html).trim() !== data.text.replace(/\r/g, '').trim()) {
       throw Error('Unsupported private note payload.');
     }
-    const now = new Date().toISOString();
+    const now = deps.now?.() ?? new Date().toISOString();
     const note: Note = { id, title: data.title, text: data.text, html: data.html,
-      category: data.category as Note['category'], createdAt: now, updatedAt: now,
+      category: data.category as Note['category'],
+      createdAt: typeof data.createdAt === 'string' ? data.createdAt : now,
+      updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : now,
       pinned: typeof data.pinned === 'boolean' ? data.pinned : false, archived: false, deletedAt: null,
       folderId: typeof data.folderId === 'string' ? data.folderId : null };
     try {

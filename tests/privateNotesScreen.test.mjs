@@ -138,11 +138,16 @@ function enterPassword(app, setup = false) {
 const isUnlocked = app => text(app.render()).includes('Lock Private Notes');
 
 test('unlock displays authenticated previews and locking clears decrypted note content', async () => {
-  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general' };
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general',
+    updatedAt: '2026-01-02T00:00:00.000Z' };
   const app = await screen({ unlock: async () => [preview] });
   enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
   assert.deepEqual(app.calls, [['unlock', PASSWORD]]);
   assert.match(text(app.render()), /Private title/);
+  const privateCount = find(app.render(), item => item.props.testID === 'private-note-count');
+  assert.equal(privateCount.props.children[0], 1);
+  assert.match(text(privateCount), /private note/);
+  assert.match(text(app.render()), /Updated /);
   find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
   assert.match(text(app.render()), /Sensitive body/);
   button(app, 'Lock Private Notes').props.onPress();

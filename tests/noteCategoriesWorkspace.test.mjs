@@ -9,6 +9,7 @@ import { createNotesController } from '../src/notesController.ts';
 import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
 import { createPrivateOrdinarySaveGuard } from '../src/privateOrdinarySaveGuard.ts';
 import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
+import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as folders from '../src/folders.ts';
@@ -98,6 +99,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === '../privateSharedCoordinator') return { privateSharedCoordinator };
       if (name === '../privateOrdinarySaveGuard') return { createPrivateOrdinarySaveGuard };
       if (name === '../privateVaultStorage') return { createPrivateVaultStorage };
+      if (name === '../privateNoteReader') return { countPrivateVaultNotes };
       if (name === '../privateMoveService') return { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;
@@ -122,6 +124,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
     render() { cursor = 0; refCursor = 0; return exports.NotesWorkspace(); },
     controller, alerts, archiveCalls, trashCalls, pinCalls, duplicateCalls, events,
     setStatus(next) { status = next; },
+    setPrivateNoteCount(value) { slots[stateNames.indexOf('privateNoteCount')] = value; },
   };
 }
 
@@ -231,6 +234,15 @@ test('drawer icons retain their names and remain decorative within labelled butt
     assert.equal(icon.props.name, row.props.icon);
     assert.equal(icon.props.accessible, false);
   }
+});
+
+test('Private Notes drawer badge reports the current count', () => {
+  const app = workspace();
+  app.setPrivateNoteCount(2);
+  const row = elements(app.render()).find(element => typeof element.type === 'function' && element.props.label === 'Private Notes');
+  assert.ok(row);
+  assert.equal(row.props.detail, '2 private notes');
+  assert.equal(text(row.type(row.props)), 'Private Notes2');
 });
 
 test('library, archive, and trash expose exactly their available note actions in the popup', () => {

@@ -11,6 +11,9 @@ export function buildMobilePrivatePayload(note: Note) {
     text: note.text || '',
     html: note.html || '',
     category: note.category || 'general',
+    // These mobile library timestamps belong inside ciphertext, not vault metadata.
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
     pinned: Boolean(note.pinned),
     tags: [],
     time: '',

@@ -13,6 +13,7 @@ import { createNotesController } from '../notesController';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { createPrivateOrdinarySaveGuard } from '../privateOrdinarySaveGuard';
 import { createPrivateVaultStorage } from '../privateVaultStorage';
+import { countPrivateVaultNotes } from '../privateNoteReader';
 import { DRAFT_LIBRARY_KEY, newDraftId, parseDraftLibrary, removeDraft, upsertDraft, type SavedDraft } from '../draftLibrary';
 import { FOLDERS_KEY, FOLDER_ICON_NAMES, FOLDER_COLOR_VALUES, normalizeFolderIcon, normalizeFolderColor, type FolderIcon, type FolderColor, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
@@ -107,8 +108,9 @@ function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAct
 
 // One queue for this workspace's ordinary-note mutations. The encrypted vault
 // must join this same queue before Move to Private can be enabled.
+const privateVaultStorage = createPrivateVaultStorage(AsyncStorage);
 const coordinatedDeviceNotesStorage = createPrivateOrdinarySaveGuard(
-  privateSharedCoordinator, deviceNotesStorage, createPrivateVaultStorage(AsyncStorage),
+  privateSharedCoordinator, deviceNotesStorage, privateVaultStorage,
 );
 
 export function NotesWorkspace() {
@@ -117,6 +119,7 @@ export function NotesWorkspace() {
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
+  const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ id: string; revision: number } | null>(null);
   const folderActionsTarget = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
@@ -167,6 +170,22 @@ export function NotesWorkspace() {
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const refreshPrivateNoteCount = useCallback(async () => {
+    try {
+      setPrivateNoteCount(countPrivateVaultNotes(await privateVaultStorage.load()));
+    } catch {
+      setPrivateNoteCount(null);
+    }
+  }, []);
+  useEffect(() => {
+    let active = true;
+    void privateVaultStorage.load().then(entries => {
+      if (active) setPrivateNoteCount(countPrivateVaultNotes(entries));
+    }).catch(() => {
+      if (active) setPrivateNoteCount(null);
+    });
+    return () => { active = false; };
+  }, []);
   function trackOpenedDraft(id: string | null) {
     openedDraftIdRef.current = id;
     setOpenedDraftId(id);
@@ -796,6 +815,7 @@ export function NotesWorkspace() {
     } catch (cause) {
       Alert.alert('Could not move note', cause instanceof Error ? cause.message : 'Your note was not moved.');
     } finally {
+      void refreshPrivateNoteCount();
       setPrivateMoveBusy(false);
     }
   }
@@ -975,7 +995,8 @@ export function NotesWorkspace() {
       {draftLibraryError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftLibraryError}</Text>}
 
       {view === 'private' ? (
-        <PrivateNotesScreen onBack={openLibrary} onRestored={() => controller.refreshAfterPrivateTransfer()} />
+        <PrivateNotesScreen onBack={() => { void refreshPrivateNoteCount(); openLibrary(); }}
+          onRestored={async () => { await controller.refreshAfterPrivateTransfer(); await refreshPrivateNoteCount(); }} />
       ) : view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
@@ -1317,7 +1338,9 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
-              <MenuRow label="Private Notes" icon="lock" detail="Protected vault" active={view === 'private'} onPress={selectPrivate} />
+              <MenuRow label="Private Notes" icon="lock"
+                detail={privateNoteCount === null ? 'Protected vault' : `${privateNoteCount} private ${privateNoteCount === 1 ? 'note' : 'notes'}`}
+                active={view === 'private'} onPress={selectPrivate} />
               <MenuRow label="Drafts" icon="file-text-o" detail={`${savedDrafts.length} drafts`} active={view === 'drafts'} onPress={selectDrafts} />
               <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />

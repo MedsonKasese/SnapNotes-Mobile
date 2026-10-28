@@ -5,8 +5,12 @@ import { PRIVATE_VERIFIER_ID } from '../src/privateAccess.ts';
 
 const key = {};
 const salt = new Uint8Array(16);
+const CREATED_AT = '2026-01-01T00:00:00.000Z';
+const UPDATED_AT = '2026-01-02T00:00:00.000Z';
+const EDITED_AT = '2026-02-01T00:00:00.000Z';
 const payload = {
   title: 'Private title', text: 'Private body', html: '<p>Private body</p>', category: 'personal',
+  createdAt: CREATED_AT, updatedAt: UPDATED_AT,
   tags: ['keep'], attachments: [{ id: 'encrypted-attachment-reference' }], pinned: false,
 };
 function fixture({ failSave = false } = {}) {
@@ -18,7 +22,7 @@ function fixture({ failSave = false } = {}) {
   ];
   const events = [];
   const deps = {
-    key, salt,
+    key, salt, now: () => EDITED_AT,
     async loadVault() { return structuredClone(vault); },
     async saveVault(next) { events.push('save'); if (failSave) throw Error('disk failure'); vault = structuredClone(next); },
     async decrypt(record) {
@@ -47,8 +51,10 @@ test('editing changes the encrypted title/body while retaining other private pay
   assert.equal(updated.text, 'Edited body');
   assert.equal(f.state().find(entry => entry.id === 'note-1').privateData.ciphertext, 'new-1');
   assert.deepEqual(f.payloads.get('new-1'), {
-    ...before, title: 'Changed title', text: 'Edited body', html: '<p>Edited body</p>',
+    ...before, title: 'Changed title', text: 'Edited body', html: '<p>Edited body</p>', updatedAt: EDITED_AT,
   });
+  assert.equal(updated.createdAt, CREATED_AT);
+  assert.equal(updated.updatedAt, EDITED_AT);
   assert.deepEqual(payload, before);
   assert.deepEqual(f.events, ['exclusive', 'encrypt', 'save']);
 });
@@ -59,6 +65,7 @@ test('pin updates are persisted in ciphertext and returned for card ordering', a
   assert.equal(updated.pinned, true);
   assert.equal(f.payloads.get('new-1').pinned, true);
   assert.equal(f.payloads.get('new-1').text, payload.text);
+  assert.equal(f.payloads.get('new-1').updatedAt, UPDATED_AT);
 });
 
 test('invalid edit content is rejected before writing', async () => {

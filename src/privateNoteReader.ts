@@ -2,10 +2,16 @@ import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 
-export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string; pinned: boolean };
+export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string; pinned: boolean; createdAt?: string; updatedAt?: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+// The PWA shows the count while locked; count opaque vault records without
+// decrypting them or exposing note content. The verifier is not a note.
+export function countPrivateVaultNotes(entries: readonly PrivateVaultEntry[]): number {
+  return entries.filter(entry => entry.id !== PRIVATE_VERIFIER_ID).length;
 }
 
 // Decrypted values are kept in memory only. Do not cache previews, put them in
@@ -27,7 +33,9 @@ export async function readPrivateNotes(
     }
     results.push({ id: entry.id, title: payload.title, text: payload.text,
       html: payload.html, category: payload.category,
-      pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false });
+      pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false,
+      ...(typeof payload.createdAt === 'string' ? { createdAt: payload.createdAt } : {}),
+      ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}) });
   }
   return results;
 }
