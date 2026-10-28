@@ -147,8 +147,9 @@ test('unlock displays authenticated previews and locking clears decrypted note c
   const privateCount = find(app.render(), item => item.props.testID === 'private-note-count');
   assert.equal(privateCount.props.children[0], 1);
   assert.match(text(privateCount), /private note/);
-  assert.ok(text(app.render()).includes('1 Jan 2026'));
-  assert.doesNotMatch(text(app.render()), /Updated /);
+  const updatedAt = new Date('2026-01-02T00:00:00.000Z');
+  const expectedUpdated = `Updated ${updatedAt.toLocaleDateString()} · ${updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  assert.ok(text(app.render()).includes(expectedUpdated));
   find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Open private note Private title').props.onPress();
   assert.match(text(app.render()), /Sensitive body/);
   button(app, 'Lock Private Notes').props.onPress();
@@ -166,6 +167,28 @@ test('private card time follows PWA explicit-time precedence and labels legacy m
   const legacyApp = await screen({ unlock: async () => [{ ...timed, id: 'legacy', time: undefined, createdAt: undefined }] });
   enterPassword(legacyApp); button(legacyApp, 'Unlock').props.onPress(); await legacyApp.flush();
   assert.ok(text(legacyApp.render()).includes('No date'));
+});
+
+test('private-note footer keeps category and Updated time together on the left, with pin and menu on the right', async () => {
+  const updatedAt = '2026-10-28T09:01:00.000Z';
+  const preview = { id: 'private-footer', title: 'Footer note', text: 'Body', html: '<p>Body</p>',
+    category: 'general', pinned: false, updatedAt };
+  const app = await screen({ unlock: async () => [preview] });
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+
+  const tree = app.render();
+  const footer = find(tree, item => item.props.testID === 'private-note-footer');
+  const metadata = find(tree, item => item.props.testID === 'private-note-metadata');
+  const actions = find(tree, item => item.props.testID === 'private-note-footer-actions');
+  assert.equal(footer.props.children[0], metadata);
+  assert.equal(footer.props.children[1], actions);
+  assert.equal(text(metadata.props.children[0]), 'general');
+  assert.equal(metadata.props.children[0].props.style.textTransform, 'capitalize');
+  const expectedUpdated = `Updated ${new Date(updatedAt).toLocaleDateString()} · ${new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  assert.equal(text(metadata.props.children[1]), expectedUpdated);
+  assert.deepEqual(elements(actions).filter(item => item.type === 'Pressable').map(item => item.props.accessibilityLabel), [
+    'Pin private note Footer note', 'Note actions for Footer note',
+  ]);
 });
 
 test('moving a private note out asks for one confirmation and refreshes the ordinary library', async () => {

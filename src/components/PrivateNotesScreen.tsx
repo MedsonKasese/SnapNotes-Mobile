@@ -31,6 +31,15 @@ function formatNoteTime(time?: string, createdAt?: string): string {
   if (!Number.isFinite(date.getTime())) return 'No date';
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
+function formatUpdatedNoteTime(updatedAt?: string, time?: string, createdAt?: string): string {
+  if (updatedAt) {
+    const date = new Date(updatedAt);
+    if (Number.isFinite(date.getTime())) {
+      return `Updated ${date.toLocaleDateString()} · ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    }
+  }
+  return `Updated ${formatNoteTime(time, createdAt)}`;
+}
 
 export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void; onRestored?: () => Promise<void> }) {
   const [phase, setPhase] = useState<'loading' | 'setup' | 'locked' | 'unlocked' | 'error'>('loading');
@@ -344,7 +353,6 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
             {orderedNotes.length === 0 ? <Text style={styles.description}>No private notes yet.</Text> : orderedNotes.map(note => {
               const expanded = selectedNoteId === note.id;
               const editing = editingNote?.id === note.id;
-              const noteTimeLabel = formatNoteTime(note.time, note.createdAt);
               return (
                 <View key={note.id} style={[styles.privateCard, note.pinned && styles.privateCardPinned]}>
                   <View style={styles.noteCardTop}>
@@ -378,10 +386,12 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
                       <Text numberOfLines={expanded ? undefined : 5} style={styles.noteText}>{note.text || 'No note text.'}</Text>
                     </Pressable>
                   )}
-                  <Text numberOfLines={1} style={styles.noteTime}>{noteTimeLabel}</Text>
-                  <View style={styles.noteFooter}>
-                    <Text numberOfLines={1} style={styles.noteCategory}>{note.category || 'General'}</Text>
-                    <View style={styles.footerActions}>
+                  <View testID="private-note-footer" style={styles.noteFooter}>
+                    <View testID="private-note-metadata" style={styles.noteMeta}>
+                      <Text numberOfLines={1} style={styles.noteCategory}>{note.category || 'General'}</Text>
+                      <Text numberOfLines={1} style={styles.noteTime}>{formatUpdatedNoteTime(note.updatedAt, note.time, note.createdAt)}</Text>
+                    </View>
+                    <View testID="private-note-footer-actions" style={styles.footerActions}>
                       <Pressable accessibilityRole="button" accessibilityLabel={`${note.pinned ? 'Unpin' : 'Pin'} private note ${note.title || 'Untitled'}`}
                         accessibilityState={{ selected: note.pinned, disabled: busy }} disabled={busy}
                         onPress={() => void togglePin(note)} style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
@@ -491,9 +501,10 @@ const styles = StyleSheet.create({
   noteTitle: { color: '#20351d', fontSize: 18, fontWeight: '800', lineHeight: 24 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
   noteTime: { color: '#778372', fontSize: 12 },
-  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
-  noteCategory: { color: '#687567', fontSize: 12, fontWeight: '700', textTransform: 'capitalize', flex: 1 },
-  footerActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  noteFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e4e8e1', minHeight: 42 },
+  noteMeta: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  noteCategory: { color: '#687b69', fontSize: 11, fontWeight: '700', textTransform: 'capitalize', backgroundColor: '#eef3ef', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, overflow: 'hidden', flexShrink: 0 },
+  footerActions: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
   iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
   pressed: { opacity: 0.7 },
   editForm: { gap: 10 },

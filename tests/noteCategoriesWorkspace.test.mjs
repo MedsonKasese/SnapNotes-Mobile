@@ -641,6 +641,28 @@ test('the contextual popup stays compact and accessible with its duplicate, fold
   }
 });
 
+test('Move to Private password visibility toggles masking without changing the entered value', () => {
+  const app = workspace();
+  const { sheet } = openNoteActions(app, savedNotes[0]);
+  sheetActions(sheet, savedNotes[0].title)
+    .find(button => button.props.accessibilityLabel === `Move to Private: ${savedNotes[0].title}`)
+    .props.onPress();
+
+  const password = () => find(app.render(), element => element.type === 'TextInput' &&
+    element.props.accessibilityLabel === 'Private Notes password for transfer');
+  const visibility = label => find(app.render(), element => element.type === 'Pressable' &&
+    element.props.accessibilityLabel === label);
+  assert.equal(find(app.render(), element => element.props.testID === 'move-private-modal').props.visible, true);
+  password().props.onChangeText('a-test-vault-password');
+  assert.equal(password().props.secureTextEntry, true);
+  visibility('Show Private Notes transfer password').props.onPress();
+  assert.equal(password().props.secureTextEntry, false);
+  assert.equal(password().props.value, 'a-test-vault-password');
+  visibility('Hide Private Notes transfer password').props.onPress();
+  assert.equal(password().props.secureTextEntry, true);
+  assert.equal(password().props.value, 'a-test-vault-password');
+});
+
 test('the popup uses the tapped trigger and the measured safe viewport origin', () => {
   const app = workspace();
   const triggerRect = [324, 680, 40, 40];

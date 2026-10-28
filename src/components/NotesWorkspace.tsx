@@ -140,6 +140,7 @@ export function NotesWorkspace() {
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
   const [privateMovePassword, setPrivateMovePassword] = useState('');
+  const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
   const [privateMoveBusy, setPrivateMoveBusy] = useState(false);
   const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
   const [actionsViewport, setActionsViewport] = useState<MenuRect | null>(null);
@@ -787,7 +788,11 @@ export function NotesWorkspace() {
     if (!selected) return;
     const now = new Date().toISOString();
     switch (action) {
-      case 'move-private': setPrivateMoveId(id); break;
+      case 'move-private':
+        setPrivateMovePassword('');
+        setPrivateMovePasswordVisible(false);
+        setPrivateMoveId(id);
+        break;
       case 'move-folder': chooseFolder(id); break;
       case 'duplicate': void controller.duplicateNote(id, now); break;
       case 'archive': void controller.setArchived(id, true, now); break;
@@ -805,6 +810,7 @@ export function NotesWorkspace() {
     try {
       const result = await moveDeviceNoteToPrivate(id, privateMovePassword);
       setPrivateMovePassword('');
+      setPrivateMovePasswordVisible(false);
       setPrivateMoveId(null);
       await controller.refreshAfterPrivateTransfer();
       if (result.status === 'needs-recovery') {
@@ -1184,22 +1190,31 @@ export function NotesWorkspace() {
         </View>
       )}
 
-      <Modal visible={privateMoveId !== null} transparent animationType="fade"
-        onRequestClose={() => { if (!privateMoveBusy) { setPrivateMoveId(null); setPrivateMovePassword(''); } }}>
+      <Modal testID="move-private-modal" visible={privateMoveId !== null} transparent animationType="fade"
+        onRequestClose={() => { if (!privateMoveBusy) { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); } }}>
         <View style={{ flex: 1, backgroundColor: '#0009', justifyContent: 'center', padding: 24 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 14 }}>
             <Text style={{ fontSize: 20, fontWeight: '800', color: '#20351d' }}>Move to Private</Text>
             <Text>Enter your Private Notes password to encrypt and move this note.</Text>
-            <TextInput accessibilityLabel="Private Notes password for transfer" secureTextEntry
-              autoCapitalize="none" autoCorrect={false} placeholder="Private Notes password"
-              value={privateMovePassword} onChangeText={setPrivateMovePassword}
-              style={{ borderWidth: 1, borderColor: '#cbd9c3', borderRadius: 10, padding: 12 }} />
+            <View style={styles.movePasswordRow}>
+              <TextInput accessibilityLabel="Private Notes password for transfer" secureTextEntry={!privateMovePasswordVisible}
+                autoCapitalize="none" autoCorrect={false} placeholder="Private Notes password"
+                value={privateMovePassword} onChangeText={setPrivateMovePassword}
+                style={styles.movePasswordInput} />
+              <Pressable accessibilityRole="button"
+                accessibilityLabel={`${privateMovePasswordVisible ? 'Hide' : 'Show'} Private Notes transfer password`}
+                accessibilityHint={privateMovePasswordVisible ? 'Hides the password on screen' : 'Shows the password on screen'}
+                disabled={privateMoveBusy} hitSlop={8} style={styles.movePasswordVisibilityButton}
+                onPress={() => setPrivateMovePasswordVisible(visible => !visible)}>
+                <FontAwesome name={privateMovePasswordVisible ? 'eye-slash' : 'eye'} size={19} color="#3b7f16" accessible={false} />
+              </Pressable>
+            </View>
             <Pressable accessibilityRole="button" disabled={privateMoveBusy} onPress={() => void confirmPrivateMove()}
               style={{ backgroundColor: '#3b7f16', padding: 14, borderRadius: 10 }}>
               <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '700' }}>{privateMoveBusy ? 'Encrypting…' : 'Move to Private'}</Text>
             </Pressable>
             <Pressable accessibilityRole="button" disabled={privateMoveBusy}
-              onPress={() => { setPrivateMoveId(null); setPrivateMovePassword(''); }}>
+              onPress={() => { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); }}>
               <Text style={{ textAlign: 'center', color: '#a32b2b', padding: 8 }}>Cancel</Text>
             </Pressable>
           </View>
@@ -1452,6 +1467,9 @@ const styles = StyleSheet.create({
   editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
   input: { color: '#20351d', backgroundColor: '#f8faf6', borderColor: '#d5dfcd', borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, minHeight: 48 },
+  movePasswordRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#cbd9c3', borderRadius: 10 },
+  movePasswordInput: { flex: 1, minWidth: 0, padding: 12, color: '#20351d', fontSize: 16 },
+  movePasswordVisibilityButton: { width: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   categoryButton: { padding: 12, borderRadius: 11, backgroundColor: '#eff7e9', borderWidth: 1, borderColor: '#dce6d4' },
   categoryButtonText: { color: '#304728', fontSize: 14, fontWeight: '700' },
   categoryOptions: { gap: 2, borderRadius: 11, borderWidth: 1, borderColor: '#dce6d4' },
