@@ -1050,7 +1050,7 @@ export function NotesWorkspace() {
                 <FormattingToolbar disabled={saving || !editorReady} active={formattingState} onAction={formatNote} />
               </View>
               <RichNoteEditor
-                key={state.editingId ?? 'new-note'}
+                key={`note-editor:${state.editingId ?? 'new-note'}`}
                 ref={bodyEditor}
                 editable={!saving}
                 accessibilityLabel="Note body"
@@ -1061,7 +1061,7 @@ export function NotesWorkspace() {
                 onSelection={setFormattingState}
               />
               {state.editingId !== null
-                ? <NoteAttachments key={state.editingId} noteId={state.editingId} />
+                ? <NoteAttachments key={`note-attachments:${state.editingId}`} noteId={state.editingId} />
                 : <Text style={styles.hint}>Save this note first to add local attachments. Then reopen it from your notes and tap Add attachment.</Text>}
               <Text style={[styles.hint, count > MAX_NOTE_CHARACTERS && styles.error]}>
                 {count}/{MAX_NOTE_CHARACTERS} characters

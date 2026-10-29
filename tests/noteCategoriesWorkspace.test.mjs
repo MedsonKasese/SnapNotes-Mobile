@@ -192,6 +192,20 @@ test('new-note editor explains attachments appear after save, and saved-note edi
   assert.equal(picker.props.noteId, savedNotes[0].id);
 });
 
+test('saved note editor and attachment siblings use distinct React keys', () => {
+  const note = { ...savedNotes[0], id: 'local-note-42' };
+  const app = workspace([note]);
+  const card = list(app.render()).props.renderItem({ item: note });
+  find(card, element => element.props.accessibilityLabel === `Open ${note.title}`).props.onPress();
+
+  const tree = app.render();
+  const editor = find(tree, element => element.type === 'RichNoteEditor');
+  const attachments = find(tree, element => element.type === 'NoteAttachments');
+  assert.equal(editor.key, 'note-editor:local-note-42');
+  assert.equal(attachments.key, 'note-attachments:local-note-42');
+  assert.notEqual(editor.key, attachments.key);
+});
+
 test('editor All notes clears the category filter and includes notes from other categories', () => {
   const app = workspace();
   editWorkNote(app);
