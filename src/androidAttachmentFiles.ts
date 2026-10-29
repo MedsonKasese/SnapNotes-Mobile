@@ -1,5 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import type { AttachmentFileOperations } from './attachmentTransactions.ts';
+import { createAndroidAttachmentFileOperations } from './androidAttachmentFileOperations.ts';
 
 const KEY_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const ATTACHMENT_DIRECTORY = 'snapnotes-attachments';
@@ -18,25 +19,20 @@ function destinationFor(key: string): File {
 export function createAndroidAttachmentFiles(): AttachmentFileOperations & {
   fileForPreview(fileKey: string): File;
 } {
-  return {
-    async copyIntoPrivateStorage(sourceUri: string, fileKey: string): Promise<void> {
-      if (!/^(content|file):\/\//.test(sourceUri)) {
-        throw new Error('Expected a local document picker URI.');
-      }
+  const operations = createAndroidAttachmentFileOperations({
+    ensureDirectory() {
       const directory = new Directory(Paths.document, ATTACHMENT_DIRECTORY);
       directory.create({ idempotent: true, intermediates: true });
-      const destination = destinationFor(fileKey);
-      if (destination.exists) throw new Error('Attachment file identifier collision.');
-      new File(sourceUri).copy(destination);
     },
-    async storedFileSize(fileKey: string): Promise<number | null> {
-      const file = destinationFor(fileKey);
-      return file.exists ? file.size : null;
+    sourceFile(uri) {
+      return new File(uri);
     },
-    async removePrivateFile(fileKey: string): Promise<void> {
-      const file = destinationFor(fileKey);
-      if (file.exists) file.delete();
+    destinationFile(key) {
+      return destinationFor(key);
     },
+  });
+  return {
+    ...operations,
     fileForPreview(fileKey: string): File {
       return destinationFor(fileKey);
     },

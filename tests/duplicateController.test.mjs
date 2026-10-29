@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNotesController } from '../src/notesController.ts';
 import { MAX_NOTE_CHARACTERS } from '../src/notes.ts';
+import { createPrivateWriteCoordinator } from '../src/privateWriteCoordinator.ts';
+import { createPrivateOrdinarySaveGuard } from '../src/privateOrdinarySaveGuard.ts';
 
 const FIRST = '2026-10-19T09:00:00.000Z';
 const SECOND = '2026-10-23T12:00:00.000Z';
@@ -77,4 +79,23 @@ test('missing and trashed notes cannot be duplicated', async () => {
   await controller.duplicateNote(original.id, SECOND);
   await controller.duplicateNote('missing', SECOND);
   assert.equal(writes, 0);
+});
+
+test('duplicate allocates an ID outside both ordinary and encrypted-vault namespaces', async () => {
+  let persisted = [original];
+  const privateEntries = [{ id: 'local-note-3', privateData: { ciphertext: 'opaque-private-payload' } }];
+  const storage = createPrivateOrdinarySaveGuard(createPrivateWriteCoordinator(), {
+    async load() { return structuredClone(persisted); },
+    async save(notes) { persisted = structuredClone(notes); },
+  }, {
+    async load() { return structuredClone(privateEntries); },
+  });
+  const controller = createNotesController(storage);
+  await controller.load();
+  await controller.duplicateNote(original.id, SECOND);
+
+  assert.deepEqual(persisted.map(note => note.id), ['local-note-4', 'local-note-2']);
+  assert.equal(new Set(persisted.map(note => note.id)).size, persisted.length);
+  assert.deepEqual(privateEntries, [{ id: 'local-note-3', privateData: { ciphertext: 'opaque-private-payload' } }]);
+  assert.equal(controller.getSnapshot().storageError, null);
 });
