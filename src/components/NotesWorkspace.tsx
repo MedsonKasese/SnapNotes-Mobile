@@ -1060,7 +1060,9 @@ export function NotesWorkspace() {
                 onReady={setEditorReady}
                 onSelection={setFormattingState}
               />
-              {state.editingId !== null && <NoteAttachments key={state.editingId} noteId={state.editingId} />}
+              {state.editingId !== null
+                ? <NoteAttachments key={state.editingId} noteId={state.editingId} />
+                : <Text style={styles.hint}>Save this note first to add local attachments. Then reopen it from your notes and tap Add attachment.</Text>}
               <Text style={[styles.hint, count > MAX_NOTE_CHARACTERS && styles.error]}>
                 {count}/{MAX_NOTE_CHARACTERS} characters
               </Text>

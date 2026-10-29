@@ -178,6 +178,20 @@ function editWorkNote(app) {
 const archivedNote = { ...savedNotes[0], id: 'archived-1', title: 'Archived project', archived: true, pinned: true, deletedAt: null };
 const trashedNote = { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' };
 
+test('new-note editor explains attachments appear after save, and saved-note editor wires the picker', () => {
+  const app = workspace();
+  action(app.render(), '+ New note').props.onPress();
+  const newNoteEditor = app.render();
+  assert.match(text(newNoteEditor), /Save this note first to add local attachments/);
+  assert.equal(elements(newNoteEditor).some(element => element.type === 'NoteAttachments'), false);
+
+  action(newNoteEditor, 'All notes').props.onPress();
+  editWorkNote(app);
+  const savedNoteEditor = app.render();
+  const picker = find(savedNoteEditor, element => element.type === 'NoteAttachments');
+  assert.equal(picker.props.noteId, savedNotes[0].id);
+});
+
 test('editor All notes clears the category filter and includes notes from other categories', () => {
   const app = workspace();
   editWorkNote(app);
