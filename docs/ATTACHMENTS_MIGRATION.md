@@ -12,7 +12,7 @@ Source inspected: `MedsonKasese/SnapNotes` on `main`, especially `js/attachments
 
 ## Mobile state and security decisions
 - Mobile currently has **device-local notes** and no equivalent signed-in attachment upload service. Do not attach a working-looking upload button that silently stores unsynced references.
-- The initial foundation added pure MIME/count/size rules without changing the persisted note schema. The current branch also supports local-only picker selection and add/list/remove controls for saved ordinary notes, with a versioned metadata manifest and app-private file storage; attachments are not synced or uploaded.
+- The initial foundation added pure MIME/count/size rules without changing the persisted note schema. The current branch also supports local-only picker selection and add/list/remove controls for saved ordinary notes, with a versioned metadata manifest and app-private file storage; read-only note-card summaries show each local attachment's name, type, and size. Attachments are not synced or uploaded.
 - The copy-first transaction verifies stored byte size before committing metadata and rolls back on commit failure. Orphan cleanup/retry, permanent-note-deletion coordination, missing-file and permission handling, and Android device verification remain open work.
 - For **Private Notes**, plaintext file paths, cached previews, sharing, exports, and recent-app snapshots are sensitive. Notes with local attachments are currently blocked from **Move to Private**; encrypted attachment storage and lock-time cleanup are required before private attachments can be supported.
 - Avoid placing file bytes in AsyncStorage or storing transient picker URIs as permanent references.
@@ -22,7 +22,7 @@ Source inspected: `MedsonKasese/SnapNotes` on `main`, especially `js/attachments
 - [x] Add pure MIME/count/size rules and automated unit tests.
 - [x] Add Android picker selection, durable app-private copies, manifest persistence, and transactional copy/verification coverage.
 - [x] Add editor add/list/remove controls for saved ordinary notes.
-- [ ] Add rename and note-card display.
+- [ ] Add rename; note-card attachment summaries are implemented, but image/PDF/text previews are not.
 - [ ] In-app image, PDF and text previews, safe fallback for unsupported files.
 - [ ] Handle offline, permission denial, missing files, restart and orphan cleanup.
 - [ ] Audit authenticated cloud uploads and ownership boundaries.

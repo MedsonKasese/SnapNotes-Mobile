@@ -7,6 +7,7 @@ import { pickAndroidAttachments } from '../androidAttachmentPicker';
 import { createAttachmentManifestStorage } from '../attachmentManifestStorage';
 import { createAttachmentService } from '../attachmentService';
 import type { StoredAttachment } from '../attachmentManifest';
+import { attachmentPreviewKind } from '../attachmentRules';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { createPrivateVaultStorage } from '../privateVaultStorage';
@@ -98,6 +99,46 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
         onPress={() => { void add(); }} style={{ padding: 12, backgroundColor: '#e7f2e1', borderRadius: 8 }}>
         <Text style={{ color: '#263b22', fontWeight: '700' }}>{busy ? 'Working…' : 'Add attachment'}</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/** Read-only attachment list for ordinary saved-note cards. Files stay local. */
+export function NoteAttachmentSummary({ noteId }: { noteId: string }) {
+  const [items, setItems] = useState<StoredAttachment[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void service.list(noteId).then(attachments => {
+      if (active) setItems(attachments);
+    }).catch(() => {
+      if (active) setError('Attachments are unavailable on this device.');
+    }).finally(() => {
+      if (active) setLoaded(true);
+    });
+    return () => { active = false; };
+  }, [noteId]);
+
+  if (!loaded || (items.length === 0 && error === null)) return null;
+  if (error !== null) {
+    return <Text accessibilityRole="alert" style={{ color: '#7a4b00', marginTop: 8 }}>{error}</Text>;
+  }
+  return (
+    <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
+      <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
+      {items.map(item => {
+        const kind = attachmentPreviewKind(item.mimeType);
+        const typeLabel = kind === 'pdf' ? 'PDF' : kind === 'text' ? 'Text' : kind === 'image' ? 'Image' : 'File';
+        return (
+          <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: '#53674c', fontSize: 12, fontWeight: '700' }}>{typeLabel}</Text>
+            <Text numberOfLines={1} style={{ flex: 1, color: '#34452f' }}>{item.name}</Text>
+            <Text style={{ color: '#687567', fontSize: 12 }}>{Math.ceil(item.size / 1024)} KB</Text>
+          </View>
+        );
+      })}
+      <Text style={{ color: '#596b55', fontSize: 12 }}>Stored on this device only. Not synced to the web app.</Text>
     </View>
   );
 }

@@ -25,7 +25,7 @@ import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { moveDeviceNoteToPrivate } from '../privateMoveService';
-import { NoteAttachments } from './NoteAttachments';
+import { NoteAttachmentSummary, NoteAttachments } from './NoteAttachments';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
@@ -1156,6 +1156,7 @@ export function NotesWorkspace() {
                     })}
                   </View>
                 )}
+                <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} />
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
                     <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
