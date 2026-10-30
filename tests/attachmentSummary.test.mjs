@@ -16,7 +16,7 @@ const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
 
-function renderSummary() {
+function renderSummary({ fileForPreview = () => null } = {}) {
   let hookIndex = 0;
   const exports = {};
   vm.runInNewContext(outputText, {
@@ -30,10 +30,14 @@ function renderSummary() {
         useEffect() {},
         useCallback: callback => callback,
       };
-      if (name === 'react-native') return { Alert: { alert() {} }, Pressable: 'Pressable', Text: 'Text', View: 'View' };
+      if (name === 'react-native') return {
+        Alert: { alert() {} }, Image: 'Image', Pressable: 'Pressable', StyleSheet: { create: styles => styles },
+        Text: 'Text', View: 'View',
+      };
+      if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };
       if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {} };
       if (name === 'expo-crypto') return { __esModule: true, randomUUID: () => 'generated_id' };
-      if (name === '../androidAttachmentFiles') return { createAndroidAttachmentFiles: () => ({}) };
+      if (name === '../androidAttachmentFiles') return { createAndroidAttachmentFiles: () => ({ fileForPreview }) };
       if (name === '../androidAttachmentPicker') return { pickAndroidAttachments: async () => [] };
       if (name === '../attachmentManifestStorage') return { createAttachmentManifestStorage: () => ({}) };
       if (name === '../attachmentService') return { createAttachmentService: () => ({ list: async () => attachments }) };
@@ -51,11 +55,12 @@ function renderSummary() {
 function elements(tree) {
   if (Array.isArray(tree)) return tree.flatMap(elements);
   if (!tree || typeof tree !== 'object' || !tree.props) return [];
+  if (typeof tree.type === 'function') return elements(tree.type(tree.props));
   return [tree, ...elements(tree.props.children)];
 }
 function text(tree) {
   if (Array.isArray(tree)) return tree.map(text).join('');
-  if (tree?.props) return text(tree.props.children);
+  if (tree?.props) return text(typeof tree.type === 'function' ? tree.type(tree.props) : tree.props.children);
   return typeof tree === 'string' || typeof tree === 'number' ? String(tree) : '';
 }
 
@@ -63,10 +68,24 @@ test('saved-note attachment summary renders its local file list without enabling
   const summary = renderSummary();
   const renderedText = text(summary);
   assert.match(renderedText, /Attachments \(2\)/);
-  assert.match(renderedText, /Image/);
-  assert.match(renderedText, /PDF/);
   assert.match(renderedText, /diagram\.png/);
   assert.match(renderedText, /brief\.pdf/);
   assert.match(renderedText, /Stored on this device only\. Not synced to the web app\./);
+  assert.deepEqual(elements(summary).filter(element => element.type === 'FontAwesome').map(element => element.props.name), [
+    'file-image-o', 'file-pdf-o',
+  ]);
   assert.equal(elements(summary).some(element => element.type === 'Pressable'), false, 'the library summary is read-only');
+});
+
+test('saved-note summary uses an available local image thumbnail and falls back to the file icon when unavailable', () => {
+  const localUri = 'file:///app/snapnotes-attachments/file_image_1';
+  const summary = renderSummary({
+    fileForPreview: fileKey => fileKey === 'file_image_1' ? { exists: true, uri: localUri } : null,
+  });
+  const images = elements(summary).filter(element => element.type === 'Image');
+  assert.equal(images.length, 1);
+  assert.equal(images[0].props.source.uri, localUri);
+  assert.deepEqual(elements(summary).filter(element => element.type === 'FontAwesome').map(element => element.props.name), [
+    'file-pdf-o',
+  ]);
 });
