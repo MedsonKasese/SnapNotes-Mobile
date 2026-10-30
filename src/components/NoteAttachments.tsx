@@ -12,6 +12,7 @@ import { attachmentPreviewKind } from '../attachmentRules';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { createPrivateVaultStorage } from '../privateVaultStorage';
+import { AttachmentPreview } from './AttachmentPreview';
 
 const files = createAndroidAttachmentFiles();
 const manifest = createAttachmentManifestStorage(AsyncStorage);
@@ -35,10 +36,11 @@ const service = createAttachmentService(
 );
 
 
-function AttachmentRow({ item, action, onAction }: {
+function AttachmentRow({ item, action, onAction, onPreview }: {
   item: StoredAttachment;
   action?: string;
   onAction?: () => void;
+  onPreview?: () => void;
 }) {
   const kind = attachmentPreviewKind(item.mimeType);
   const icon = kind === 'pdf' ? 'file-pdf-o' : kind === 'image' ? 'file-image-o' : kind === 'text' ? 'file-text-o' : 'file-o';
@@ -56,6 +58,7 @@ function AttachmentRow({ item, action, onAction }: {
         <Text style={attachmentStyles.meta}>{Math.max(1, Math.ceil(item.size / 1024))} KB</Text>
         <Text style={attachmentStyles.status}>Stored on this device</Text>
       </View>
+      {onPreview && <Pressable accessibilityRole="button" accessibilityLabel={'Preview ' + item.name} onPress={onPreview} style={attachmentStyles.action}><Text style={attachmentStyles.actionText}>Preview</Text></Pressable>}
       {action && onAction && (
         <Pressable accessibilityRole="button" accessibilityLabel={action + ' ' + item.name}
           onPress={onAction} style={attachmentStyles.action}>
@@ -82,6 +85,7 @@ const attachmentStyles = StyleSheet.create({
 export function NoteAttachments({ noteId }: { noteId: string }) {
   const [items, setItems] = useState<StoredAttachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<StoredAttachment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     try { setItems(await service.list(noteId)); setError(null); }
@@ -132,8 +136,9 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       <Text style={{ color: '#596b55' }}>Stored on this device only. Not synced to the web app.</Text>
       {error !== null && <Text accessibilityRole="alert" style={{ color: '#a32222' }}>{error}</Text>}
       {items.map(item => (
-        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} />
+        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onPreview={() => setPreview(item)} />
       ))}
+      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
       <Pressable accessibilityRole="button" disabled={busy || items.length >= 5}
         onPress={() => { void add(); }} style={{ padding: 12, backgroundColor: '#e7f2e1', borderRadius: 8 }}>
         <Text style={{ color: '#263b22', fontWeight: '700' }}>{busy ? 'Working…' : 'Add attachment'}</Text>
@@ -146,6 +151,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
 export function NoteAttachmentSummary({ noteId }: { noteId: string }) {
   const [items, setItems] = useState<StoredAttachment[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [preview, setPreview] = useState<StoredAttachment | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -166,7 +172,8 @@ export function NoteAttachmentSummary({ noteId }: { noteId: string }) {
   return (
     <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
       <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
-      {items.map(item => <AttachmentRow key={item.id} item={item} />)}
+      {items.map(item => <AttachmentRow key={item.id} item={item} onPreview={() => setPreview(item)} />)}
+      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
       <Text style={{ color: '#596b55', fontSize: 12 }}>Stored on this device only. Not synced to the web app.</Text>
     </View>
   );
