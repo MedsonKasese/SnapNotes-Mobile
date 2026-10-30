@@ -3,6 +3,7 @@ import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Tex
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { attachmentPreviewKind } from '../attachmentRules';
 import { createAndroidAttachmentFiles } from '../androidAttachmentFiles';
+import { getAttachmentPreviewDisplayState, type AttachmentPreviewLoadState } from '../attachmentPreviewState';
 import type { StoredAttachment } from '../attachmentManifest';
 
 const files = createAndroidAttachmentFiles();
@@ -11,37 +12,33 @@ export function AttachmentPreview({ attachment, onClose }: {
   attachment: StoredAttachment;
   onClose: () => void;
 }) {
-  const kind = attachmentPreviewKind(attachment.mimeType);
-  const [textContent, setTextContent] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const file = files.fileForPreview(attachment.fileKey);
+  const { fileKey, mimeType } = attachment;
+  const kind = attachmentPreviewKind(mimeType);
+  const [preview, setPreview] = useState<AttachmentPreviewLoadState | null>(null);
 
   useEffect(() => {
+    if (kind !== 'text') return;
     let active = true;
-    setLoading(true);
-    setError(null);
-    setTextContent(null);
-    async function prepare() {
+    void Promise.resolve().then(async () => {
       try {
+        const file = files.fileForPreview(fileKey);
         if (!file.exists) throw new Error('This attachment is missing from this device.');
-        if (kind === 'text') {
-          const value = await file.text();
-          if (active) setTextContent(value);
-        } else if (kind === 'pdf') {
-          throw new Error('PDF page rendering is not yet supported in the Android viewer. Your file remains safely stored.');
-        } else if (kind !== 'image') {
-          throw new Error('No in-app preview is available for this file type.');
-        }
+        const value = await file.text();
+        if (active) setPreview({ fileKey, kind, textContent: value, error: null });
       } catch (reason) {
-        if (active) setError(reason instanceof Error ? reason.message : 'Unable to preview this file.');
-      } finally {
-        if (active) setLoading(false);
+        if (active) setPreview({
+          fileKey,
+          kind,
+          textContent: null,
+          error: reason instanceof Error ? reason.message : 'Unable to preview this file.',
+        });
       }
-    }
-    void prepare();
+    });
     return () => { active = false; };
-  }, [attachment.fileKey, kind, file.uri]);
+  }, [fileKey, kind]);
+
+  const file = files.fileForPreview(fileKey);
+  const display = getAttachmentPreviewDisplayState(kind, fileKey, preview);
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen">
@@ -56,19 +53,24 @@ export function AttachmentPreview({ attachment, onClose }: {
             <FontAwesome name="times" size={22} color="#243925" />
           </Pressable>
         </View>
-        {loading ? <ActivityIndicator style={styles.center} size="large" color="#389c0e" />
-          : error !== null ? (
+        {display.status === 'loading' ? <ActivityIndicator style={styles.center} size="large" color="#389c0e" />
+          : display.status === 'error' ? (
             <View style={styles.message}>
               <FontAwesome name="exclamation-circle" size={30} color="#a05d20" />
-              <Text style={styles.messageText}>{error}</Text>
+              <Text style={styles.messageText}>{display.error}</Text>
             </View>
-          ) : kind === 'image' ? (
+          ) : display.status === 'image' ? (
             <Image source={{ uri: file.uri }} resizeMode="contain" style={styles.image}
               accessibilityLabel={'Preview of ' + attachment.name}
-              onError={() => setError('Could not display this image. The file may be damaged.')} />
+              onError={() => setPreview({
+                fileKey,
+                kind,
+                textContent: null,
+                error: 'Could not display this image. The file may be damaged.',
+              })} />
           ) : (
             <ScrollView contentContainerStyle={styles.textContainer}>
-              <Text selectable style={styles.fileText}>{textContent}</Text>
+              <Text selectable style={styles.fileText}>{display.textContent}</Text>
             </ScrollView>
           )}
       </View>

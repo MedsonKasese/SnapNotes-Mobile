@@ -38,6 +38,7 @@ function renderSummary({ fileForPreview = () => null } = {}) {
       if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {} };
       if (name === 'expo-crypto') return { __esModule: true, randomUUID: () => 'generated_id' };
       if (name === '../androidAttachmentFiles') return { createAndroidAttachmentFiles: () => ({ fileForPreview }) };
+      if (name === './AttachmentPreview') return { AttachmentPreview: () => null };
       if (name === '../androidAttachmentPicker') return { pickAndroidAttachments: async () => [] };
       if (name === '../attachmentManifestStorage') return { createAttachmentManifestStorage: () => ({}) };
       if (name === '../attachmentService') return { createAttachmentService: () => ({ list: async () => attachments }) };
@@ -74,7 +75,9 @@ test('saved-note attachment summary renders its local file list without enabling
   assert.deepEqual(elements(summary).filter(element => element.type === 'FontAwesome').map(element => element.props.name), [
     'file-image-o', 'file-pdf-o',
   ]);
-  assert.equal(elements(summary).some(element => element.type === 'Pressable'), false, 'the library summary is read-only');
+  const actions = elements(summary).filter(element => element.type === 'Pressable')
+    .map(element => element.props.accessibilityLabel);
+  assert.deepEqual(actions, ['Preview diagram.png', 'Preview brief.pdf'], 'the summary exposes preview only, never mutations');
 });
 
 test('saved-note summary uses an available local image thumbnail and falls back to the file icon when unavailable', () => {
