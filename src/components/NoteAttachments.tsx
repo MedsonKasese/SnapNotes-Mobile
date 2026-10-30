@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import { createAndroidAttachmentFiles } from '../androidAttachmentFiles';
@@ -32,6 +33,50 @@ const service = createAttachmentService(
   privateSharedCoordinator,
   assertOrdinaryNote,
 );
+
+
+function AttachmentRow({ item, action, onAction }: {
+  item: StoredAttachment;
+  action?: string;
+  onAction?: () => void;
+}) {
+  const kind = attachmentPreviewKind(item.mimeType);
+  const icon = kind === 'pdf' ? 'file-pdf-o' : kind === 'image' ? 'file-image-o' : kind === 'text' ? 'file-text-o' : 'file-o';
+  const previewFile = kind === 'image' ? files.fileForPreview(item.fileKey) : null;
+  const imageUri = previewFile?.exists ? previewFile.uri : null;
+  return (
+    <View style={attachmentStyles.row}>
+      <View style={attachmentStyles.iconBox}>
+        {imageUri !== null
+          ? <Image source={{ uri: imageUri }} resizeMode="cover" style={attachmentStyles.thumbnail} accessibilityLabel={'Thumbnail for ' + item.name} />
+          : <FontAwesome name={icon} size={26} color="#25392b" />}
+      </View>
+      <View style={attachmentStyles.details}>
+        <Text style={attachmentStyles.name} numberOfLines={1}>{item.name}</Text>
+        <Text style={attachmentStyles.meta}>{Math.max(1, Math.ceil(item.size / 1024))} KB</Text>
+        <Text style={attachmentStyles.status}>Stored on this device</Text>
+      </View>
+      {action && onAction && (
+        <Pressable accessibilityRole="button" accessibilityLabel={action + ' ' + item.name}
+          onPress={onAction} style={attachmentStyles.action}>
+          <Text style={attachmentStyles.actionText}>{action}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+const attachmentStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: '#dce3dc', borderRadius: 16, backgroundColor: '#fff', minHeight: 94 },
+  iconBox: { width: 62, height: 68, borderRadius: 12, backgroundColor: '#f0f4f0', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  thumbnail: { width: '100%', height: '100%' },
+  details: { flex: 1, minWidth: 0, gap: 3 },
+  name: { color: '#1f2c21', fontWeight: '700', fontSize: 15 },
+  meta: { color: '#687568', fontSize: 13 },
+  status: { color: '#42862d', fontSize: 12 },
+  action: { paddingHorizontal: 6, paddingVertical: 12 },
+  actionText: { color: '#2e6a18', fontWeight: '700', fontSize: 13 },
+});
 
 /** Local-only attachments for SAVED ordinary notes. No cloud sync or private vault. */
 export function NoteAttachments({ noteId }: { noteId: string }) {
@@ -87,13 +132,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       <Text style={{ color: '#596b55' }}>Stored on this device only. Not synced to the web app.</Text>
       {error !== null && <Text accessibilityRole="alert" style={{ color: '#a32222' }}>{error}</Text>}
       {items.map(item => (
-        <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text numberOfLines={1} style={{ flex: 1 }}>{item.name} ({Math.ceil(item.size / 1024)} KB)</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + item.name}
-            disabled={busy} onPress={() => remove(item)} style={{ padding: 10 }}>
-            <Text style={{ color: '#a32222' }}>Remove</Text>
-          </Pressable>
-        </View>
+        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} />
       ))}
       <Pressable accessibilityRole="button" disabled={busy || items.length >= 5}
         onPress={() => { void add(); }} style={{ padding: 12, backgroundColor: '#e7f2e1', borderRadius: 8 }}>
@@ -127,17 +166,7 @@ export function NoteAttachmentSummary({ noteId }: { noteId: string }) {
   return (
     <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
       <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
-      {items.map(item => {
-        const kind = attachmentPreviewKind(item.mimeType);
-        const typeLabel = kind === 'pdf' ? 'PDF' : kind === 'text' ? 'Text' : kind === 'image' ? 'Image' : 'File';
-        return (
-          <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={{ color: '#53674c', fontSize: 12, fontWeight: '700' }}>{typeLabel}</Text>
-            <Text numberOfLines={1} style={{ flex: 1, color: '#34452f' }}>{item.name}</Text>
-            <Text style={{ color: '#687567', fontSize: 12 }}>{Math.ceil(item.size / 1024)} KB</Text>
-          </View>
-        );
-      })}
+      {items.map(item => <AttachmentRow key={item.id} item={item} />)}
       <Text style={{ color: '#596b55', fontSize: 12 }}>Stored on this device only. Not synced to the web app.</Text>
     </View>
   );
