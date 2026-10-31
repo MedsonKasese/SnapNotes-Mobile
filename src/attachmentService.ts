@@ -1,5 +1,6 @@
 import { createAttachmentOperationQueue } from './attachmentOperationQueue.ts';
 import { addPickedAttachment, detachAttachment, type AttachmentFileOperations, type AttachmentManifestOperations, type AttachmentIdFactory, type PickedAttachment } from './attachmentTransactions.ts';
+import { renameStoredAttachment } from './attachmentTransactions.ts';
 
 type AttachmentCoordinator = {
   exclusive<T>(operation: () => Promise<T>): Promise<T>;
@@ -29,6 +30,9 @@ export function createAttachmentService(
     },
     remove(noteId: string, attachmentId: string) {
       return run(noteId, () => detachAttachment(noteId, attachmentId, files, manifest));
+    },
+    rename(noteId: string, attachmentId: string, requestedName: string) {
+      return run(noteId, () => renameStoredAttachment(noteId, attachmentId, requestedName, manifest));
     },
     list(noteId: string) {
       return run(noteId, () => manifest.load(noteId));
