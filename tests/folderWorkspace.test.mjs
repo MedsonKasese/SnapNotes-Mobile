@@ -15,6 +15,7 @@ import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
 import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
+import * as noteTransfer from '../src/noteTransfer.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_FOLDER_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -99,6 +100,9 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
       StyleSheet: { create: styles => styles, absoluteFill: {} },
     },
     'react-native-safe-area-context': { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' },
+    'expo-document-picker': { getDocumentAsync: async () => ({ canceled: true, assets: null }) },
+    'expo-file-system': { File: class File {}, Paths: { cache: 'cache' } },
+    'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async () => {} },
     '@expo/vector-icons/FontAwesome': { __esModule: true, default: 'FontAwesome' },
     '@react-native-async-storage/async-storage': backend,
     '../notes': notes,
@@ -112,6 +116,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '../privateMoveService': { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes },
+    '../noteTransfer': noteTransfer,
     '../noteActionsMenu': { getNoteActionsMenuLayout },
     '../noteFormatting': formatting,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' },

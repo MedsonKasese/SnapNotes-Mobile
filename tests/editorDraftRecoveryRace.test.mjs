@@ -14,6 +14,7 @@ import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFormatting.ts';
 import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
+import * as noteTransfer from '../src/noteTransfer.ts';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -190,6 +191,9 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
       if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
+      if (name === 'expo-document-picker') return { getDocumentAsync: async () => ({ canceled: true, assets: null }) };
+      if (name === 'expo-file-system') return { File: class File {}, Paths: { cache: 'cache' } };
+      if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
       if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === 'react/jsx-runtime') return require(name);
       // Native font loading is outside this deterministic recovery harness.
@@ -206,6 +210,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };
       if (name === '../noteSearch') return { searchNotes };
+      if (name === '../noteTransfer') return noteTransfer;
       if (name === '../noteFormatting') return { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml,
         getNoteHtmlLines: html => [], normalizeNoteLink: value => value, updateChecklistHtml: (html, _line, checked) => html.replace(checked ? '☐' : '☑', checked ? '☑' : '☐') };
       if (name === './ChecklistLabel') return { ChecklistLabel: 'ChecklistLabel' };

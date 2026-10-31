@@ -12,6 +12,7 @@ import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
 import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
+import * as noteTransfer from '../src/noteTransfer.ts';
 import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 
@@ -89,6 +90,9 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
       if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
+      if (name === 'expo-document-picker') return { getDocumentAsync: async () => ({ canceled: true, assets: null }) };
+      if (name === 'expo-file-system') return { File: class File {}, Paths: { cache: 'cache' } };
+      if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
       if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === 'react/jsx-runtime') return require(name);
       // Keep the icon element/props inspectable without loading native fonts.
@@ -105,6 +109,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === '../draftLibrary') return draftLibrary;
       if (name === '../deviceNotesStorage') return {};
       if (name === '../noteSearch') return { searchNotes };
+      if (name === '../noteTransfer') return noteTransfer;
       if (name === './ChecklistLabel') return { ChecklistLabel: 'ChecklistLabel' };
       if (name === '../noteFormatting') return {
         sanitizeNoteHtml: value => value,
@@ -128,6 +133,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
     controller, alerts, archiveCalls, trashCalls, pinCalls, duplicateCalls, events,
     setStatus(next) { status = next; },
     setPrivateNoteCount(value) { slots[stateNames.indexOf('privateNoteCount')] = value; },
+    setFoldersReady(value) { slots[stateNames.indexOf('foldersReady')] = value; },
   };
 }
 
@@ -264,8 +270,8 @@ test('empty categories explain the filter instead of claiming there are no saved
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
   const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'lock', 'file-text-o', 'archive', 'trash', 'plus']);
-  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Private Notes', 'Drafts', 'Archived', 'Trash', 'New note']);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'file-text-o', 'lock', 'trash', 'plus']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Drafts', 'Private Notes', 'Trash', 'New note']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');
@@ -832,4 +838,21 @@ test('all existing library, archive, and trash menu actions retain their origina
       assert.ok(row.minHeight >= 44);
     }
   }
+});
+
+test('drawer shows section dividers, transfer actions, and an explicit Private Notes export warning', () => {
+  const app = workspace();
+  app.setFoldersReady(true);
+  const tree = app.render();
+  assert.equal(elements(tree).filter(element => element.props.testID === 'drawer-section-divider').length, 3);
+  const exportButton = find(tree, element => element.props.accessibilityLabel === 'Export notes');
+  const importButton = find(tree, element => element.props.accessibilityLabel === 'Import notes');
+  assert.equal(exportButton.props.accessibilityRole, 'button');
+  assert.equal(importButton.props.accessibilityRole, 'button');
+  exportButton.props.onPress();
+  const exportAlert = app.alerts.at(-1);
+  assert.equal(exportAlert[0], 'Export notes');
+  assert.match(exportAlert[1], /Private Notes are never included/);
+  assert.match(exportAlert[1], /Local attachment files stay on this device/);
+  assert.equal(JSON.stringify(Array.from(exportAlert[2], button => button.text)), JSON.stringify(['JSON', 'Markdown', 'TXT']));
 });

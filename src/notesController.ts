@@ -336,6 +336,47 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  // Import is additive: never replace the current library or editor draft. IDs
+  // come from the guarded allocator so encrypted Private Notes keep their namespace.
+  async function importNotes(importedNotes: Omit<Note, 'id'>[]): Promise<boolean> {
+    if (snapshot.status !== 'ready') return false;
+    if (importedNotes.length === 0) return true;
+    const previous = snapshot.state;
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      const usedIds = new Set(previous.notes.map(note => note.id));
+      const additions: Note[] = [];
+      let fallbackSequence = 1;
+      for (const imported of importedNotes) {
+        let id: string;
+        if (storage.allocateNoteId) {
+          id = await storage.allocateNoteId([...usedIds]);
+        } else {
+          while (usedIds.has(`local-note-import-${fallbackSequence}`)) fallbackSequence += 1;
+          id = `local-note-import-${fallbackSequence++}`;
+        }
+        if (usedIds.has(id)) throw new Error('The device could not allocate a unique note ID.');
+        usedIds.add(id);
+        additions.push({ ...imported, id });
+      }
+      const notes = [...additions, ...previous.notes];
+      await storage.save(notes);
+      publish({
+        state: { ...previous, notes, error: null, notice: `${additions.length} notes imported.` },
+        status: 'ready',
+        storageError: null,
+      });
+      return true;
+    } catch (cause) {
+      publish({
+        state: previous,
+        status: 'ready',
+        storageError: `Could not import notes on this device. No notes were added. ${saveFailureGuidance(cause)}`,
+      });
+      return false;
+    }
+  }
+
   // Reconcile after an external encrypted-vault transfer. Never replace an
   // active editor draft or overwrite a write in progress.
   async function refreshAfterPrivateTransfer(): Promise<void> {
@@ -354,6 +395,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, refreshAfterPrivateTransfer, dispatch, save, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
+    load, refreshAfterPrivateTransfer, dispatch, save, importNotes, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }

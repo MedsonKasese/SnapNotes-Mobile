@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type ComponentRef } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import * as DocumentPicker from 'expo-document-picker';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import {
   Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
@@ -18,6 +21,7 @@ import { DRAFT_LIBRARY_KEY, newDraftId, parseDraftLibrary, removeDraft, upsertDr
 import { FOLDERS_KEY, FOLDER_ICON_NAMES, FOLDER_COLOR_VALUES, normalizeFolderIcon, normalizeFolderColor, type FolderIcon, type FolderColor, MAX_FOLDERS, makeFolderId, normalizeFolderName, parseFolders, validateFolderName, type Folder } from '../folders';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { searchNotes } from '../noteSearch';
+import { mergeImportedFolders, parsePwaImport, serializeNotesForExport, type TransferFormat } from '../noteTransfer';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import { ChecklistLabel } from './ChecklistLabel';
 import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
@@ -122,6 +126,7 @@ export function NotesWorkspace() {
   const [view, setView] = useState<WorkspaceView>('library');
   const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ id: string; revision: number } | null>(null);
   const folderActionsTarget = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -699,6 +704,121 @@ export function NotesWorkspace() {
       { text: 'Delete forever', style: 'destructive', onPress: () => { void controller.permanentlyDelete(id); } },
     ]);
   }
+
+  function openExportFormatPicker() {
+    closeDrawer();
+    const snapshot = controller.getSnapshot();
+    if (snapshot.status !== 'ready') {
+      Alert.alert('Export unavailable', 'Wait for notes to finish loading before exporting.');
+      return;
+    }
+    if (snapshot.state.notes.length === 0) {
+      Alert.alert('No notes to export', 'There are no saved notes on this device.');
+      return;
+    }
+    if (!foldersReady) {
+      Alert.alert('Folders unavailable', 'Folders could not be loaded, so an export cannot safely preserve your folder setup.');
+      return;
+    }
+    Alert.alert('Export notes', 'Private Notes are never included in exports. Local attachment files stay on this device and are not included.', [
+      { text: 'JSON', onPress: () => { void exportNotes('json'); } },
+      { text: 'Markdown', onPress: () => { void exportNotes('markdown'); } },
+      { text: 'TXT', onPress: () => { void exportNotes('txt'); } },
+    ]);
+  }
+
+  async function exportNotes(format: TransferFormat) {
+    if (transferBusy) return;
+    if (controller.getSnapshot().status !== 'ready') {
+      Alert.alert('Export unavailable', 'Wait for notes to finish loading before exporting.');
+      return;
+    }
+    setTransferBusy(true);
+    try {
+      const now = new Date();
+      const serialized = serializeNotesForExport(format, controller.getSnapshot().state.notes, foldersRef.current, now.toISOString());
+      const filename = `snapnotes-export-${now.toISOString().slice(0, 10)}.${serialized.extension}`;
+      const file = new File(Paths.cache, filename);
+      file.create({ overwrite: true, intermediates: true });
+      await file.write(serialized.content);
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Sharing unavailable', 'This device cannot open the system sharing menu right now. Your saved notes were not changed.');
+        return;
+      }
+      await Sharing.shareAsync(file.uri, { mimeType: serialized.mimeType, dialogTitle: filename });
+    } catch {
+      Alert.alert('Could not export notes', 'The export file could not be prepared. Your saved notes have not been changed.');
+    } finally {
+      setTransferBusy(false);
+    }
+  }
+
+  async function applyParsedImport(parsed: ReturnType<typeof parsePwaImport>) {
+    if (transferBusy) return;
+    setTransferBusy(true);
+    const previousFolders = [...foldersRef.current];
+    try {
+      const merged = mergeImportedFolders(previousFolders, parsed.folders, new Date().toISOString());
+      const importedNotes = parsed.notes.map(note => ({
+        ...note,
+        folderId: note.folderId ? merged.idMap.get(note.folderId) ?? null : null,
+      }));
+      const foldersChanged = JSON.stringify(previousFolders) !== JSON.stringify(merged.folders);
+      if (foldersChanged && !(await persistFolders(merged.folders, 'Imported folders could not be saved. No notes were imported.'))) {
+        Alert.alert('Could not import notes', 'Imported folders could not be saved. Your existing notes have not been changed.');
+        return;
+      }
+      if (!(await controller.importNotes(importedNotes))) {
+        let rollbackSucceeded = true;
+        if (foldersChanged) rollbackSucceeded = await persistFolders(previousFolders, 'Imported folders could not be rolled back.');
+        const storageMessage = controller.getSnapshot().storageError ?? 'The device did not confirm the note import.';
+        Alert.alert('Could not import notes', `${storageMessage}${rollbackSucceeded ? '' : ' Imported folders may remain, but no notes were added.'}`);
+        return;
+      }
+      const skipped = parsed.privateNotesSkipped;
+      Alert.alert('Import complete', `${importedNotes.length} ${importedNotes.length === 1 ? 'note was' : 'notes were'} added. Existing notes were kept.${skipped ? ` ${skipped} Private ${skipped === 1 ? 'Note was' : 'Notes were'} skipped.` : ''} Attachment files were not imported.`);
+    } finally {
+      setTransferBusy(false);
+    }
+  }
+
+  async function openImportPicker() {
+    closeDrawer();
+    if (transferBusy) return;
+    if (controller.getSnapshot().status !== 'ready' || !foldersReady) {
+      Alert.alert('Import unavailable', 'Wait for notes and folders to finish loading before importing.');
+      return;
+    }
+    setTransferBusy(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: ['application/json'], copyToCacheDirectory: true, multiple: false });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset) throw new Error('No file was selected.');
+      if (typeof asset.size === 'number' && asset.size > 25 * 1024 * 1024) {
+        throw new Error('Choose a JSON export smaller than 25 MB.');
+      }
+      const parsed = parsePwaImport(await new File(asset.uri).text(), new Date().toISOString());
+      if (parsed.notes.length === 0) {
+        const message = parsed.privateNotesSkipped
+          ? `This file contains no ordinary notes. ${parsed.privateNotesSkipped} Private ${parsed.privateNotesSkipped === 1 ? 'Note was' : 'Notes were'} skipped.`
+          : 'This file contains no notes that can be imported.';
+        Alert.alert('Nothing to import', `${message} Attachment files are not imported.`);
+        return;
+      }
+      const skipped = parsed.privateNotesSkipped;
+      const privacyNote = skipped ? ` ${skipped} Private ${skipped === 1 ? 'Note will' : 'Notes will'} be skipped.` : ' Private Notes are never imported.';
+      Alert.alert('Import notes', `${parsed.notes.length} ${parsed.notes.length === 1 ? 'note will' : 'notes will'} be added without replacing existing notes.${privacyNote} Attachment files are not imported.`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Import', onPress: () => { void applyParsedImport(parsed); } },
+      ]);
+    } catch (error) {
+      Alert.alert('Could not import notes', error instanceof Error ? error.message : 'Choose a SnapNotes JSON export. Your existing notes have not been changed.');
+    } finally {
+      setTransferBusy(false);
+    }
+  }
+
   function confirmDiscard(continueAction: () => void) {
     // A normal note's pending snapshot remains cancellable via editorSession.
     // A draft write must not later reset a different editor after committing.
@@ -1329,6 +1449,7 @@ export function NotesWorkspace() {
             <ScrollView style={styles.flex} contentContainerStyle={styles.drawerNavigation} keyboardShouldPersistTaps="handled">
               <MenuRow label="All notes" icon="inbox" detail={`${activeNotes.length} saved ${activeNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'library' && categoryFilter === 'all'} onPress={() => selectLibraryCategory('all')} />
               {NOTE_CATEGORIES.map(category => <MenuRow key={category} icon={({ general: "sticky-note-o", work: "briefcase", personal: "user", ideas: "lightbulb-o", important: "star" } as const)[category]} label={categoryLabel(category)} detail={`${activeNotes.filter(note => normalizeCategory(note.category) === category).length} notes`} active={categoryFilter === category && view === 'library'} onPress={() => selectLibraryCategory(category)} />)}
+              <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
               <View style={styles.folderSectionHeading}>
                 <Text style={styles.drawerEyebrow}>FOLDERS</Text>
                 <Pressable accessibilityRole="button" accessibilityLabel="Create new folder"
@@ -1359,13 +1480,27 @@ export function NotesWorkspace() {
                 <Text style={styles.folderExpandText}>{foldersExpanded ? 'Show fewer' : `View all folders (${folders.length})`}</Text>
                 <FontAwesome name={foldersExpanded ? 'chevron-up' : 'chevron-down'} size={12} color="#3b7f16" accessible={false} />
               </Pressable>}
+              <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
+              <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
+              <MenuRow label="Drafts" icon="file-text-o" detail={`${savedDrafts.length} drafts`} active={view === 'drafts'} onPress={selectDrafts} />
               <MenuRow label="Private Notes" icon="lock"
                 detail={privateNoteCount === null ? 'Protected vault' : `${privateNoteCount} private ${privateNoteCount === 1 ? 'note' : 'notes'}`}
                 active={view === 'private'} onPress={selectPrivate} />
-              <MenuRow label="Drafts" icon="file-text-o" detail={`${savedDrafts.length} drafts`} active={view === 'drafts'} onPress={selectDrafts} />
-              <MenuRow label="Archived" icon="archive" detail={`${archiveNotes.length} archived ${archiveNotes.length === 1 ? 'note' : 'notes'}`} active={view === 'archive'} onPress={selectArchive} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
-               <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
+              <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
+              <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
+              <Pressable accessibilityRole="button" accessibilityLabel="Export notes" disabled={transferBusy}
+                accessibilityState={{ disabled: transferBusy }} onPress={openExportFormatPicker}
+                style={({ pressed }) => [styles.drawerTransferRow, (pressed || transferBusy) && styles.pressed]}>
+                <FontAwesome name="download" size={18} color="#65775c" accessible={false} />
+                <Text style={styles.menuRowTitle}>Export notes</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Import notes" disabled={transferBusy}
+                accessibilityState={{ disabled: transferBusy }} onPress={() => { void openImportPicker(); }}
+                style={({ pressed }) => [styles.drawerTransferRow, (pressed || transferBusy) && styles.pressed]}>
+                <FontAwesome name="upload" size={18} color="#65775c" accessible={false} />
+                <Text style={styles.menuRowTitle}>Import notes</Text>
+              </Pressable>
             </ScrollView>
             <View style={styles.drawerNotice}>
               <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
@@ -1546,6 +1681,7 @@ const styles = StyleSheet.create({
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
   drawerNavigation: { paddingTop: 15, gap: 7 },
+  drawerDivider: { width: '100%', height: 1, marginHorizontal: 12, marginTop: 10, marginBottom: 8, backgroundColor: '#e1e8dc' },
   folderNavigationRow: { flexDirection: 'row', alignItems: 'center' },
   folderNavigationButton: { flex: 1, minWidth: 0 },
   folderMenuTrigger: { width: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
@@ -1561,6 +1697,7 @@ const styles = StyleSheet.create({
   folderExpandButton: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 15 },
   folderExpandText: { color: '#3b7f16', fontSize: 13, fontWeight: '700' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingHorizontal: 13, paddingVertical: 8, borderRadius: 13, borderWidth: 1, borderColor: 'transparent' },
+  drawerTransferRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingHorizontal: 13, paddingVertical: 8, borderRadius: 13 },
   menuRowActive: { backgroundColor: '#eff7e9', borderColor: '#e0efd5' },
 
   menuCountBadge: { marginLeft: 'auto', minWidth: 32, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, alignItems: 'center', backgroundColor: '#edf3eb' },
