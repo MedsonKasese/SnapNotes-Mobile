@@ -1,6 +1,5 @@
 import { createAttachmentOperationQueue } from './attachmentOperationQueue.ts';
-import { addPickedAttachment, detachAttachment, type AttachmentFileOperations, type AttachmentManifestOperations, type AttachmentIdFactory, type PickedAttachment } from './attachmentTransactions.ts';
-import { renameStoredAttachment } from './attachmentTransactions.ts';
+import { addPickedAttachment, detachAttachment, renameStoredAttachment, type AttachmentFileOperations, type AttachmentManifestOperations, type AttachmentIdFactory, type PickedAttachment } from './attachmentTransactions.ts';
 
 type AttachmentCoordinator = {
   exclusive<T>(operation: () => Promise<T>): Promise<T>;
