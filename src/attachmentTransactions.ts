@@ -76,3 +76,24 @@ export async function detachAttachment(
   catch { /* caller must arrange orphan cleanup */ }
   return true;
 }
+
+/** Rename metadata only. The opaque file key and underlying bytes never change. */
+export async function renameStoredAttachment(
+  noteId: string,
+  attachmentId: string,
+  requestedName: string,
+  manifest: AttachmentManifestOperations,
+): Promise<StoredAttachment> {
+  if (typeof noteId !== 'string' || !noteId.trim()) throw new Error('Missing note ID.');
+  if (typeof attachmentId !== 'string' || !attachmentId) throw new Error('Missing attachment ID.');
+  if (typeof requestedName !== 'string') throw new Error('Enter a file name.');
+  const name = requestedName.replace(/[\\/\u0000-\u001f\u007f]/g, '').trim().slice(0, 120);
+  if (!name) throw new Error('Enter a valid file name.');
+  const existing = validateStoredAttachments(await manifest.load(noteId));
+  const target = existing.find(item => item.id === attachmentId);
+  if (!target) throw new Error('This attachment is no longer available.');
+  const renamed = { ...target, name };
+  const next = existing.map(item => item.id === attachmentId ? renamed : item);
+  await manifest.save(noteId, next);
+  return renamed;
+}
