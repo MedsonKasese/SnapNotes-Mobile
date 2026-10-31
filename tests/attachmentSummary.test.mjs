@@ -41,6 +41,7 @@ function createSummaryRenderer({ fileForPreview = () => null, onPreviewVisibilit
       if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };
       if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {} };
       if (name === 'expo-crypto') return { __esModule: true, randomUUID: () => 'generated_id' };
+      if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
       if (name === '../androidAttachmentFiles') return { createAndroidAttachmentFiles: () => ({ fileForPreview }) };
       if (name === './AttachmentPreview') return {
         AttachmentPreview: ({ attachment, onClose }) => ({ type: 'AttachmentPreview', props: { attachment, onClose } }),
@@ -90,7 +91,9 @@ test('saved-note attachment summary renders its local file list without enabling
   ]);
   const actions = elements(summary).filter(element => element.type === 'Pressable')
     .map(element => element.props.accessibilityLabel);
-  assert.deepEqual(actions, ['Preview diagram.png', 'Preview brief.pdf'], 'the summary exposes preview only, never mutations');
+  assert.deepEqual(actions, [
+    'Preview diagram.png', 'Share diagram.png', 'Preview brief.pdf', 'Share brief.pdf',
+  ], 'the summary exposes local preview and share actions, never mutations');
 });
 
 test('saved-note summary uses an available local image thumbnail and falls back to the file icon when unavailable', () => {
