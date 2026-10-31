@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as attachmentRules from '../src/attachmentRules.ts';
+import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 
 const require = createRequire(import.meta.url);
 const attachments = [
@@ -39,18 +40,27 @@ function createAttachmentRenderer(componentName, { fileForPreview = () => null, 
             hookState[index] = typeof value === 'function' ? value(hookState[index]) : value;
           }];
         },
+        useRef(initialValue) {
+          const index = hookIndex++;
+          if (!(index in hookState)) hookState[index] = { current: initialValue };
+          return hookState[index];
+        },
         useEffect() {},
         useCallback: callback => callback,
       };
       if (name === 'react-native') return {
-        Alert: { alert() {} }, Image: 'Image', Modal: 'Modal', Pressable: 'Pressable',
-        StyleSheet: { create: styles => styles }, Text: 'Text', TextInput: 'TextInput', View: 'View',
+        Alert: { alert() {} }, Image: 'Image', Modal: 'Modal', Pressable: 'Pressable', ScrollView: 'ScrollView',
+        StyleSheet: { absoluteFill: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }, create: styles => styles },
+        Text: 'Text', TextInput: 'TextInput', View: 'View',
       };
+      if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
       if (name === '@expo/vector-icons/FontAwesome') return { __esModule: true, default: 'FontAwesome' };
       if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {} };
       if (name === 'expo-crypto') return { __esModule: true, randomUUID: () => 'generated_id' };
       if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
       if (name === '../androidAttachmentFiles') return { createAndroidAttachmentFiles: () => ({ fileForPreview }) };
+      if (name === '../attachmentSharing') return { shareAttachmentWithTemporaryCopy: async () => {} };
+      if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === './AttachmentPreview') return {
         AttachmentPreview: ({ attachment, onClose }) => ({ type: 'AttachmentPreview', props: { attachment, onClose } }),
       };
@@ -159,4 +169,52 @@ test('note-card attachment preview visibility is cleared when the preview closes
   assert.ok(preview);
   preview.props.onClose();
   assert.deepEqual(visibilityChanges, [true, false]);
+});
+
+function flatStyle(style) {
+  return Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style]));
+}
+
+test('attachment actions use the compact note popup layout and preserve all four per-file actions', () => {
+  for (const componentName of ['NoteAttachmentSummary', 'NoteAttachments']) {
+    const render = createAttachmentRenderer(componentName);
+    const trigger = elements(render()).find(element => element.props.accessibilityLabel === 'Attachment actions for diagram.png');
+    assert.ok(trigger);
+    trigger.props.ref({ measureInWindow: callback => callback(320, 600, 42, 42) });
+    trigger.props.onPress();
+
+    const openMenu = render();
+    const layer = elements(openMenu).find(element => element.props.testID === 'attachment-actions-layer');
+    layer.props.ref.current = { measureInWindow: callback => callback(8, 28, 364, 700) };
+    const modal = elements(openMenu).find(element => element.type === 'Modal' && element.props.visible);
+    modal.props.onShow();
+    const unmeasuredPopup = elements(render()).find(element => element.props.testID === 'attachment-actions-menu');
+    unmeasuredPopup.props.onLayout({ nativeEvent: { layout: { height: 200 } } });
+
+    const popup = elements(render()).find(element => element.props.testID === 'attachment-actions-menu');
+    const style = flatStyle(popup.props.style);
+    const expected = getNoteActionsMenuLayout(
+      { x: 320, y: 600, width: 42, height: 42 },
+      { x: 8, y: 28, width: 364, height: 700 },
+      200,
+    );
+    assert.deepEqual({ left: style.left, top: style.top, width: style.width, maxHeight: style.maxHeight }, expected);
+    assert.equal(style.position, 'absolute');
+    assert.equal(style.borderRadius, 14);
+    assert.equal(popup.props.pointerEvents, 'auto');
+    assert.equal(popup.props.accessibilityViewIsModal, true);
+    assert.equal(popup.props.accessibilityElementsHidden, false);
+
+    const buttons = elements(popup).filter(element => element.type === 'Pressable');
+    assert.deepEqual(buttons.map(button => button.props.accessibilityLabel), [
+      'Preview diagram.png', 'Share diagram.png', 'Rename diagram.png', 'Remove diagram.png',
+    ]);
+    assert.deepEqual(elements(popup).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), [
+      'eye', 'share-alt', 'pencil', 'trash-o',
+    ]);
+    const remove = elements(popup).find(element => element.type === 'Text' && text(element) === 'Remove');
+    assert.equal(flatStyle(remove.props.style).color, '#b3261e');
+    assert.doesNotMatch(text(popup), /Cancel|diagram\.png/);
+    for (const button of buttons) assert.ok(flatStyle(button.props.style({ pressed: false })).minHeight >= 44);
+  }
 });

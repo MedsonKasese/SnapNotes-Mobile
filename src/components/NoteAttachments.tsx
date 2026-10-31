@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import * as Sharing from 'expo-sharing';
 import { createAndroidAttachmentFiles } from '../androidAttachmentFiles';
+import { shareAttachmentWithTemporaryCopy } from '../attachmentSharing';
 import { pickAndroidAttachments } from '../androidAttachmentPicker';
 import { createAttachmentManifestStorage } from '../attachmentManifestStorage';
 import { createAttachmentService } from '../attachmentService';
@@ -13,6 +14,8 @@ import { attachmentPreviewKind } from '../attachmentRules';
 import { deviceNotesStorage } from '../deviceNotesStorage';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { createPrivateVaultStorage } from '../privateVaultStorage';
+import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AttachmentPreview } from './AttachmentPreview';
 
 const files = createAndroidAttachmentFiles();
@@ -36,9 +39,66 @@ const service = createAttachmentService(
   assertOrdinaryNote,
 );
 
-function AttachmentRow({ item, onOpenActions }: {
+type MeasurableWindowView = Pick<ComponentRef<typeof View>, 'measureInWindow'>;
+
+function useAttachmentActionsMenu() {
+  const [attachment, setAttachment] = useState<StoredAttachment | null>(null);
+  const [anchor, setAnchor] = useState<MenuRect | null>(null);
+  const [viewport, setViewport] = useState<MenuRect | null>(null);
+  const [menuHeight, setMenuHeight] = useState(0);
+  const triggerRefs = useRef(new Map<string, MeasurableWindowView>());
+  const layerRef = useRef<ComponentRef<typeof View> | null>(null);
+  const request = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
+
+  function measure(id: string | null) {
+    if (id === null || request.current.id !== id) return;
+    const trigger = triggerRefs.current.get(id);
+    const layer = layerRef.current;
+    if (!trigger || !layer) return;
+    const revision = ++request.current.revision;
+    layer.measureInWindow((x, y, width, height) => {
+      if (request.current.revision !== revision || request.current.id !== id || width <= 0 || height <= 0 ||
+          ![x, y, width, height].every(Number.isFinite)) return;
+      trigger.measureInWindow((anchorX, anchorY, anchorWidth, anchorHeight) => {
+        if (request.current.revision !== revision || request.current.id !== id || anchorWidth <= 0 || anchorHeight <= 0 ||
+            ![anchorX, anchorY, anchorWidth, anchorHeight].every(Number.isFinite)) return;
+        setViewport({ x, y, width, height });
+        setAnchor({ x: anchorX, y: anchorY, width: anchorWidth, height: anchorHeight });
+      });
+    });
+  }
+
+  function open(item: StoredAttachment) {
+    request.current = { id: item.id, revision: request.current.revision + 1 };
+    setAnchor(null);
+    setViewport(null);
+    setMenuHeight(0);
+    setAttachment(item);
+    measure(item.id);
+  }
+
+  function close() {
+    request.current = { id: null, revision: request.current.revision + 1 };
+    setAttachment(null);
+    setAnchor(null);
+    setViewport(null);
+    setMenuHeight(0);
+  }
+
+  function registerTrigger(id: string, node: MeasurableWindowView | null) {
+    if (node) triggerRefs.current.set(id, node);
+    else triggerRefs.current.delete(id);
+  }
+
+  const layout = anchor && viewport ? getNoteActionsMenuLayout(anchor, viewport, menuHeight) : null;
+  const ready = layout !== null && layout.width > 0 && layout.maxHeight > 0 && menuHeight > 0;
+  return { attachment, layout, ready, setMenuHeight, layerRef, measure, open, close, registerTrigger };
+}
+
+function AttachmentRow({ item, onOpenActions, onRegisterTrigger }: {
   item: StoredAttachment;
   onOpenActions: (item: StoredAttachment) => void;
+  onRegisterTrigger: (id: string, node: MeasurableWindowView | null) => void;
 }) {
   const kind = attachmentPreviewKind(item.mimeType);
   const icon = kind === 'pdf' ? 'file-pdf-o' : kind === 'image' ? 'file-image-o' : kind === 'text' ? 'file-text-o' : 'file-o';
@@ -57,6 +117,7 @@ function AttachmentRow({ item, onOpenActions }: {
         <Text style={attachmentStyles.status} numberOfLines={1}>Stored on this device</Text>
       </View>
       <Pressable
+        ref={node => onRegisterTrigger(item.id, node)}
         accessibilityRole="button"
         accessibilityLabel={'Attachment actions for ' + item.name}
         accessibilityHint="Shows Preview, Share, Rename, and Remove actions."
@@ -69,9 +130,8 @@ function AttachmentRow({ item, onOpenActions }: {
   );
 }
 
-function AttachmentActionsMenu({ attachment, onClose, onPreview, onShare, onRename, onRemove, busy, sharing }: {
-  attachment: StoredAttachment | null;
-  onClose: () => void;
+function AttachmentActionsMenu({ menuState, onPreview, onShare, onRename, onRemove, busy, sharing }: {
+  menuState: ReturnType<typeof useAttachmentActionsMenu>;
   onPreview: (item: StoredAttachment) => void;
   onShare: (item: StoredAttachment) => void;
   onRename: (item: StoredAttachment) => void;
@@ -79,7 +139,7 @@ function AttachmentActionsMenu({ attachment, onClose, onPreview, onShare, onRena
   busy: boolean;
   sharing: boolean;
 }) {
-  if (attachment === null) return null;
+  const { attachment, layout, ready, layerRef, measure, close, setMenuHeight } = menuState;
 
   const actions = [
     { label: 'Preview', icon: 'eye' as const, run: onPreview, destructive: false, disabled: busy },
@@ -89,30 +149,43 @@ function AttachmentActionsMenu({ attachment, onClose, onPreview, onShare, onRena
   ];
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={attachmentStyles.menuOverlay}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Close attachment actions" onPress={onClose} style={attachmentStyles.menuBackdrop} />
-        <View accessibilityLabel={'Attachment actions for ' + attachment.name} style={attachmentStyles.menu}>
-          <Text numberOfLines={1} style={attachmentStyles.menuTitle}>{attachment.name}</Text>
-          {actions.map(action => (
-            <Pressable
-              key={action.label}
-              accessibilityRole="button"
-              accessibilityLabel={action.label.replace('…', '') + ' ' + attachment.name}
-              accessibilityState={{ disabled: action.disabled }}
-              disabled={action.disabled}
-              onPress={() => { onClose(); action.run(attachment); }}
-              style={({ pressed }) => [attachmentStyles.menuAction, pressed && attachmentStyles.menuActionPressed]}
-            >
-              <FontAwesome name={action.icon} size={17} color={action.destructive ? '#b3261e' : '#52634b'} accessible={false} />
-              <Text style={[attachmentStyles.menuActionText, action.destructive && attachmentStyles.menuActionDanger]}>{action.label}</Text>
-            </Pressable>
-          ))}
-          <Pressable accessibilityRole="button" onPress={onClose} style={attachmentStyles.menuCancel}>
-            <Text style={attachmentStyles.menuCancelText}>Cancel</Text>
-          </Pressable>
-        </View>
-      </View>
+    <Modal visible={attachment !== null} transparent animationType="fade"
+      onShow={() => measure(attachment?.id ?? null)} onRequestClose={close}>
+      <SafeAreaProvider>
+        <SafeAreaView style={attachmentStyles.actionsSafeArea}>
+          <View ref={layerRef} testID="attachment-actions-layer"
+            onLayout={() => measure(attachment?.id ?? null)} style={attachmentStyles.actionsLayer}>
+            {attachment !== null && <Pressable style={attachmentStyles.actionsBackdrop} accessibilityRole="button"
+              accessibilityLabel="Close attachment actions" onPress={close} />}
+            {attachment !== null && (
+              <View testID="attachment-actions-menu" accessibilityLabel={'Attachment actions for ' + attachment.name}
+                accessibilityViewIsModal onAccessibilityEscape={close}
+                accessibilityElementsHidden={!ready} importantForAccessibility={ready ? 'auto' : 'no-hide-descendants'}
+                pointerEvents={ready ? 'auto' : 'none'}
+                onLayout={event => setMenuHeight(event.nativeEvent.layout.height)}
+                style={[attachmentStyles.actionsMenu, layout, !ready && attachmentStyles.actionsMenuMeasuring]}>
+                <ScrollView style={attachmentStyles.actionsMenuScroll} keyboardShouldPersistTaps="handled">
+                  {actions.map(action => (
+                    <Pressable
+                      key={action.label}
+                      accessibilityRole="button"
+                      accessibilityLabel={action.label.replace('…', '') + ' ' + attachment.name}
+                      accessibilityState={{ disabled: action.disabled }}
+                      disabled={action.disabled}
+                      onPress={() => { close(); action.run(attachment); }}
+                      style={({ pressed }) => [attachmentStyles.actionsMenuRow, pressed && attachmentStyles.actionsMenuRowPressed]}
+                    >
+                      <FontAwesome name={action.icon} size={19} color={action.destructive ? '#b3261e' : '#52634b'}
+                        style={attachmentStyles.actionsMenuIcon} accessible={false} />
+                      <Text style={[attachmentStyles.actionsMenuText, action.destructive && attachmentStyles.actionsMenuDanger]}>{action.label}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -150,16 +223,17 @@ const attachmentStyles = StyleSheet.create({
   meta: { color: '#687568', fontSize: 13 },
   status: { color: '#42862d', fontSize: 12 },
   moreButton: { width: 42, height: 42, flexShrink: 0, borderRadius: 12, backgroundColor: '#f0f4f0', alignItems: 'center', justifyContent: 'center' },
-  menuOverlay: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.45)' },
-  menuBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
-  menu: { width: '100%', maxWidth: 420, alignSelf: 'center', backgroundColor: '#fff', borderRadius: 18, padding: 16, gap: 4, elevation: 8 },
-  menuTitle: { color: '#263b22', fontSize: 16, fontWeight: '700', paddingHorizontal: 10, paddingBottom: 8 },
-  menuAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 12, borderRadius: 10 },
-  menuActionPressed: { backgroundColor: '#f0f4ed' },
-  menuActionText: { color: '#2e6a18', fontSize: 15, fontWeight: '600' },
-  menuActionDanger: { color: '#b3261e' },
-  menuCancel: { alignSelf: 'flex-end', paddingVertical: 10, paddingHorizontal: 12, marginTop: 4 },
-  menuCancelText: { color: '#52634b', fontWeight: '700' },
+  actionsSafeArea: { flex: 1 },
+  actionsLayer: { flex: 1 },
+  actionsBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15, 28, 12, 0.08)' },
+  actionsMenu: { position: 'absolute', width: 216, maxWidth: '100%', paddingVertical: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dce4d7', borderRadius: 14, shadowColor: '#172712', shadowOpacity: 0.16, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8 },
+  actionsMenuMeasuring: { opacity: 0 },
+  actionsMenuRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  actionsMenuRowPressed: { backgroundColor: '#eff4eb' },
+  actionsMenuIcon: { width: 20, flexShrink: 0, textAlign: 'center' },
+  actionsMenuText: { flex: 1, flexShrink: 1, minWidth: 0, color: '#293d23', fontSize: 15, fontWeight: '600' },
+  actionsMenuDanger: { color: '#b3261e' },
+  actionsMenuScroll: { flexGrow: 0, flexShrink: 1 },
   dialogOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
   dialog: { backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 12 },
   dialogTitle: { fontSize: 18, fontWeight: '700', color: '#263b22' },
@@ -182,11 +256,11 @@ async function shareAttachment(noteId: string, item: StoredAttachment): Promise<
   if (!(await Sharing.isAvailableAsync())) {
     throw new Error('Android file sharing is unavailable on this device.');
   }
-  await Sharing.shareAsync(file.uri, {
-    mimeType: current.mimeType,
-    dialogTitle: current.name,
-    UTI: current.mimeType === 'application/pdf' ? 'com.adobe.pdf' : undefined,
-  });
+  await shareAttachmentWithTemporaryCopy(
+    current,
+    (fileKey, name) => files.createShareCopy(fileKey, name),
+    (uri, options) => Sharing.shareAsync(uri, options),
+  );
 }
 
 function attachmentError(reason: unknown, fallback: string): string {
@@ -202,7 +276,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
   const [renameTarget, setRenameTarget] = useState<StoredAttachment | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [actionsTarget, setActionsTarget] = useState<StoredAttachment | null>(null);
+  const attachmentMenu = useAttachmentActionsMenu();
   const refresh = useCallback(async () => {
     try { setItems(await service.list(noteId)); setError(null); }
     catch (reason) { setError(attachmentError(reason, 'Unable to read attachments.')); }
@@ -284,17 +358,16 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       <Text style={{ color: '#596b55' }}>Stored on this device only. Not synced to the web app.</Text>
       {error !== null && <Text accessibilityRole="alert" style={{ color: '#a32222' }}>{error}</Text>}
       {items.map(item => (
-        <AttachmentRow key={item.id} item={item} onOpenActions={setActionsTarget} />
+        <AttachmentRow key={item.id} item={item} onOpenActions={attachmentMenu.open} onRegisterTrigger={attachmentMenu.registerTrigger} />
       ))}
       <AttachmentActionsMenu
-        attachment={actionsTarget}
-        onClose={() => setActionsTarget(null)}
+        menuState={attachmentMenu}
         onPreview={item => { void openPreview(item); }}
         onShare={item => { void share(item); }}
         onRename={beginRename}
         onRemove={remove}
         busy={busy}
-        sharing={sharingId === actionsTarget?.id}
+        sharing={sharingId === attachmentMenu.attachment?.id}
       />
       {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
       <AttachmentRenameDialog visible={renameTarget !== null} value={renameValue} busy={busy}
@@ -314,10 +387,10 @@ export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { n
   const [preview, setPreview] = useState<StoredAttachment | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [actionsTarget, setActionsTarget] = useState<StoredAttachment | null>(null);
   const [renameTarget, setRenameTarget] = useState<StoredAttachment | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const attachmentMenu = useAttachmentActionsMenu();
 
   const refresh = useCallback(async () => {
     try { setItems(await service.list(noteId)); setError(null); }
@@ -392,16 +465,15 @@ export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { n
   return (
     <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
       <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
-      {items.map(item => <AttachmentRow key={item.id} item={item} onOpenActions={setActionsTarget} />)}
+      {items.map(item => <AttachmentRow key={item.id} item={item} onOpenActions={attachmentMenu.open} onRegisterTrigger={attachmentMenu.registerTrigger} />)}
       <AttachmentActionsMenu
-        attachment={actionsTarget}
-        onClose={() => setActionsTarget(null)}
+        menuState={attachmentMenu}
         onPreview={item => { void openPreview(item); }}
         onShare={item => { void share(item); }}
         onRename={beginRename}
         onRemove={remove}
         busy={busy}
-        sharing={sharingId === actionsTarget?.id}
+        sharing={sharingId === attachmentMenu.attachment?.id}
       />
       {preview !== null && <AttachmentPreview attachment={preview} onClose={() => { setPreview(null); onPreviewVisibilityChange?.(false); }} />}
       <AttachmentRenameDialog visible={renameTarget !== null} value={renameValue} busy={busy}
