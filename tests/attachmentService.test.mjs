@@ -87,3 +87,14 @@ test('does not rename an attachment after its note enters Private Notes', async 
   await assert.rejects(h.service.rename('note_123', original.id, 'secret.pdf'), /not available in Private Notes/);
   assert.equal(h.items[0].name, original.name, 'the rejected rename must leave the manifest unchanged');
 });
+
+
+test('does not list or remove an attachment after its note enters Private Notes', async () => {
+  let ordinary = true;
+  const h = harness(() => ordinary);
+  const original = await h.service.add('note_123', picked);
+  ordinary = false;
+  await assert.rejects(h.service.list('note_123'), /not available in Private Notes/);
+  await assert.rejects(h.service.remove('note_123', original.id), /not available in Private Notes/);
+  assert.deepEqual(h.items, [original], 'the private-note guard must leave the manifest unchanged');
+});
