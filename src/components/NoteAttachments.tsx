@@ -138,7 +138,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       {items.map(item => (
         <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onPreview={() => setPreview(item)} />
       ))}
-      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
+      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => { setPreview(null); onPreviewVisibilityChange?.(false); }} />}
       <Pressable accessibilityRole="button" disabled={busy || items.length >= 5}
         onPress={() => { void add(); }} style={{ padding: 12, backgroundColor: '#e7f2e1', borderRadius: 8 }}>
         <Text style={{ color: '#263b22', fontWeight: '700' }}>{busy ? 'Working…' : 'Add attachment'}</Text>
@@ -148,7 +148,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
 }
 
 /** Read-only attachment list for ordinary saved-note cards. Files stay local. */
-export function NoteAttachmentSummary({ noteId }: { noteId: string }) {
+export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { noteId: string; onPreviewVisibilityChange?: (visible: boolean) => void }) {
   const [items, setItems] = useState<StoredAttachment[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [preview, setPreview] = useState<StoredAttachment | null>(null);
@@ -172,7 +172,7 @@ export function NoteAttachmentSummary({ noteId }: { noteId: string }) {
   return (
     <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
       <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
-      {items.map(item => <AttachmentRow key={item.id} item={item} onPreview={() => setPreview(item)} />)}
+      {items.map(item => <AttachmentRow key={item.id} item={item} onPreview={() => { setPreview(item); onPreviewVisibilityChange?.(true); }} />)}
       {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
       <Text style={{ color: '#596b55', fontSize: 12 }}>Stored on this device only. Not synced to the web app.</Text>
     </View>
