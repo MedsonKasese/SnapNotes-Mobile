@@ -115,6 +115,15 @@ export async function derivePrivateKey(
   salt: Uint8Array,
   cryptoProvider?: CryptoLike | null,
 ): Promise<PrivateKey> {
+  return derivePrivateKeyWithExtractability(password, salt, cryptoProvider, false);
+}
+
+async function derivePrivateKeyWithExtractability(
+  password: string,
+  salt: Uint8Array,
+  cryptoProvider: CryptoLike | null | undefined,
+  extractable: boolean,
+): Promise<CryptoKey> {
   if (typeof password !== 'string' || !password) throw Error('Private Notes password is required.');
   if (salt.length < 16) throw Error('Invalid private-note salt.');
   const provider = await resolveCryptoProvider(cryptoProvider);
@@ -124,9 +133,31 @@ export async function derivePrivateKey(
     { name: 'PBKDF2', salt: salt as BufferSource, iterations: PRIVATE_KDF_ITERATIONS, hash: 'SHA-256' },
     material,
     { name: 'AES-GCM', length: 256 },
-    false,
+    extractable,
     ['encrypt', 'decrypt'],
   );
+}
+
+// Exportability is reserved for an explicit biometric enrollment flow. Normal
+// password unlock continues to derive a non-exportable key.
+export async function derivePrivateKeyForBiometric(
+  password: string,
+  salt: Uint8Array,
+  cryptoProvider?: CryptoLike | null,
+): Promise<CryptoKey> {
+  return derivePrivateKeyWithExtractability(password, salt, cryptoProvider, true);
+}
+
+export async function exportPrivateKey(key: CryptoKey, cryptoProvider?: CryptoLike | null): Promise<Uint8Array> {
+  if (!key.extractable) throw Error('The private key is not exportable.');
+  const provider = await resolveCryptoProvider(cryptoProvider);
+  return new Uint8Array(await provider.subtle.exportKey('raw', key));
+}
+
+export async function importPrivateKey(key: Uint8Array, cryptoProvider?: CryptoLike | null): Promise<CryptoKey> {
+  if (key.length !== 32) throw Error('Invalid private vault key.');
+  const provider = await resolveCryptoProvider(cryptoProvider);
+  return provider.subtle.importKey('raw', key as BufferSource, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
 export async function encryptPrivatePayload(

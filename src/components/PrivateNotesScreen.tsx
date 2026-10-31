@@ -7,6 +7,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ScreenCapture from 'expo-screen-capture';
 import { createPrivateAccess, type AuthenticatedPrivateSession } from '../privateAccess';
+import { importPrivateKey } from '../privateCrypto';
+import { PRIVATE_BIOMETRIC_ENABLED_FLAG, privateBiometricKeyStore } from '../privateBiometricUnlock';
 import { createPrivateSession } from '../privateSession';
 import { createPrivateScreenCaptureProtection } from '../privateScreenCapture';
 import { restoreDevicePrivateNoteWithKey } from '../privateRestoreService';
@@ -50,8 +52,11 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
   const [confirmation, setConfirmation] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmationVisible, setConfirmationVisible] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const biometricAvailable = useMemo(() => privateBiometricKeyStore.canUse(), []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [biometricBusy, setBiometricBusy] = useState(false);
   const [privateNotes, setPrivateNotes] = useState<PrivateNotePreview[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<EditDraft | null>(null);
@@ -116,6 +121,14 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(PRIVATE_BIOMETRIC_ENABLED_FLAG).then(value => {
+      if (active) setBiometricEnabled(value === 'enabled');
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     const session = lifecycle.current;
     const activeGuard = sessionGuard.current;
     let active = true;
@@ -138,6 +151,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
         authenticatedSession.current = null;
         lifecycle.current.busy = false;
         setBusy(false);
+        setBiometricBusy(false);
         setPhase(current => current === 'unlocked' ? 'locked' : current);
         clearSensitiveInputs();
         setPrivateNotes([]);
@@ -188,6 +202,79 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
       sessionGuard.current.finish(generation);
       if (session.mounted) setBusy(false);
     }
+  }
+
+  async function unlockWithBiometric() {
+    const session = lifecycle.current;
+    if (!session.mounted || session.busy || AppState.currentState !== 'active' || phase !== 'locked') return;
+    const generation = sessionGuard.current.begin();
+    if (generation === null) return;
+    session.busy = true;
+    setBusy(true);
+    setBiometricBusy(true);
+    setError(null);
+    let keyBytes: Uint8Array | null = null;
+    const isCurrentAttempt = () => session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active';
+    try {
+      keyBytes = await privateBiometricKeyStore.read();
+      if (!isCurrentAttempt()) return;
+      if (keyBytes === null) {
+        if (!password) {
+          setError('Enter your Private Notes password once, then tap “Use passkey or fingerprint” to enable biometric unlock.');
+          return;
+        }
+        keyBytes = await access.exportBiometricKey(password);
+        if (!isCurrentAttempt()) return;
+        await privateBiometricKeyStore.save(keyBytes);
+      }
+      const key = await importPrivateKey(keyBytes);
+      if (!isCurrentAttempt()) return;
+      keyBytes.fill(0);
+      keyBytes = null;
+      const unlockedSession = await access.readUnlockedSessionWithKey(key);
+      if (!isCurrentAttempt()) return;
+      authenticatedSession.current = unlockedSession;
+      setPrivateNotes(unlockedSession.notes);
+      setSelectedNoteId(null);
+      setEditingNote(null);
+      setPhase('unlocked');
+      setBiometricEnabled(true);
+      void AsyncStorage.setItem(PRIVATE_BIOMETRIC_ENABLED_FLAG, 'enabled').catch(() => undefined);
+      clearSensitiveInputs();
+    } catch (cause) {
+      if (session.mounted && sessionGuard.current.valid(generation) && AppState.currentState === 'active') {
+        setError(cause instanceof Error ? cause.message : 'Biometric unlock could not be completed. Use your password instead.');
+      }
+    } finally {
+      keyBytes?.fill(0);
+      const ownsAttempt = sessionGuard.current.valid(generation);
+      sessionGuard.current.finish(generation);
+      if (ownsAttempt) {
+        session.busy = false;
+        if (session.mounted) {
+          setBusy(false);
+          setBiometricBusy(false);
+        }
+      }
+    }
+  }
+
+  function confirmRemoveBiometricUnlock() {
+    Alert.alert('Remove biometric unlock?', 'Your encrypted notes and password are unchanged. You can still unlock with your password.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => {
+        void (async () => {
+          try {
+            await privateBiometricKeyStore.remove();
+            await AsyncStorage.removeItem(PRIVATE_BIOMETRIC_ENABLED_FLAG).catch(() => undefined);
+            setBiometricEnabled(false);
+            setError(null);
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'Biometric unlock could not be removed.');
+          }
+        })();
+      } },
+    ]);
   }
 
   async function performPrivateMutation<T>(operation: (session: AuthenticatedPrivateSession) => Promise<T>): Promise<T | null> {
@@ -375,12 +462,13 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 
   return (
     <View style={styles.container}>
-      <Pressable accessibilityRole="button" onPress={() => { lock(); onBack(); }}>
+      <Pressable accessibilityRole="button" disabled={biometricBusy} onPress={() => { lock(); onBack(); }}>
         <Text style={styles.back}>‹ All notes</Text>
       </Pressable>
+      {phase === 'locked' && <Text style={styles.privateEyebrow}>PRIVATE NOTES</Text>}
       <View testID="private-notes-title-row" style={styles.titleRow}>
         <Text accessibilityRole="header" numberOfLines={1} style={styles.title}>
-          {phase === 'setup' ? 'Protect your notes' : phase === 'unlocked' ? 'Private Notes' : 'Locked notes'}
+          {phase === 'setup' ? 'Protect your notes' : phase === 'unlocked' ? 'Private Notes' : 'Unlock Private Notes'}
         </Text>
         {phase === 'unlocked' && (
           <Pressable accessibilityRole="button" accessibilityLabel="Lock Private Notes"
@@ -398,6 +486,12 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
         <>
           <Text style={styles.description}>Your encrypted notes are available only while this vault is unlocked.</Text>
           <Text testID="private-note-count" style={styles.description}>{orderedNotes.length} private {orderedNotes.length === 1 ? 'note' : 'notes'}</Text>
+          {biometricEnabled && (
+            <Pressable accessibilityRole="button" accessibilityLabel="Remove biometric unlock"
+              disabled={busy} onPress={confirmRemoveBiometricUnlock} style={styles.biometricRemoveButton}>
+              <Text style={styles.biometricRemoveText}>Remove biometric unlock</Text>
+            </Pressable>
+          )}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
           <ScrollView style={styles.noteScroll} contentContainerStyle={styles.noteList} keyboardShouldPersistTaps="handled">
             {orderedNotes.length === 0 ? <Text style={styles.description}>No private notes yet.</Text> : orderedNotes.map(note => {
@@ -465,7 +559,9 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
           <Text style={styles.description}>
             {phase === 'setup'
               ? 'Create a password with at least 12 characters. If you forget it, encrypted private content cannot be recovered. If you cancel after starting setup, it may still finish. Keep this password to unlock later.'
-              : 'Enter your Private Notes password. It is never saved on this device.'}
+              : biometricEnabled
+                ? 'Enter your Private Notes password. It is never saved on this device.'
+                : 'Enter your Private Notes password. It is never saved on this device. To enable biometric unlock, enter it once and tap “Use passkey or fingerprint”.'}
           </Text>
           <View style={styles.inputRow}>
             <TextInput accessibilityLabel="Private Notes password" placeholder="Password" secureTextEntry={!passwordVisible}
@@ -493,9 +589,21 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
               </Pressable>
             </View>
           )}
+          {phase === 'locked' && (biometricAvailable || biometricEnabled) && (
+            <Pressable accessibilityRole="button" accessibilityLabel="Use passkey or fingerprint"
+              accessibilityHint={biometricEnabled
+                ? 'Authenticate with this device to unlock Private Notes; password unlock remains available.'
+                : 'Enter your password first to set up biometric unlock on this device.'}
+              accessibilityState={{ disabled: busy }} disabled={busy}
+              onPress={() => void unlockWithBiometric()}
+              style={({ pressed }) => [styles.biometricButton, pressed && styles.pressed, busy && styles.disabledButton]}>
+              <MaterialCommunityIcons name="fingerprint" size={23} color="#ffffff" accessible={false} />
+              <Text style={styles.biometricButtonText}>{busy ? 'Please wait…' : 'Use passkey or fingerprint'}</Text>
+            </Pressable>
+          )}
           {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
           <View style={styles.actionRow}>
-            <Pressable accessibilityRole="button" style={styles.cancelButton} onPress={() => { lock(); onBack(); }}>
+            <Pressable accessibilityRole="button" disabled={biometricBusy} style={styles.cancelButton} onPress={() => { lock(); onBack(); }}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
             <Pressable accessibilityRole="button" disabled={busy} style={[styles.button, styles.submitButton]} onPress={() => void submit()}>
@@ -534,6 +642,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 const styles = StyleSheet.create({
   container: { flex: 1, minHeight: 0, width: '100%', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 8, gap: 12, backgroundColor: '#f7f9f5' },
   back: { color: '#3b7f16', fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  privateEyebrow: { color: '#4d9c25', fontSize: 13, fontWeight: '900', letterSpacing: 1.1 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   title: { flex: 1, color: '#20351d', fontSize: 28, fontWeight: '800' },
   headerLockButton: { minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
@@ -568,11 +677,15 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', alignItems: 'center', borderColor: '#cbd9c3', borderWidth: 1, borderRadius: 12, paddingLeft: 14 },
   input: { flex: 1, paddingVertical: 14, paddingRight: 8, fontSize: 16, color: '#20351d' },
   visibilityButton: { minWidth: 48, minHeight: 50, alignItems: 'center', justifyContent: 'center' },
+  biometricButton: { width: '100%', minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 16, borderRadius: 12, backgroundColor: '#69bd2d' },
+  biometricButtonText: { color: '#ffffff', fontWeight: '800', fontSize: 16 },
+  biometricRemoveButton: { alignSelf: 'flex-start', minHeight: 38, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: '#cbd9c3' },
+  biometricRemoveText: { color: '#3b7f16', fontSize: 14, fontWeight: '700' },
   button: { padding: 16, borderRadius: 12, backgroundColor: '#3b7f16', alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  cancelButton: { flex: 1, minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: '#c73333', alignItems: 'center', justifyContent: 'center', backgroundColor: '#b42323' },
-  cancelText: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  cancelButton: { flex: 1, minHeight: 50, borderRadius: 12, borderWidth: 1, borderColor: '#d2a2a2', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
+  cancelText: { color: '#b3261e', fontSize: 16, fontWeight: '800' },
   submitButton: { flex: 1, minHeight: 50, justifyContent: 'center' },
   disabledButton: { opacity: 0.55 },
   actionsLayer: { flex: 1 },

@@ -1,4 +1,4 @@
-import { generatePrivateSalt, derivePrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
+import { generatePrivateSalt, derivePrivateKey, derivePrivateKeyForBiometric, exportPrivateKey, encryptPrivatePayload, decryptPrivatePayload, privateSaltFromRecord, PrivatePayloadError, PRIVATE_MIN_PASSWORD_LENGTH, type PrivateCipherRecord } from './privateCrypto.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 import { createPrivateSharedVaultStorage } from './privateSharedVaultStorage.ts';
 import type { PrivateNotePreview } from './privateNoteReader.ts';
@@ -20,6 +20,24 @@ export function validatePrivatePassword(password: string, confirmation: string):
   return null;
 }
 
+async function verifyVaultKey(privateData: PrivateCipherRecord, key: Awaited<ReturnType<typeof derivePrivateKey>>): Promise<void> {
+  let payload: unknown;
+  try {
+    payload = await decryptPrivatePayload(privateData, key);
+  } catch (cause) {
+    if (cause instanceof PrivatePayloadError && cause.stage === 'decode') {
+      throw new Error('The vault decrypted, but this build could not read its payload. Check the app runtime. No changes were made. [PV-DECODE]');
+    }
+    // AES-GCM authentication cannot distinguish a wrong password, damaged
+    // ciphertext or a faulty native decrypt implementation. Do not claim it can.
+    throw new Error('Could not authenticate the vault. Incorrect password, damaged data, or a native decryption failure may be responsible. No changes were made. [PV-AUTH]');
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+    (payload as { verifier?: unknown }).verifier !== VERIFIER_TEXT) {
+    throw new Error('The decrypted password verifier was not recognized. No changes were made. [PV-VERIFY]');
+  }
+}
+
 async function verifyPassword(password: string, privateData: PrivateCipherRecord): Promise<Awaited<ReturnType<typeof derivePrivateKey>>> {
   if (!password) throw new Error('Enter your Private Notes password.');
   let salt: Uint8Array;
@@ -36,21 +54,7 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
     // a wrong password. Never surface raw native exception details or inputs.
     throw new Error('This build could not prepare the private key. Check the native development build and try again. No changes were made. [PV-KEY]');
   }
-  let payload: unknown;
-  try {
-    payload = await decryptPrivatePayload(privateData, key);
-  } catch (cause) {
-    if (cause instanceof PrivatePayloadError && cause.stage === 'decode') {
-      throw new Error('The vault decrypted, but this build could not read its payload. Check the app runtime. No changes were made. [PV-DECODE]');
-    }
-    // AES-GCM authentication cannot distinguish a wrong password, damaged
-    // ciphertext or a faulty native decrypt implementation. Do not claim it can.
-    throw new Error('Could not authenticate the vault. Incorrect password, damaged data, or a native decryption failure may be responsible. No changes were made. [PV-AUTH]');
-  }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
-    (payload as { verifier?: unknown }).verifier !== VERIFIER_TEXT) {
-    throw new Error('The decrypted password verifier was not recognized. No changes were made. [PV-VERIFY]');
-  }
+  await verifyVaultKey(privateData, key);
   return key;
 }
 
@@ -61,6 +65,20 @@ export function createPrivateAccess(backend: Backend) {
     const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
     if (!verifier) throw new Error('Private vault has no password verifier.');
     const key = await verifyPassword(password, verifier.privateData);
+    const salt = privateSaltFromRecord(verifier.privateData);
+    const { readPrivateNotes } = await import('./privateNoteReader.ts');
+    return { notes: await readPrivateNotes(entries, key), key, salt };
+  }
+  async function readUnlockedSessionWithKey(key: Awaited<ReturnType<typeof derivePrivateKey>>): Promise<AuthenticatedPrivateSession> {
+    let entries: PrivateVaultEntry[];
+    try {
+      entries = await vault.load();
+    } catch {
+      throw new Error('Could not read the encrypted vault. No changes were made. [PV-STORAGE]');
+    }
+    const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
+    if (!verifier) throw new Error('Private vault has no password verifier.');
+    await verifyVaultKey(verifier.privateData, key);
     const salt = privateSaltFromRecord(verifier.privateData);
     const { readPrivateNotes } = await import('./privateNoteReader.ts');
     return { notes: await readPrivateNotes(entries, key), key, salt };
@@ -108,6 +126,25 @@ export function createPrivateAccess(backend: Backend) {
       if (!verifier) throw new Error('Private vault has no password verifier.');
       await verifyPassword(password, verifier.privateData);
     },
+    async exportBiometricKey(password: string): Promise<Uint8Array> {
+      let entries: PrivateVaultEntry[];
+      try {
+        entries = await vault.load();
+      } catch {
+        throw new Error('Could not read the encrypted vault. No changes were made. [PV-STORAGE]');
+      }
+      const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
+      if (!verifier) throw new Error('Private vault has no password verifier.');
+      await verifyPassword(password, verifier.privateData);
+      const salt = privateSaltFromRecord(verifier.privateData);
+      try {
+        const key = await derivePrivateKeyForBiometric(password, salt);
+        await verifyVaultKey(verifier.privateData, key);
+        return await exportPrivateKey(key);
+      } catch {
+        throw new Error('Could not prepare a biometric-protected vault key. No changes were made. [PV-BIOMETRIC]');
+      }
+    },
     async withAuthenticatedKey<T>(password: string, operation: (key: Awaited<ReturnType<typeof derivePrivateKey>>, salt: Uint8Array) => Promise<T>): Promise<T> {
       const entries = await vault.load();
       const verifier = entries.find(item => item.id === PRIVATE_VERIFIER_ID);
@@ -116,6 +153,7 @@ export function createPrivateAccess(backend: Backend) {
       return operation(key, privateSaltFromRecord(verifier.privateData));
     },
     readUnlockedSession,
+    readUnlockedSessionWithKey,
     async readUnlocked(password: string) { return (await readUnlockedSession(password)).notes; },
   };
 }
