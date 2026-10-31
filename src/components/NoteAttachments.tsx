@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
@@ -36,11 +36,12 @@ const service = createAttachmentService(
 );
 
 
-function AttachmentRow({ item, action, onAction, onPreview }: {
+function AttachmentRow({ item, action, onAction, onPreview, onRename }: {
   item: StoredAttachment;
   action?: string;
   onAction?: () => void;
   onPreview?: () => void;
+  onRename?: () => void;
 }) {
   const kind = attachmentPreviewKind(item.mimeType);
   const icon = kind === 'pdf' ? 'file-pdf-o' : kind === 'image' ? 'file-image-o' : kind === 'text' ? 'file-text-o' : 'file-o';
@@ -59,6 +60,7 @@ function AttachmentRow({ item, action, onAction, onPreview }: {
         <Text style={attachmentStyles.status}>Stored on this device</Text>
       </View>
       {onPreview && <Pressable accessibilityRole="button" accessibilityLabel={'Preview ' + item.name} onPress={onPreview} style={attachmentStyles.action}><Text style={attachmentStyles.actionText}>Preview</Text></Pressable>}
+      {onRename && <Pressable accessibilityRole="button" accessibilityLabel={'Rename ' + item.name} onPress={onRename} style={attachmentStyles.action}><Text style={attachmentStyles.actionText}>Rename</Text></Pressable>}
       {action && onAction && (
         <Pressable accessibilityRole="button" accessibilityLabel={action + ' ' + item.name}
           onPress={onAction} style={attachmentStyles.action}>
@@ -79,6 +81,13 @@ const attachmentStyles = StyleSheet.create({
   status: { color: '#42862d', fontSize: 12 },
   action: { paddingHorizontal: 6, paddingVertical: 12 },
   actionText: { color: '#2e6a18', fontWeight: '700', fontSize: 13 },
+  dialogOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
+  dialog: { backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 12 },
+  dialogTitle: { fontSize: 18, fontWeight: '700', color: '#263b22' },
+  input: { borderWidth: 1, borderColor: '#aebcad', borderRadius: 8, padding: 12, color: '#1f2c21' },
+  dialogButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  dialogButton: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#e7f2e1' },
+  dialogButtonText: { color: '#263b22', fontWeight: '700' },
 });
 
 /** Local-only attachments for SAVED ordinary notes. No cloud sync or private vault. */
@@ -86,6 +95,8 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
   const [items, setItems] = useState<StoredAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<StoredAttachment | null>(null);
+  const [renameTarget, setRenameTarget] = useState<StoredAttachment | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     try { setItems(await service.list(noteId)); setError(null); }
@@ -116,6 +127,25 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
     } finally { setBusy(false); }
   }
 
+  function beginRename(item: StoredAttachment) {
+    setRenameTarget(item);
+    setRenameValue(item.name);
+  }
+
+  async function saveRename() {
+    if (!renameTarget || busy) return;
+    setBusy(true);
+    try {
+      await service.rename(noteId, renameTarget.id, renameValue);
+      await refresh();
+      setRenameTarget(null);
+    } catch (reason) {
+      Alert.alert('Unable to rename attachment', reason instanceof Error ? reason.message : 'Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function remove(item: StoredAttachment) {
     Alert.alert('Remove attachment?', item.name, [
       { text: 'Cancel', style: 'cancel' },
@@ -136,9 +166,21 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       <Text style={{ color: '#596b55' }}>Stored on this device only. Not synced to the web app.</Text>
       {error !== null && <Text accessibilityRole="alert" style={{ color: '#a32222' }}>{error}</Text>}
       {items.map(item => (
-        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onPreview={() => setPreview(item)} />
+        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onRename={() => { if (!busy) beginRename(item); }} onPreview={() => setPreview(item)} />
       ))}
       {preview !== null && <AttachmentPreview attachment={preview} onClose={() => { setPreview(null); onPreviewVisibilityChange?.(false); }} />}
+      <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
+        <View style={attachmentStyles.dialogOverlay}>
+          <View style={attachmentStyles.dialog}>
+            <Text style={attachmentStyles.dialogTitle}>Rename attachment</Text>
+            <TextInput accessibilityLabel="Attachment file name" value={renameValue} onChangeText={setRenameValue} autoFocus selectTextOnFocus maxLength={120} editable={!busy} returnKeyType="done" onSubmitEditing={() => { void saveRename(); }} style={attachmentStyles.input} />
+            <View style={attachmentStyles.dialogButtons}>
+              <Pressable accessibilityRole="button" disabled={busy} onPress={() => setRenameTarget(null)} style={attachmentStyles.dialogButton}><Text style={attachmentStyles.dialogButtonText}>Cancel</Text></Pressable>
+              <Pressable accessibilityRole="button" disabled={busy} onPress={() => { void saveRename(); }} style={attachmentStyles.dialogButton}><Text style={attachmentStyles.dialogButtonText}>{busy ? 'Saving…' : 'Save'}</Text></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <Pressable accessibilityRole="button" disabled={busy || items.length >= 5}
         onPress={() => { void add(); }} style={{ padding: 12, backgroundColor: '#e7f2e1', borderRadius: 8 }}>
         <Text style={{ color: '#263b22', fontWeight: '700' }}>{busy ? 'Working…' : 'Add attachment'}</Text>
