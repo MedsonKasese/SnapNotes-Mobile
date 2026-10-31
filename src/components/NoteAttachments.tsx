@@ -3,6 +3,7 @@ import { Alert, Image, Modal, Pressable, StyleSheet, Text, TextInput, View } fro
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import * as Sharing from 'expo-sharing';
 import { createAndroidAttachmentFiles } from '../androidAttachmentFiles';
 import { pickAndroidAttachments } from '../androidAttachmentPicker';
 import { createAttachmentManifestStorage } from '../attachmentManifestStorage';
@@ -36,12 +37,14 @@ const service = createAttachmentService(
 );
 
 
-function AttachmentRow({ item, action, onAction, onPreview, onRename }: {
+function AttachmentRow({ item, action, onAction, onPreview, onRename, onShare, sharing }: {
   item: StoredAttachment;
   action?: string;
   onAction?: () => void;
   onPreview?: () => void;
   onRename?: () => void;
+  onShare?: () => void;
+  sharing?: boolean;
 }) {
   const kind = attachmentPreviewKind(item.mimeType);
   const icon = kind === 'pdf' ? 'file-pdf-o' : kind === 'image' ? 'file-image-o' : kind === 'text' ? 'file-text-o' : 'file-o';
@@ -60,6 +63,7 @@ function AttachmentRow({ item, action, onAction, onPreview, onRename }: {
         <Text style={attachmentStyles.status}>Stored on this device</Text>
       </View>
       {onPreview && <Pressable accessibilityRole="button" accessibilityLabel={'Preview ' + item.name} onPress={onPreview} style={attachmentStyles.action}><Text style={attachmentStyles.actionText}>Preview</Text></Pressable>}
+      {onShare && <Pressable accessibilityRole="button" accessibilityLabel={'Share ' + item.name} disabled={sharing} onPress={onShare} style={attachmentStyles.action}><Text style={attachmentStyles.actionText}>{sharing ? 'Sharing…' : 'Share'}</Text></Pressable>}
       {onRename && <Pressable accessibilityRole="button" accessibilityLabel={'Rename ' + item.name} onPress={onRename} style={attachmentStyles.action}><Text style={attachmentStyles.actionText}>Rename</Text></Pressable>}
       {action && onAction && (
         <Pressable accessibilityRole="button" accessibilityLabel={action + ' ' + item.name}
@@ -90,10 +94,25 @@ const attachmentStyles = StyleSheet.create({
   dialogButtonText: { color: '#263b22', fontWeight: '700' },
 });
 
+
+async function shareAttachment(item: StoredAttachment): Promise<void> {
+  const file = files.fileForPreview(item.fileKey);
+  if (!file.exists) throw new Error('This attachment is missing from this device.');
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error('Android file sharing is unavailable on this device.');
+  }
+  await Sharing.shareAsync(file.uri, {
+    mimeType: item.mimeType,
+    dialogTitle: item.name,
+    UTI: item.mimeType === 'application/pdf' ? 'com.adobe.pdf' : undefined,
+  });
+}
+
 /** Local-only attachments for SAVED ordinary notes. No cloud sync or private vault. */
 export function NoteAttachments({ noteId }: { noteId: string }) {
   const [items, setItems] = useState<StoredAttachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [sharingId, setSharingId] = useState<string | null>(null);
   const [preview, setPreview] = useState<StoredAttachment | null>(null);
   const [renameTarget, setRenameTarget] = useState<StoredAttachment | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -125,6 +144,14 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
     } catch (reason) {
       Alert.alert('Attachment not added', reason instanceof Error ? reason.message : 'Please try again.');
     } finally { setBusy(false); }
+  }
+
+  async function share(item: StoredAttachment) {
+    if (busy || sharingId !== null) return;
+    setSharingId(item.id);
+    try { await shareAttachment(item); }
+    catch (reason) { Alert.alert('Unable to share attachment', reason instanceof Error ? reason.message : 'Please try again.'); }
+    finally { setSharingId(null); }
   }
 
   function beginRename(item: StoredAttachment) {
@@ -166,7 +193,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       <Text style={{ color: '#596b55' }}>Stored on this device only. Not synced to the web app.</Text>
       {error !== null && <Text accessibilityRole="alert" style={{ color: '#a32222' }}>{error}</Text>}
       {items.map(item => (
-        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onRename={() => { if (!busy) beginRename(item); }} onPreview={() => setPreview(item)} />
+        <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onRename={() => { if (!busy) beginRename(item); }} onShare={() => { void share(item); }} sharing={sharingId === item.id} onPreview={() => setPreview(item)} />
       ))}
       {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
       <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
@@ -194,6 +221,7 @@ export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { n
   const [items, setItems] = useState<StoredAttachment[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [preview, setPreview] = useState<StoredAttachment | null>(null);
+  const [sharingId, setSharingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -207,6 +235,14 @@ export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { n
     return () => { active = false; };
   }, [noteId]);
 
+  async function share(item: StoredAttachment) {
+    if (sharingId !== null) return;
+    setSharingId(item.id);
+    try { await shareAttachment(item); }
+    catch (reason) { Alert.alert('Unable to share attachment', reason instanceof Error ? reason.message : 'Please try again.'); }
+    finally { setSharingId(null); }
+  }
+
   if (!loaded || (items.length === 0 && error === null)) return null;
   if (error !== null) {
     return <Text accessibilityRole="alert" style={{ color: '#7a4b00', marginTop: 8 }}>{error}</Text>;
@@ -214,7 +250,7 @@ export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { n
   return (
     <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
       <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
-      {items.map(item => <AttachmentRow key={item.id} item={item} onPreview={() => { setPreview(item); onPreviewVisibilityChange?.(true); }} />)}
+      {items.map(item => <AttachmentRow key={item.id} item={item} onShare={() => { void share(item); }} sharing={sharingId === item.id} onPreview={() => { setPreview(item); onPreviewVisibilityChange?.(true); }} />)}
       {preview !== null && <AttachmentPreview attachment={preview} onClose={() => { setPreview(null); onPreviewVisibilityChange?.(false); }} />}
       <Text style={{ color: '#596b55', fontSize: 12 }}>Stored on this device only. Not synced to the web app.</Text>
     </View>
