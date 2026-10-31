@@ -213,6 +213,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
       if (name === './RichNoteEditor') return { RichNoteEditor: 'RichNoteEditor' };
       if (name === './PrivateNotesScreen') return { PrivateNotesScreen: 'PrivateNotesScreen' };
+      if (name === './NoteAttachments') return { NoteAttachments: 'NoteAttachments' };
       throw new Error(`Unexpected import: ${name}`);
     },
   });

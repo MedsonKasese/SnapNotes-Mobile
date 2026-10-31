@@ -117,6 +117,9 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === './PrivateNotesScreen') return { PrivateNotesScreen: 'PrivateNotesScreen' };
       if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
       if (name === './FormattedText') return { FormattedText: 'FormattedText' };
+      if (name === './NoteAttachments') return {
+        NoteAttachments: 'NoteAttachments', NoteAttachmentSummary: 'NoteAttachmentSummary',
+      };
       throw new Error(`Unexpected import: ${name}`);
     },
   });
@@ -176,6 +179,43 @@ function editWorkNote(app) {
 
 const archivedNote = { ...savedNotes[0], id: 'archived-1', title: 'Archived project', archived: true, pinned: true, deletedAt: null };
 const trashedNote = { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' };
+
+test('new-note editor explains attachments appear after save, and saved-note editor wires the picker', () => {
+  const app = workspace();
+  action(app.render(), '+ New note').props.onPress();
+  const newNoteEditor = app.render();
+  assert.match(text(newNoteEditor), /Save this note first to add local attachments/);
+  assert.equal(elements(newNoteEditor).some(element => element.type === 'NoteAttachments'), false);
+
+  action(newNoteEditor, 'All notes').props.onPress();
+  editWorkNote(app);
+  const savedNoteEditor = app.render();
+  const picker = find(savedNoteEditor, element => element.type === 'NoteAttachments');
+  assert.equal(picker.props.noteId, savedNotes[0].id);
+});
+
+test('saved note editor and attachment siblings use distinct React keys', () => {
+  const note = { ...savedNotes[0], id: 'local-note-42' };
+  const app = workspace([note]);
+  const card = list(app.render()).props.renderItem({ item: note });
+  find(card, element => element.props.accessibilityLabel === `Open ${note.title}`).props.onPress();
+
+  const tree = app.render();
+  const editor = find(tree, element => element.type === 'RichNoteEditor');
+  const attachments = find(tree, element => element.type === 'NoteAttachments');
+  assert.equal(editor.key, 'note-editor:local-note-42');
+  assert.equal(attachments.key, 'note-attachments:local-note-42');
+  assert.notEqual(editor.key, attachments.key);
+});
+
+test('saved-note cards show the local attachment summary for that note', () => {
+  const note = { ...savedNotes[0], id: 'local-note-with-files' };
+  const app = workspace([note]);
+  const card = list(app.render()).props.renderItem({ item: note });
+  const summary = find(card, element => element.type === 'NoteAttachmentSummary');
+  assert.equal(summary.props.noteId, note.id);
+  assert.equal(summary.key, `note-attachment-summary:${note.id}`);
+});
 
 test('editor All notes clears the category filter and includes notes from other categories', () => {
   const app = workspace();

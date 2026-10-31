@@ -226,13 +226,14 @@ export function createNotesController(storage: NotesStorage) {
       return;
     }
     // Follow the PWA: copies retain content/category but start unpinned, unarchived,
-    // with fresh creation/edit timestamps. Avoid collisions with imported/local IDs.
+    // with fresh creation/edit timestamps. Check ordinary IDs before allocating.
     const ids = new Set(previous.notes.map(note => note.id));
     let sequence = previous.notes.length + 1;
     while (ids.has(`local-note-${sequence}`)) sequence += 1;
+    const fallbackId = `local-note-${sequence}`;
     const copy: Note = {
       ...source,
-      id: `local-note-${sequence}`,
+      id: fallbackId,
       title: source.title ? `Copy of ${source.title}` : 'Copy of Untitled note',
       createdAt: now,
       updatedAt: now,
@@ -244,9 +245,13 @@ export function createNotesController(storage: NotesStorage) {
       publish({ ...snapshot, storageError: 'This note is too long to duplicate. Shorten it before duplicating.' });
       return;
     }
-    const notes = [copy, ...previous.notes];
     publish({ ...snapshot, status: 'saving', storageError: null });
     try {
+      // The guarded allocator also excludes IDs already owned by the encrypted
+      // vault. Keep its save-time check as the final defense against races.
+      const allocatedId = storage.allocateNoteId ? await storage.allocateNoteId([...ids]) : fallbackId;
+      if (ids.has(allocatedId)) throw new Error('Duplicate note ID allocation collision.');
+      const notes = [{ ...copy, id: allocatedId }, ...previous.notes];
       await storage.save(notes);
       publish({ state: { ...previous, notes, error: null, notice: 'Note duplicated.' }, status: 'ready', storageError: null });
     } catch {

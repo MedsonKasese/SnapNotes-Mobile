@@ -24,7 +24,8 @@
       "android"
     ],
     "plugins": [
-      "react-native-quick-crypto"
+      "react-native-quick-crypto",
+      "expo-font"
     ],
     "extra": {
       "eas": {

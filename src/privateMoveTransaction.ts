@@ -13,6 +13,7 @@ type MoveDependencies = {
   saveNotes(notes: Note[]): Promise<void>;
   loadVault(): Promise<PrivateVaultEntry[]>;
   saveVault(entries: PrivateVaultEntry[]): Promise<void>;
+  assertNoUnencryptedAttachments(noteId: string): Promise<void>;
   encrypt: typeof encryptPrivatePayload;
   decrypt: typeof decryptPrivatePayload;
   key: Parameters<typeof encryptPrivatePayload>[1];
@@ -34,6 +35,7 @@ export async function moveNoteToPrivateTransaction(
   deps: MoveDependencies,
 ): Promise<PrivateMoveResult> {
   return deps.withExclusiveMove(async () => {
+    await deps.assertNoUnencryptedAttachments(id);
     const notes = await deps.loadNotes();
     const vault = await deps.loadVault();
     const source = assertPrivateMoveSafe(notes, id, vault.map(entry => entry.id));

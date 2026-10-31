@@ -25,6 +25,7 @@ import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { moveDeviceNoteToPrivate } from '../privateMoveService';
+import { NoteAttachmentSummary, NoteAttachments } from './NoteAttachments';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
@@ -138,6 +139,7 @@ export function NotesWorkspace() {
   const [appearanceColor, setAppearanceColor] = useState<FolderColor>('');
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
+  const [attachmentPreviewNoteId, setAttachmentPreviewNoteId] = useState<string | null>(null);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
   const [privateMovePassword, setPrivateMovePassword] = useState('');
   const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
@@ -1049,7 +1051,7 @@ export function NotesWorkspace() {
                 <FormattingToolbar disabled={saving || !editorReady} active={formattingState} onAction={formatNote} />
               </View>
               <RichNoteEditor
-                key={state.editingId ?? 'new-note'}
+                key={`note-editor:${state.editingId ?? 'new-note'}`}
                 ref={bodyEditor}
                 editable={!saving}
                 accessibilityLabel="Note body"
@@ -1059,6 +1061,9 @@ export function NotesWorkspace() {
                 onReady={setEditorReady}
                 onSelection={setFormattingState}
               />
+              {state.editingId !== null
+                ? <NoteAttachments key={`note-attachments:${state.editingId}`} noteId={state.editingId} />
+                : <Text style={styles.hint}>Save this note first to add local attachments. Then reopen it from your notes and tap Add attachment.</Text>}
               <Text style={[styles.hint, count > MAX_NOTE_CHARACTERS && styles.error]}>
                 {count}/{MAX_NOTE_CHARACTERS} characters
               </Text>
@@ -1124,7 +1129,7 @@ export function NotesWorkspace() {
               return (
               // Keep nested checkboxes/menu independently reachable by screen readers.
               // The contextual menu provides their explicit Open note control.
-              <Pressable style={styles.card} accessible={false} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
+              <Pressable style={styles.card} accessible={false} disabled={view === 'trash' || attachmentPreviewNoteId === item.id} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
                 <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
@@ -1152,6 +1157,7 @@ export function NotesWorkspace() {
                     })}
                   </View>
                 )}
+                <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} onPreviewVisibilityChange={visible => setAttachmentPreviewNoteId(visible ? item.id : current => current === item.id ? null : current)} />
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
                     <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
