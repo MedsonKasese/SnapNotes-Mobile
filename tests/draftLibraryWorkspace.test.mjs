@@ -15,6 +15,7 @@ import { createPrivateVaultStorage } from '../src/privateVaultStorage.ts';
 import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
+import * as noteTransfer from '../src/noteTransfer.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_DRAFT_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -78,6 +79,9 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
       Keyboard: { dismiss() {} }, Platform: { OS: 'android' }, StyleSheet: { create: styles => styles, absoluteFill: {} },
     },
     'react-native-safe-area-context': { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' },
+    'expo-document-picker': { getDocumentAsync: async () => ({ canceled: true, assets: null }) },
+    'expo-file-system': { File: class File {}, Paths: { cache: 'cache' } },
+    'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async () => {} },
     '@expo/vector-icons/FontAwesome': { __esModule: true, default: 'FontAwesome' },
     '@react-native-async-storage/async-storage': backend,
     '../notes': notes, '../folders': folders, '../draftLibrary': drafts,
@@ -92,6 +96,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     '../privateMoveService': { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } },
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
+    '../noteTransfer': noteTransfer,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' }, './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
     './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },

@@ -209,3 +209,48 @@ test('corrupt and future-version storage stays byte-for-byte intact with saves b
     assert.equal(backend.data.get(NOTES_STORAGE_KEY), raw);
   }
 });
+
+test('bulk import prepends new notes with guarded IDs and preserves the existing library and editor draft', async () => {
+  let saved;
+  const controller = createNotesController({
+    async load() { return [note]; },
+    allocateNoteId(usedIds) {
+      const used = new Set(usedIds);
+      let sequence = 1;
+      while (used.has(`local-note-${sequence}`)) sequence += 1;
+      return `local-note-${sequence}`;
+    },
+    async save(notes) { saved = notes; },
+  });
+  await controller.load();
+  draft(controller, 'Unsaved editor text');
+  const imported = {
+    title: 'Imported', text: 'Preserved body', category: 'ideas', createdAt: NOW,
+    updatedAt: LATER, pinned: true, archived: false, deletedAt: null,
+  };
+
+  assert.equal(await controller.importNotes([imported, imported]), true);
+  const state = controller.getSnapshot().state;
+  assert.deepEqual(state.notes.map(item => item.id), ['local-note-1', 'local-note-3', note.id]);
+  assert.equal(state.notes[0].createdAt, NOW);
+  assert.equal(state.notes[0].updatedAt, LATER);
+  assert.equal(state.notes[0].pinned, true);
+  assert.equal(state.draft.text, 'Unsaved editor text');
+  assert.deepEqual(saved, state.notes);
+});
+
+test('failed bulk import leaves the existing notes and draft unchanged', async () => {
+  const controller = createNotesController({
+    async load() { return [note]; },
+    allocateNoteId() { return 'local-note-1'; },
+    async save() { throw Error('disk full'); },
+  });
+  await controller.load();
+  draft(controller, 'Keep this draft');
+  const before = controller.getSnapshot().state;
+  const imported = { title: 'Imported', text: 'Body', category: 'general', createdAt: NOW, updatedAt: NOW, pinned: false, archived: false, deletedAt: null };
+
+  assert.equal(await controller.importNotes([imported]), false);
+  assert.deepEqual(controller.getSnapshot().state, before);
+  assert.match(controller.getSnapshot().storageError, /No notes were added/);
+});
