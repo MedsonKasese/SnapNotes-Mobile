@@ -58,3 +58,32 @@ test('allows attachment storage while the note remains ordinary', async () => {
   assert.equal(h.copies, 1);
   assert.equal((await h.service.list('note_123')).length, 1);
 });
+
+test('renames attachment metadata without copying or deleting its stored file', async () => {
+  const h = harness(() => true);
+  const original = await h.service.add('note_123', picked);
+  const renamed = await h.service.rename('note_123', original.id, '  Final report.pdf  ');
+  assert.equal(renamed.name, 'Final report.pdf');
+  assert.equal(renamed.fileKey, original.fileKey);
+  assert.equal(h.copies, 1);
+  assert.equal(h.items.length, 1);
+  assert.equal((await h.service.list('note_123'))[0].name, 'Final report.pdf');
+});
+
+test('sanitizes unsafe filename characters and rejects an empty rename', async () => {
+  const h = harness(() => true);
+  const original = await h.service.add('note_123', picked);
+  const renamed = await h.service.rename('note_123', original.id, '  report/\\draft.pdf  ');
+  assert.equal(renamed.name, 'reportdraft.pdf');
+  await assert.rejects(h.service.rename('note_123', original.id, ' /\\ '), /valid file name/);
+  assert.equal((await h.service.list('note_123'))[0].name, 'reportdraft.pdf');
+});
+
+test('does not rename an attachment after its note enters Private Notes', async () => {
+  let ordinary = true;
+  const h = harness(() => ordinary);
+  const original = await h.service.add('note_123', picked);
+  ordinary = false;
+  await assert.rejects(h.service.rename('note_123', original.id, 'secret.pdf'), /not available in Private Notes/);
+  assert.equal((await h.service.list('note_123'))[0].name, original.name);
+});
