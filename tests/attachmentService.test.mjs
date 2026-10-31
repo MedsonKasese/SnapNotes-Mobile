@@ -85,5 +85,5 @@ test('does not rename an attachment after its note enters Private Notes', async 
   const original = await h.service.add('note_123', picked);
   ordinary = false;
   await assert.rejects(h.service.rename('note_123', original.id, 'secret.pdf'), /not available in Private Notes/);
-  assert.equal((await h.service.list('note_123'))[0].name, original.name);
+  assert.equal(h.items[0].name, original.name, 'the rejected rename must leave the manifest unchanged');
 });

@@ -16,16 +16,20 @@ const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
 
-function renderSummary({ fileForPreview = () => null } = {}) {
+function createSummaryRenderer({ fileForPreview = () => null, onPreviewVisibilityChange = () => {} } = {}) {
   let hookIndex = 0;
+  const hookState = [];
   const exports = {};
   vm.runInNewContext(outputText, {
     exports,
     require(name) {
       if (name === 'react') return {
-        useState() {
+        useState(initialValue) {
           const index = hookIndex++;
-          return [index === 0 ? attachments : index === 1 ? true : null, () => {}];
+          if (!(index in hookState)) hookState[index] = index === 0 ? attachments : index === 1 ? true : initialValue;
+          return [hookState[index], value => {
+            hookState[index] = typeof value === 'function' ? value(hookState[index]) : value;
+          }];
         },
         useEffect() {},
         useCallback: callback => callback,
@@ -38,7 +42,9 @@ function renderSummary({ fileForPreview = () => null } = {}) {
       if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {} };
       if (name === 'expo-crypto') return { __esModule: true, randomUUID: () => 'generated_id' };
       if (name === '../androidAttachmentFiles') return { createAndroidAttachmentFiles: () => ({ fileForPreview }) };
-      if (name === './AttachmentPreview') return { AttachmentPreview: () => null };
+      if (name === './AttachmentPreview') return {
+        AttachmentPreview: ({ attachment, onClose }) => ({ type: 'AttachmentPreview', props: { attachment, onClose } }),
+      };
       if (name === '../androidAttachmentPicker') return { pickAndroidAttachments: async () => [] };
       if (name === '../attachmentManifestStorage') return { createAttachmentManifestStorage: () => ({}) };
       if (name === '../attachmentService') return { createAttachmentService: () => ({ list: async () => attachments }) };
@@ -50,7 +56,14 @@ function renderSummary({ fileForPreview = () => null } = {}) {
       throw new Error(`Unexpected import: ${name}`);
     },
   });
-  return exports.NoteAttachmentSummary({ noteId: 'ordinary-note-7' });
+  return () => {
+    hookIndex = 0;
+    return exports.NoteAttachmentSummary({ noteId: 'ordinary-note-7', onPreviewVisibilityChange });
+  };
+}
+
+function renderSummary(options) {
+  return createSummaryRenderer(options)();
 }
 
 function elements(tree) {
@@ -91,4 +104,18 @@ test('saved-note summary uses an available local image thumbnail and falls back 
   assert.deepEqual(elements(summary).filter(element => element.type === 'FontAwesome').map(element => element.props.name), [
     'file-pdf-o',
   ]);
+});
+
+test('note-card attachment preview visibility is cleared when the preview closes', () => {
+  const visibilityChanges = [];
+  const render = createSummaryRenderer({ onPreviewVisibilityChange: visible => visibilityChanges.push(visible) });
+  const previewButton = elements(render()).find(element => element.props.accessibilityLabel === 'Preview diagram.png');
+
+  previewButton.props.onPress();
+  assert.deepEqual(visibilityChanges, [true]);
+
+  const preview = elements(render()).find(element => element.type === 'AttachmentPreview');
+  assert.ok(preview);
+  preview.props.onClose();
+  assert.deepEqual(visibilityChanges, [true, false]);
 });

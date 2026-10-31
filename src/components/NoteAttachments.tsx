@@ -168,7 +168,7 @@ export function NoteAttachments({ noteId }: { noteId: string }) {
       {items.map(item => (
         <AttachmentRow key={item.id} item={item} action="Remove" onAction={() => { if (!busy) remove(item); }} onRename={() => { if (!busy) beginRename(item); }} onPreview={() => setPreview(item)} />
       ))}
-      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => { setPreview(null); onPreviewVisibilityChange?.(false); }} />}
+      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
       <Modal visible={renameTarget !== null} transparent animationType="fade" onRequestClose={() => setRenameTarget(null)}>
         <View style={attachmentStyles.dialogOverlay}>
           <View style={attachmentStyles.dialog}>
@@ -215,7 +215,7 @@ export function NoteAttachmentSummary({ noteId, onPreviewVisibilityChange }: { n
     <View accessibilityLabel="Note attachments" style={{ gap: 6, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#e6ebdf' }}>
       <Text style={{ color: '#34452f', fontWeight: '700' }}>Attachments ({items.length})</Text>
       {items.map(item => <AttachmentRow key={item.id} item={item} onPreview={() => { setPreview(item); onPreviewVisibilityChange?.(true); }} />)}
-      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => setPreview(null)} />}
+      {preview !== null && <AttachmentPreview attachment={preview} onClose={() => { setPreview(null); onPreviewVisibilityChange?.(false); }} />}
       <Text style={{ color: '#596b55', fontSize: 12 }}>Stored on this device only. Not synced to the web app.</Text>
     </View>
   );
