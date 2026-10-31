@@ -40,8 +40,10 @@ test('Android back and navigation guard unsaved editor changes', () => {
   assert.match(source, /function openLibrary\(\)[\s\S]*?confirmDiscard/);
 });
 
-test('search remains clearable and note cards open the editor', () => {
+test('search remains clearable and note cards expose editing only through their actions menu', () => {
   assert.match(source, /accessibilityLabel="Clear search"/);
   assert.match(source, /onChangeText={setSearchQuery}/);
-  assert.match(source, /onPress={\(\) => editNote\(item\.id\)}/);
+  assert.doesNotMatch(source, /onPress={\(\) => editNote\(item\.id\)}/);
+  assert.match(source, /accessibilityLabel=\{'Edit note: ' \+ title\}/);
+  assert.match(source, /<Text style={styles\.actionsMenuText}>Edit note<\/Text>/);
 });

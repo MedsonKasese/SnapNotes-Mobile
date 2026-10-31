@@ -85,18 +85,18 @@ function MenuRow({ label, detail, icon, onPress, active = false, iconColor, fill
   );
 }
 
-function NoteActionsMenuContent({ title, canOpen, saving, options, onOpen, onAction }: {
-  title: string; canOpen: boolean; saving: boolean; options: NoteActionOption[];
-  onOpen: () => void; onAction: (action: NoteAction) => void;
+function NoteActionsMenuContent({ title, canEdit, saving, options, onEdit, onAction }: {
+  title: string; canEdit: boolean; saving: boolean; options: NoteActionOption[];
+  onEdit: () => void; onAction: (action: NoteAction) => void;
 }) {
   return (
     <ScrollView style={styles.actionsMenuScroll} keyboardShouldPersistTaps="handled">
-      {canOpen && (
-        <Pressable accessibilityRole="button" accessibilityLabel={'Open note: ' + title}
-          disabled={saving} accessibilityState={{ disabled: saving }} onPress={onOpen}
+      {canEdit && (
+        <Pressable accessibilityRole="button" accessibilityLabel={'Edit note: ' + title}
+          disabled={saving} accessibilityState={{ disabled: saving }} onPress={onEdit}
           style={({ pressed }) => [styles.actionsMenuRow, pressed && styles.actionsMenuRowPressed]}>
           <FontAwesome name="file-text-o" size={19} color="#52634b" style={styles.actionsMenuIcon} accessible={false} />
-          <Text style={styles.actionsMenuText}>Open note</Text>
+          <Text style={styles.actionsMenuText}>Edit note</Text>
         </Pressable>
       )}
       {options.map(option => (
@@ -144,7 +144,6 @@ export function NotesWorkspace() {
   const [appearanceColor, setAppearanceColor] = useState<FolderColor>('');
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
-  const [attachmentPreviewNoteId, setAttachmentPreviewNoteId] = useState<string | null>(null);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
   const [privateMovePassword, setPrivateMovePassword] = useState('');
   const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
@@ -1247,9 +1246,9 @@ export function NotesWorkspace() {
             renderItem={({ item }) => {
               const formattedLines = item.html ? getNoteHtmlLines(item.html) : undefined;
               return (
-              // Keep nested checkboxes/menu independently reachable by screen readers.
-              // The contextual menu provides their explicit Open note control.
-              <Pressable style={styles.card} accessible={false} disabled={view === 'trash' || attachmentPreviewNoteId === item.id} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
+              // Cards are informational; edit actions stay explicit in the note menu.
+              // Keep nested checkboxes and menu controls independently reachable.
+              <View style={styles.card} accessible={false}>
                 <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
@@ -1277,7 +1276,7 @@ export function NotesWorkspace() {
                     })}
                   </View>
                 )}
-                <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} onPreviewVisibilityChange={visible => setAttachmentPreviewNoteId(visible ? item.id : current => current === item.id ? null : current)} />
+                <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} />
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
                     <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
@@ -1309,7 +1308,7 @@ export function NotesWorkspace() {
                     </Pressable>
                   </View>
                 </View>
-              </Pressable>
+              </View>
               );
             }}
           />
@@ -1360,9 +1359,9 @@ export function NotesWorkspace() {
                 pointerEvents={actionsMenuReady ? 'auto' : 'none'}
                 onLayout={event => setActionsMenuHeight(event.nativeEvent.layout.height)}
                 style={[styles.actionsMenu, actionsMenuLayout, !actionsMenuReady && styles.actionsMenuMeasuring]}>
-                {selected && <NoteActionsMenuContent title={selected.title || 'Untitled note'} canOpen={selected.deletedAt === null}
+                {selected && <NoteActionsMenuContent title={selected.title || 'Untitled note'} canEdit={selected.deletedAt === null}
                   saving={saving} options={options}
-                  onOpen={() => {
+                  onEdit={() => {
                     if (controller.getSnapshot().status !== 'ready') return;
                     closeNoteActions();
                     editNote(selected.id);

@@ -160,8 +160,9 @@ function openNoteActions(app, item, {
   triggerRect = [310, 530, 40, 40], viewportRect = [0, 30, 380, 740], menuHeight = 146,
 } = {}) {
   const card = list(app.render()).props.renderItem({ item });
-  const openCard = find(card, element => element.props.accessibilityLabel === `Open ${item.title}`);
-  assert.equal(openCard.props.accessibilityRole, 'button');
+  assert.equal(card.type, 'View');
+  assert.equal(card.props.accessible, false);
+  assert.equal(card.props.onPress, undefined);
   assert.equal(find(card, element => element.props.accessibilityLabel === `Note actions for ${item.title}`).props.accessibilityRole, 'button');
   const trigger = find(card, element => element.props.accessibilityLabel === `Note actions for ${item.title}`);
   trigger.props.ref({ measureInWindow: callback => callback(...triggerRect) });
@@ -180,7 +181,7 @@ function editWorkNote(app) {
   const tree = app.render();
   assert.equal(list(tree).props.data.length, 2);
   openNoteActions(app, savedNotes[0]);
-  find(app.render(), element => element.props.accessibilityLabel === 'Open note: Project alpha').props.onPress();
+  find(app.render(), element => element.props.accessibilityLabel === 'Edit note: Project alpha').props.onPress();
 }
 
 const archivedNote = { ...savedNotes[0], id: 'archived-1', title: 'Archived project', archived: true, pinned: true, deletedAt: null };
@@ -203,8 +204,8 @@ test('new-note editor explains attachments appear after save, and saved-note edi
 test('saved note editor and attachment siblings use distinct React keys', () => {
   const note = { ...savedNotes[0], id: 'local-note-42' };
   const app = workspace([note]);
-  const card = list(app.render()).props.renderItem({ item: note });
-  find(card, element => element.props.accessibilityLabel === `Open ${note.title}`).props.onPress();
+  const { sheet } = openNoteActions(app, note);
+  find(sheet, element => element.props.accessibilityLabel === `Edit note: ${note.title}`).props.onPress();
 
   const tree = app.render();
   const editor = find(tree, element => element.type === 'RichNoteEditor');
@@ -294,8 +295,8 @@ test('Private Notes drawer badge reports the current count', () => {
 test('library, archive, and trash expose exactly their available note actions in the popup', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, expected] of [
-    ['library', savedNotes[0], ['Open note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
-    ['archive', archivedNote, ['Open note: Archived project', 'Duplicate note: Archived project', 'Move to folder: Archived project', 'Restore from archive: Archived project', 'Move to Trash: Archived project']],
+    ['library', savedNotes[0], ['Edit note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
+    ['archive', archivedNote, ['Edit note: Archived project', 'Duplicate note: Archived project', 'Move to folder: Archived project', 'Restore from archive: Archived project', 'Move to Trash: Archived project']],
     ['trash', { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' }, ['Restore note: Deleted project', 'Delete forever: Deleted project']],
   ]) {
     if (view === 'archive') action(app.render(), 'Archived').props.onPress();
@@ -394,11 +395,12 @@ test('a stale enabled sheet callback is ignored if saving begins before it is pr
   assert.deepEqual(app.events.filter(([event]) => event === 'close-actions'), []);
 });
 
-test('opening a note card while saving does not start an editor session', () => {
+test('note cards are not editor shortcuts while saving', () => {
   const app = workspace();
   app.setStatus('saving');
   const card = list(app.render()).props.renderItem({ item: savedNotes[0] });
-  find(card, element => element.props.accessibilityLabel === 'Open Project alpha').props.onPress();
+  assert.equal(card.type, 'View');
+  assert.equal(card.props.onPress, undefined);
   assert.equal(app.controller.getSnapshot().state.editingId, null);
   assert.equal(elements(app.render()).some(element => element.type === 'FlatList'), true);
   assert.deepEqual(app.events.filter(([event]) => event === 'dispatch'), []);
@@ -407,7 +409,7 @@ test('opening a note card while saving does not start an editor session', () => 
 test('selecting actions closes the sheet before opening editor or a confirmation, then runs confirmed actions', () => {
   const app = workspace();
   const { sheet } = openNoteActions(app, savedNotes[0]);
-  find(sheet, element => element.props.accessibilityLabel === 'Open note: Project alpha').props.onPress();
+  find(sheet, element => element.props.accessibilityLabel === 'Edit note: Project alpha').props.onPress();
   assert.equal(actionsModal(app.render()).props.visible, false);
   assert.ok(app.events.findIndex(([event]) => event === 'close-actions') < app.events.findIndex(([event]) => event === 'dispatch'));
   assert.equal(app.controller.getSnapshot().state.editingId, savedNotes[0].id);
@@ -597,13 +599,13 @@ test('cards do not group their independent checklist and menu accessibility elem
   assert.equal(menu.props.accessibilityRole, 'button');
   assert.notEqual(menu.props.accessible, false);
   assert.equal(app.controller.getSnapshot().state.editingId, null, 'opening the menu must not dispatch an edit');
-  assert.equal(find(sheet, element => element.props.accessibilityLabel === 'Open note: Project alpha').props.accessibilityRole, 'button');
+  assert.equal(find(sheet, element => element.props.accessibilityLabel === 'Edit note: Project alpha').props.accessibilityRole, 'button');
 });
 
-test('a stale Open sheet callback cannot navigate while another write is saving', () => {
+test('a stale Edit note sheet callback cannot navigate while another write is saving', () => {
   const app = workspace();
   const { sheet } = openNoteActions(app, savedNotes[0]);
-  const open = find(sheet, element => element.props.accessibilityLabel === 'Open note: Project alpha');
+  const open = find(sheet, element => element.props.accessibilityLabel === 'Edit note: Project alpha');
   app.setStatus('saving');
   open.props.onPress();
   assert.equal(actionsModal(app.render()).props.visible, true);
@@ -639,7 +641,7 @@ test('pin and unpin stay on one independent card button, never in the action men
 
     const { sheet } = openNoteActions(app, item);
     assert.deepEqual(sheetActions(sheet, item.title).map(button => button.props.accessibilityLabel), [
-      'Open note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
+      'Edit note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
     ]);
   }
 });
@@ -679,7 +681,7 @@ test('the contextual popup stays compact and accessible with its duplicate, fold
   assert.deepEqual(elements(menu).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), ['file-text-o', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']);
   assert.equal(elements(menu).some(element => element.props.accessibilityRole === 'header'), false);
   assert.doesNotMatch(text(menu), /Cancel|Share|history|private|Pin|Unpin/);
-  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Open note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
+  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Edit note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
   const danger = find(menu, element => element.type === 'Text' && text(element) === 'Move to Trash');
   assert.equal(flatStyle(danger.props.style).color, '#b3261e');
   for (const button of sheetActions(sheet, savedNotes[0].title)) {
@@ -781,7 +783,7 @@ test('old measurements and an old onShow cannot move the menu to a previous note
   popup(app.render()).props.onLayout({ nativeEvent: { layout: { height: 150 } } });
   for (const finish of pendingFirst) finish(20, 700, 40, 40);
   tree = app.render();
-  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Open note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
+  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Edit note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
   const expected = getNoteActionsMenuLayout({ x: 290, y: 300, width: 40, height: 40 }, { x: 0, y: 30, width: 380, height: 740 }, 150);
   const style = flatStyle(popup(tree).props.style);
   assert.equal(style.left, expected.left);

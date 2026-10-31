@@ -27,6 +27,7 @@ const stateNames = [...source.matchAll(/const \[(\w+)[^\]]*\] = useState\b/g)].m
 const DRAFT_KEY = '@snapnotes-mobile/editor-draft';
 const savedNotes = [{
   id: 'saved-1', title: 'Existing note', text: 'Existing body', category: 'work',
+  pinned: false, archived: false, deletedAt: null,
   createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
 }];
 
@@ -279,6 +280,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
 function elements(tree) {
   if (Array.isArray(tree)) return tree.flatMap(elements);
   if (!tree || typeof tree !== 'object' || !tree.props) return [];
+  if (typeof tree.type === 'function' && tree.type.name === 'NoteActionsMenuContent') return [tree, ...elements(tree.type(tree.props))];
   return [tree, ...elements(tree.props.children)];
 }
 function find(tree, predicate, message = 'expected component element to exist') {
@@ -291,6 +293,23 @@ const text = tree => Array.isArray(tree) ? tree.map(text).join('')
     : typeof tree === 'string' || typeof tree === 'number' ? String(tree) : '';
 const action = (tree, label) => find(tree, element => element.props.label === label, `missing Action: ${label}`);
 const labeled = (tree, label) => find(tree, element => element.props.accessibilityLabel === label, `missing control: ${label}`);
+
+function editFromActionsMenu(app, item) {
+  const list = find(app.render(), element => element.type === 'FlatList');
+  const card = list.props.renderItem({ item });
+  const trigger = labeled(card, `Note actions for ${item.title}`);
+  trigger.props.ref({ measureInWindow: callback => callback(310, 530, 40, 40) });
+  trigger.props.onPress();
+  const modal = find(app.render(), element => element.type === 'Modal' &&
+    elements(element).some(child => child.props.testID === 'note-actions-layer'));
+  const layer = find(modal, element => element.props.testID === 'note-actions-layer');
+  layer.props.ref.current = { measureInWindow: callback => callback(0, 30, 380, 740) };
+  modal.props.onShow();
+  const menu = find(app.render(), element => element.props.testID === 'note-actions-menu');
+  menu.props.onLayout({ nativeEvent: { layout: { height: 146 } } });
+  labeled(app.render(), `Edit note: ${item.title}`).props.onPress();
+}
+
 const readError = /An earlier recovery draft could not be read/;
 const validRecord = (overrides = {}) => JSON.stringify({
   version: 1, title: 'Recovered title', text: 'Recovered body', category: 'ideas', editingId: null, ...overrides,
@@ -439,10 +458,7 @@ test('editing an existing saved note while recovery is pending takes ownership',
   const pendingRead = deferred();
   const app = workspace({ initialNotes: savedNotes, reads: [pendingRead] });
   await startRead(app);
-  const tree = app.render();
-  const list = find(tree, element => element.type === 'FlatList');
-  const card = list.props.renderItem({ item: savedNotes[0] });
-  labeled(card, 'Open Existing note').props.onPress();
+  editFromActionsMenu(app, savedNotes[0]);
   pendingRead.resolve(validRecord());
   await app.flushMicrotasks();
   const state = app.controller.getSnapshot().state;
@@ -734,7 +750,8 @@ test('a card tap during checklist persistence does not open a blank editor or su
   const item = app.controller.getSnapshot().state.notes[0];
   const list = find(app.render(), element => element.type === 'FlatList');
   const card = list.props.renderItem({ item });
-  labeled(card, 'Open Checklist').props.onPress();
+  assert.equal(card.type, 'View');
+  assert.equal(card.props.onPress, undefined);
   assert.equal(app.controller.getSnapshot().state.editingId, null);
   assert.ok(elements(app.render()).some(element => element.type === 'FlatList'));
   assert.equal(app.dispatchCalls.some(action => action.type === 'edit'), false);
