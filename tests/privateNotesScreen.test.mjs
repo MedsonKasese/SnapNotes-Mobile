@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { createPrivateSession } from '../src/privateSession.ts';
+import { createPrivateScreenCaptureProtection } from '../src/privateScreenCapture.ts';
 import { sanitizeNoteHtml } from '../src/noteFormatting.ts';
 
 const require = createRequire(import.meta.url);
@@ -36,9 +37,9 @@ const input = (app, label = 'Private Notes password') => find(app.render(), item
 
 // Exercise the actual JSX, hooks and async handlers. Native rendering and the
 // access boundary are mocked; crypto/storage have separate integration tests.
-async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => [], restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }), remove = async () => {}, onRestored = async () => {}, initialState = 'active' } = {}) {
+async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => [], restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }), remove = async () => {}, onRestored = async () => {}, preventCapture = async () => {}, allowCapture = async () => {}, initialState = 'active' } = {}) {
   const slots = [], effects = [], calls = [], listeners = new Map();
-  const restoreCalls = [], mutationCalls = [], alerts = [];
+  const restoreCalls = [], mutationCalls = [], alerts = [], captureCalls = [];
   const unlockedKey = { token: 'authenticated-test-key' };
   let cursor = 0, mounted = true, writesAfterUnmount = 0, backs = 0;
   const appState = {
@@ -49,6 +50,12 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
       listeners.set(name, callbacks);
       return { remove() { callbacks.delete(callback); } };
     },
+  };
+  const screenCapture = {
+    preventScreenCaptureAsync(key) { captureCalls.push(['prevent', key]); return preventCapture(key); },
+    allowScreenCaptureAsync(key) { captureCalls.push(['allow', key]); return allowCapture(key); },
+    enableAppSwitcherProtectionAsync() { captureCalls.push(['enable-app-switcher']); return Promise.resolve(); },
+    disableAppSwitcherProtectionAsync() { captureCalls.push(['disable-app-switcher']); return Promise.resolve(); },
   };
   const react = {
     useState(initial) {
@@ -84,14 +91,16 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
     react, 'react/jsx-runtime': require('react/jsx-runtime'),
     'react-native': {
       ...Object.fromEntries(['ActivityIndicator', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(name => [name, name])),
-      AppState: appState, StyleSheet: { create: styles => styles },
+      AppState: appState, Platform: { OS: 'android' }, StyleSheet: { create: styles => styles },
       Alert: { alert(...args) { alerts.push(args); } },
     },
     '@expo/vector-icons/FontAwesome': { __esModule: true, default: 'FontAwesome' },
     '@expo/vector-icons/MaterialCommunityIcons': { __esModule: true, default: 'MaterialCommunityIcons' },
     '@react-native-async-storage/async-storage': {},
+    'expo-screen-capture': screenCapture,
     '../privateAccess': { createPrivateAccess: () => access },
     '../privateSession': { createPrivateSession },
+    '../privateScreenCapture': { createPrivateScreenCaptureProtection },
     '../privateRestoreService': { restoreDevicePrivateNoteWithKey(id, key) { restoreCalls.push([id, key]); return restore(id, key); } },
     '../privateNoteManagementService': {
       updateDevicePrivateNote(id, session, changes) {
@@ -121,7 +130,7 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
   async function flush() { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }
   render(); await flush();
   return {
-    render, flush, calls, restoreCalls, mutationCalls, alerts, unlockedKey,
+    render, flush, calls, restoreCalls, mutationCalls, alerts, captureCalls, unlockedKey,
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
     replayEffects() {
       for (const effect of effects) effect?.cleanup?.();
@@ -137,6 +146,36 @@ function enterPassword(app, setup = false) {
   if (setup) input(app, 'Confirm Private Notes password').props.onChangeText(PASSWORD);
 }
 const isUnlocked = app => elements(app.render()).some(item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Lock Private Notes');
+
+test('private controls stay hidden until capture blocking is active and the native lease lasts until unmount', async () => {
+  const pending = deferred();
+  const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general' };
+  const app = await screen({ preventCapture: () => pending.promise, unlock: async () => [preview] });
+  assert.deepEqual(app.captureCalls.map(([operation]) => operation), ['prevent']);
+  assert.doesNotMatch(text(app.render()), /Private Notes password|Unlock/);
+  assert.equal(app.captureCalls[0][1].startsWith('snapnotes-private-notes-'), true);
+
+  pending.resolve();
+  await app.flush();
+  enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
+  assert.match(text(app.render()), /Sensitive body/);
+  lockButton(app).props.onPress();
+  assert.doesNotMatch(text(app.render()), /Sensitive body/);
+  assert.deepEqual(app.captureCalls.map(([operation]) => operation), ['prevent'], 'locking must not release protection while this screen remains mounted');
+
+  app.unmount(); await app.flush();
+  assert.deepEqual(app.captureCalls.map(([operation]) => operation), ['prevent', 'allow']);
+  assert.equal(app.captureCalls[1][1], app.captureCalls[0][1]);
+});
+
+test('private notes fail closed when native capture protection cannot be enabled', async () => {
+  const app = await screen({ preventCapture: async () => { throw new Error('native capture unavailable'); } });
+  assert.match(text(app.render()), /Screen protection could not be enabled/);
+  assert.doesNotMatch(text(app.render()), /Private Notes password|Unlock/);
+  app.unmount(); await app.flush();
+  assert.deepEqual(app.captureCalls.map(([operation]) => operation), ['prevent', 'allow']);
+  assert.equal(app.captureCalls[1][1], app.captureCalls[0][1]);
+});
 
 test('unlock displays authenticated previews and locking clears decrypted note content', async () => {
   const preview = { id: 'private-1', title: 'Private title', text: 'Sensitive body', html: '<p>Sensitive body</p>', category: 'general',

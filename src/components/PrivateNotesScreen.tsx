@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from 'react';
 import {
-  ActivityIndicator, Alert, AppState, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, Alert, AppState, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ScreenCapture from 'expo-screen-capture';
 import { createPrivateAccess, type AuthenticatedPrivateSession } from '../privateAccess';
 import { createPrivateSession } from '../privateSession';
+import { createPrivateScreenCaptureProtection } from '../privateScreenCapture';
 import { restoreDevicePrivateNoteWithKey } from '../privateRestoreService';
 import { deleteDevicePrivateNote, updateDevicePrivateNote } from '../privateNoteManagementService';
 import { validateDraft } from '../notes';
@@ -43,6 +45,7 @@ function formatUpdatedNoteTime(updatedAt?: string, time?: string, createdAt?: st
 
 export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void; onRestored?: () => Promise<void> }) {
   const [phase, setPhase] = useState<'loading' | 'setup' | 'locked' | 'unlocked' | 'error'>('loading');
+  const [captureProtection, setCaptureProtection] = useState<'pending' | 'ready' | 'error'>('pending');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -97,6 +100,20 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     closeActionsMenu();
     setError(null);
   }
+
+  useEffect(() => {
+    let active = true;
+    const protection = createPrivateScreenCaptureProtection(ScreenCapture, Platform.OS === 'ios');
+    void protection.activate().then(() => {
+      if (active) setCaptureProtection('ready');
+    }).catch(() => {
+      if (active) setCaptureProtection('error');
+    });
+    return () => {
+      active = false;
+      void protection.release().catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     const session = lifecycle.current;
@@ -340,6 +357,21 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 
   const orderedNotes = useMemo(() => [...privateNotes].sort((a, b) => Number(b.pinned) - Number(a.pinned)), [privateNotes]);
   const activeActionNote = actionsNoteId ? privateNotes.find(note => note.id === actionsNoteId) : null;
+
+  if (captureProtection !== 'ready') {
+    return (
+      <View style={styles.container}>
+        <Pressable accessibilityRole="button" onPress={onBack}>
+          <Text style={styles.back}>‹ All notes</Text>
+        </Pressable>
+        {captureProtection === 'pending' ? <ActivityIndicator /> : (
+          <Text accessibilityRole="alert" style={styles.error}>
+            Screen protection could not be enabled. Private Notes are unavailable until you leave and reopen this screen.
+          </Text>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
