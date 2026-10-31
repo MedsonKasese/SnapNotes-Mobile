@@ -139,6 +139,7 @@ export function NotesWorkspace() {
   const [appearanceColor, setAppearanceColor] = useState<FolderColor>('');
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
+  const [attachmentPreviewNoteId, setAttachmentPreviewNoteId] = useState<string | null>(null);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
   const [privateMovePassword, setPrivateMovePassword] = useState('');
   const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
@@ -1128,7 +1129,7 @@ export function NotesWorkspace() {
               return (
               // Keep nested checkboxes/menu independently reachable by screen readers.
               // The contextual menu provides their explicit Open note control.
-              <Pressable style={styles.card} accessible={false} disabled={view === 'trash'} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
+              <Pressable style={styles.card} accessible={false} disabled={view === 'trash' || attachmentPreviewNoteId === item.id} onPress={() => editNote(item.id)} accessibilityRole="button" accessibilityLabel={`Open ${item.title || 'Untitled note'}`}>
                 <View style={styles.noteCardTop}>
                   <View style={styles.noteAccent} />
                   <Text accessibilityRole="header" style={styles.noteTitle}>{item.title || 'Untitled note'}</Text>
@@ -1156,7 +1157,7 @@ export function NotesWorkspace() {
                     })}
                   </View>
                 )}
-                <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} />
+                <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} onPreviewVisibilityChange={visible => setAttachmentPreviewNoteId(visible ? item.id : current => current === item.id ? null : current)} />
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
                     <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
