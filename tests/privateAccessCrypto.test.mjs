@@ -42,6 +42,8 @@ async function makeHarness(options = {}) {
       const derive = () => cryptoExports.derivePrivateKey(password, salt, webcrypto);
       return deriveHook ? deriveHook({ password, salt, derive }) : derive();
     },
+    derivePrivateKeyForBiometric: (password, salt) => cryptoExports.derivePrivateKeyForBiometric(password, salt, webcrypto),
+    exportPrivateKey: key => cryptoExports.exportPrivateKey(key, webcrypto),
     async encryptPrivatePayload(...args) {
       const record = await cryptoExports.encryptPrivatePayload(...args, webcrypto);
       return encryptHook ? encryptHook({ payload: args[0], key: args[1], salt: args[2], record }) : record;
@@ -76,6 +78,7 @@ async function makeHarness(options = {}) {
   return {
     createAccess: backend => accessExports.createPrivateAccess(backend),
     createVault: backend => storageExports.createPrivateVaultStorage(backend),
+    importPrivateKey: key => cryptoExports.importPrivateKey(key, webcrypto),
     async storeVerifierPayload(backend, payload) {
       const salt = await cryptoExports.generatePrivateSalt(webcrypto);
       const key = await cryptoExports.derivePrivateKey(password, salt, webcrypto);
@@ -383,6 +386,7 @@ test('unlocked session returns its live key and decrypts private previews withou
   const initial = await access.readUnlockedSession(password);
   assert.deepEqual(JSON.parse(JSON.stringify(initial.notes)), []);
   assert.ok(initial.key);
+  assert.equal(initial.key.extractable, false, 'normal password unlock keeps its vault key non-exportable');
   assert.equal(initial.salt.length, 16);
 
   const privatePayload = { title: 'In-memory title', text: 'In-memory body', html: '<p>In-memory body</p>', category: 'personal', pinned: true };
@@ -438,4 +442,30 @@ test('leaving during real password setup keeps the late committed vault locked a
   assert.equal(persisted.includes(password), false);
   assert.equal(persisted.includes(verifierText), false);
   for (const [key, value] of ordinaryRecords) assert.equal(backend.values.get(key), value);
+});
+
+test('biometric key enrollment is password-verified and the recovered key must authenticate the existing vault', async () => {
+  const backend = memoryBackend();
+  const harness = await makeHarness();
+  const access = harness.createAccess(backend);
+  await access.setup(password, password);
+  const writesBefore = backend.writes.length;
+
+  const protectedKey = await access.exportBiometricKey(password);
+  assert.equal(protectedKey.length, 32);
+  assert.equal(backend.writes.length, writesBefore, 'biometric enrollment does not alter the vault');
+  assert.equal([...backend.values.values()].join('\n').includes(password), false);
+  await assert.rejects(access.exportBiometricKey('wrong-password-2026'), /Incorrect password/);
+
+  const unlocked = await access.readUnlockedSessionWithKey(await harness.importPrivateKey(protectedKey));
+  assert.deepEqual(JSON.parse(JSON.stringify(unlocked.notes)), []);
+  const wrongKey = new Uint8Array(32);
+  wrongKey.fill(7);
+  await assert.rejects(
+    access.readUnlockedSessionWithKey(await harness.importPrivateKey(wrongKey)),
+    error => /\[PV-AUTH\]/.test(error?.message ?? ''),
+  );
+  assert.equal(backend.writes.length, writesBefore, 'failed biometric verification is read-only');
+  protectedKey.fill(0);
+  wrongKey.fill(0);
 });

@@ -37,10 +37,25 @@ const input = (app, label = 'Private Notes password') => find(app.render(), item
 
 // Exercise the actual JSX, hooks and async handlers. Native rendering and the
 // access boundary are mocked; crypto/storage have separate integration tests.
-async function screen({ status = async () => 'locked', setup = async () => {}, unlock = async () => [], restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }), remove = async () => {}, onRestored = async () => {}, preventCapture = async () => {}, allowCapture = async () => {}, initialState = 'active' } = {}) {
+async function screen({
+  status = async () => 'locked', setup = async () => {}, unlock = async () => [],
+  unlockWithKey = async () => [], exportBiometricKey = async () => Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+  biometricAvailable = false, biometricKey = null,
+  restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }),
+  remove = async () => {}, onRestored = async () => {}, preventCapture = async () => {},
+  allowCapture = async () => {}, initialState = 'active',
+} = {}) {
   const slots = [], effects = [], calls = [], listeners = new Map();
-  const restoreCalls = [], mutationCalls = [], alerts = [], captureCalls = [];
+  const restoreCalls = [], mutationCalls = [], alerts = [], captureCalls = [], biometricCalls = [];
   const unlockedKey = { token: 'authenticated-test-key' };
+  let storedBiometricKey = biometricKey ? Uint8Array.from(biometricKey) : null;
+  const asyncStorage = new Map();
+  const biometricKeyStore = {
+    canUse() { return biometricAvailable; },
+    async read() { biometricCalls.push(['read']); return storedBiometricKey ? Uint8Array.from(storedBiometricKey) : null; },
+    async save(key) { biometricCalls.push(['save']); storedBiometricKey = Uint8Array.from(key); },
+    async remove() { biometricCalls.push(['remove']); storedBiometricKey = null; },
+  };
   let cursor = 0, mounted = true, writesAfterUnmount = 0, backs = 0;
   const appState = {
     currentState: initialState,
@@ -86,6 +101,14 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
         return { notes: lastUnlockedNotes, key: unlockedKey, salt: new Uint8Array([1]) };
       });
     },
+    exportBiometricKey(...args) { calls.push(['exportBiometricKey', ...args]); return exportBiometricKey(...args); },
+    readUnlockedSessionWithKey(key) {
+      calls.push(['unlockWithBiometricKey', key]);
+      return Promise.resolve(unlockWithKey(key)).then(notes => {
+        lastUnlockedNotes = notes ?? [];
+        return { notes: lastUnlockedNotes, key, salt: new Uint8Array([1]) };
+      });
+    },
   };
   const modules = {
     react, 'react/jsx-runtime': require('react/jsx-runtime'),
@@ -96,9 +119,18 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
     },
     '@expo/vector-icons/FontAwesome': { __esModule: true, default: 'FontAwesome' },
     '@expo/vector-icons/MaterialCommunityIcons': { __esModule: true, default: 'MaterialCommunityIcons' },
-    '@react-native-async-storage/async-storage': {},
+    '@react-native-async-storage/async-storage': {
+      async getItem(key) { return asyncStorage.get(key) ?? null; },
+      async setItem(key, value) { asyncStorage.set(key, value); },
+      async removeItem(key) { asyncStorage.delete(key); },
+    },
     'expo-screen-capture': screenCapture,
     '../privateAccess': { createPrivateAccess: () => access },
+    '../privateCrypto': { importPrivateKey: async key => ({ raw: Array.from(key) }) },
+    '../privateBiometricUnlock': {
+      PRIVATE_BIOMETRIC_ENABLED_FLAG: '@test/biometric-enabled',
+      privateBiometricKeyStore: biometricKeyStore,
+    },
     '../privateSession': { createPrivateSession },
     '../privateScreenCapture': { createPrivateScreenCaptureProtection },
     '../privateRestoreService': { restoreDevicePrivateNoteWithKey(id, key) { restoreCalls.push([id, key]); return restore(id, key); } },
@@ -127,10 +159,10 @@ async function screen({ status = async () => 'locked', setup = async () => {}, u
     for (const effect of effects) if (effect?.pending) { effect.pending = false; effect.cleanup = effect.callback(); }
     return tree;
   }
-  async function flush() { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }
+  async function flush() { for (let i = 0; i < 32; i += 1) await Promise.resolve(); }
   render(); await flush();
   return {
-    render, flush, calls, restoreCalls, mutationCalls, alerts, captureCalls, unlockedKey,
+    render, flush, calls, restoreCalls, mutationCalls, alerts, captureCalls, biometricCalls, asyncStorage, unlockedKey,
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
     replayEffects() {
       for (const effect of effects) effect?.cleanup?.();
@@ -587,4 +619,71 @@ test('React effect replay invalidates old authentication but allows a fresh fore
   enterPassword(app); button(app, 'Unlock').props.onPress(); await app.flush();
   assert.equal(app.calls.length, 2);
   assert.equal(isUnlocked(app), true);
+});
+
+test('locked screen shows the reference biometric action while retaining password unlock and enrolls only after password verification', async () => {
+  const preview = { id: 'private-bio', title: 'Biometric note', text: 'Secret body', html: '<p>Secret body</p>', category: 'personal' };
+  const app = await screen({ biometricAvailable: true, unlockWithKey: async () => [preview] });
+  assert.ok(input(app), 'password fallback remains visible');
+  assert.ok(button(app, 'Use passkey or fingerprint'));
+  assert.ok(button(app, 'Unlock'));
+
+  enterPassword(app);
+  button(app, 'Use passkey or fingerprint').props.onPress();
+  await app.flush();
+
+  assert.match(text(app.render()), /Secret body/);
+  assert.deepEqual(app.calls.map(([operation]) => operation), ['exportBiometricKey', 'unlockWithBiometricKey']);
+  assert.deepEqual(app.calls[0], ['exportBiometricKey', PASSWORD]);
+  assert.deepEqual(app.biometricCalls.map(([operation]) => operation), ['read', 'save']);
+  assert.equal(app.asyncStorage.get('@test/biometric-enabled'), 'enabled');
+  assert.match(text(app.render()), /Secret body/);
+  assert.ok(button(app, 'Remove biometric unlock'));
+});
+
+test('an existing biometric key unlocks only through vault verification, while an invalid key leaves password fallback available', async () => {
+  const app = await screen({
+    biometricAvailable: true,
+    biometricKey: new Uint8Array(32).fill(4),
+    unlockWithKey: async () => { throw new Error('Could not authenticate the vault. [PV-AUTH]'); },
+  });
+  button(app, 'Use passkey or fingerprint').props.onPress();
+  await app.flush();
+
+  assert.equal(app.calls[0][0], 'unlockWithBiometricKey');
+  assert.equal(app.calls.some(([operation]) => operation === 'exportBiometricKey'), false);
+  assert.equal(isUnlocked(app), false);
+  assert.match(text(app.render()), /\[PV-AUTH\]/);
+  assert.ok(input(app), 'password fallback remains visible after biometric failure');
+  assert.ok(button(app, 'Unlock'));
+});
+
+test('successful biometric unlock restores the removable-credential marker if UI metadata was missing', async () => {
+  const app = await screen({ biometricAvailable: true, biometricKey: new Uint8Array(32).fill(5) });
+  button(app, 'Use passkey or fingerprint').props.onPress();
+  await app.flush();
+
+  assert.equal(isUnlocked(app), true);
+  assert.equal(app.asyncStorage.get('@test/biometric-enabled'), 'enabled');
+  assert.ok(button(app, 'Remove biometric unlock'));
+});
+
+test('backgrounding during password-verified enrollment invalidates the attempt before saving a protected key', async () => {
+  const pending = deferred();
+  const app = await screen({ biometricAvailable: true, exportBiometricKey: () => pending.promise });
+  enterPassword(app);
+  button(app, 'Use passkey or fingerprint').props.onPress();
+  await app.flush();
+
+  assert.equal(app.biometricCalls.some(([operation]) => operation === 'save'), false);
+  assert.equal(button(app, 'Cancel').props.disabled, true);
+  assert.equal(button(app, '‹ All notes').props.disabled, true);
+  app.change('background');
+  pending.resolve(Uint8Array.from({ length: 32 }, (_, index) => index + 1));
+  await app.flush();
+
+  assert.equal(app.biometricCalls.some(([operation]) => operation === 'save'), false);
+  assert.equal(isUnlocked(app), false);
+  app.unmount();
+  assert.equal(app.writesAfterUnmount, 0);
 });
