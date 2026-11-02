@@ -11,9 +11,9 @@ You can create and edit notes saved **on this device**, with bold, italics, unor
 - Saving creates a new note at the top of the device list. Editing updates that note without changing its ID, creation time, or default `general` category; update time changes on save.
 - Draft changes do not touch a saved note until Save changes is tapped. The latest changed editor draft is autosaved to a separate device-only recovery key after a short debounce and restored after restart; changing views still asks before discarding it. Recovery is a single editor draft, not the PWA's full multi-draft library.
 
-The mobile app now also includes category assignment and filtering, pinning, archive, Trash with 15-day retention and Empty Trash, and note-actions menus. PR #19 proposes note duplication and rich formatting; device verification is pending. There is still no account/auth, cloud sync, migration/import from the PWA, or notifications. The PWA repository and its users/data are untouched.
+The mobile app also includes category assignment and filtering, pinning, archive, Trash with 15-day retention and Empty Trash, and note-actions menus. Optional email/password account access is implemented, and this branch adds native Google sign-in. Authentication supplies Firebase account identity only: there is no cloud-note sync, migration/import from the PWA, or notifications. The PWA repository and its users/data are untouched.
 
-No secrets or production-data connections are needed. Deployment and over-the-air update setup are out of scope.
+No passwords, service-account credentials, or production note-data connections are needed. Native Google sign-in uses public OAuth client IDs supplied by the owner at build/runtime; deployment and over-the-air update setup remain out of scope.
 
 ## Migration feature status
 

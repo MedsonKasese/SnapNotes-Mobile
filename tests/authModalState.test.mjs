@@ -56,7 +56,9 @@ test('sign-in uses the PWA dark sheet hierarchy with recovery, account creation,
   assert.match(source, /Create Account/);
   assert.match(source, /Cancel/);
   assert.match(source, /backgroundColor: '#171d17'/);
-  assert.doesNotMatch(source, /Continue with Google/);
+  assert.match(source, /Continue with Google/);
+  assert.match(source, /googleAuthService\.signIn\(\)/);
+  assert.match(source, /Google sign-in is not configured for this build yet/);
 });
 
 test('password recovery has a neutral acknowledgement and does not gate the notes workspace', () => {

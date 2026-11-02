@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthState } from '../auth/AuthStateProvider';
 import { AuthOperationError, authService } from '../auth/authService';
 import { getAuthErrorMessage } from '../auth/authErrors';
+import { googleAuthService } from '../auth/googleAuthService';
 import {
   normalizeDisplayName,
   normalizeEmail,
@@ -133,6 +134,30 @@ function AccountButton({
   );
 }
 
+function GoogleSignInButton({
+  disabled,
+  loading,
+  onPress,
+}: {
+  disabled: boolean;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Continue with Google"
+      accessibilityState={{ disabled, busy: loading }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [styles.googleButton, (disabled || pressed) && styles.buttonDimmed]}
+    >
+      {loading ? <ActivityIndicator color="#202124" /> : <MaterialCommunityIcons name="google" size={20} color="#4285f4" accessible={false} />}
+      <Text style={styles.googleButtonText}>{loading ? 'Opening Google…' : 'Continue with Google'}</Text>
+    </Pressable>
+  );
+}
+
 function safeMessage(error: unknown): string {
   return error instanceof AuthOperationError ? error.message : getAuthErrorMessage(error);
 }
@@ -156,6 +181,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [pendingDisplayName, setPendingDisplayName] = useState<string | null>(null);
   const [verificationRetryAvailable, setVerificationRetryAvailable] = useState(false);
   const [verificationCooldownMs, setVerificationCooldownMs] = useState(0);
+  const googleSignInAvailable = googleAuthService.isConfigured();
   const requestInFlight = useRef(false);
   const verificationUserId =
     state.status === 'signed-in' && !state.user.emailVerified ? state.user.uid : null;
@@ -208,6 +234,21 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
       requestInFlight.current = false;
       setBusy(false);
     }
+  };
+
+  const submitGoogleSignIn = async () => {
+    await runAction(async () => {
+      const result = await googleAuthService.signIn();
+      if (result.status === 'cancelled') return;
+      setPassword('');
+      setConfirmPassword('');
+      setFieldErrors({});
+      setFeedback({
+        kind: 'success',
+        message: 'You are signed in. Your local notes and Private Notes were not changed; nothing was uploaded.',
+      });
+      setScreen('account');
+    });
   };
 
   const submitSignIn = async () => {
@@ -358,7 +399,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                       <View style={styles.accountDetails}>
                         <Text numberOfLines={1} style={styles.accountDisplayName}>{accountDisplayName}</Text>
                         {state.user.email ? <Text numberOfLines={1} style={styles.accountEmail}>{state.user.email}</Text> : null}
-                        <Text style={styles.accountProvider}>Email account</Text>
+                        <Text style={styles.accountProvider}>Signed-in account</Text>
                       </View>
                     </View>
                     <View style={[styles.statusPill, state.user.emailVerified ? styles.statusVerified : styles.statusUnverified]}>
@@ -427,7 +468,13 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                     <AccountButton label="Retry account status" secondary onPress={retryAuthState} />
                   </View>
                 )}
+                {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
                 <View style={styles.buttonStack}>
+                  {googleSignInAvailable ? (
+                    <GoogleSignInButton disabled={busy} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
+                  ) : (
+                    <Text style={styles.hint}>Google sign-in is not configured for this build yet. Email sign-in and local notes remain available.</Text>
+                  )}
                   <AccountButton label="Sign in" onPress={() => { setFormError(null); setFieldErrors({}); setScreen('sign-in'); }} />
                   <AccountButton label="Create account" secondary onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
                   <AccountButton label="Back to notes" secondary onPress={close} />
@@ -472,6 +519,11 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                 </Pressable>
                 {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
                 <View style={styles.buttonStack}>
+                  {googleSignInAvailable ? (
+                    <GoogleSignInButton disabled={busy} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
+                  ) : (
+                    <Text style={styles.hint}>Google sign-in is not configured for this build yet. Email sign-in and local notes remain available.</Text>
+                  )}
                   <AccountButton label={busy ? 'Signing in…' : 'Sign In'} loading={busy} disabled={busy} onPress={() => { void submitSignIn(); }} />
                   <AccountButton label="Create Account" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
                   <Pressable
@@ -604,6 +656,8 @@ const styles = StyleSheet.create({
   warning: { color: '#f2d078', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#302916', borderWidth: 1, borderColor: '#594a25' },
   hint: { color: '#a5afa6', fontSize: 13, lineHeight: 19 },
   buttonStack: { gap: 11, marginTop: 3 },
+  googleButton: { minHeight: 54, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, backgroundColor: '#f8f9fa' },
+  googleButtonText: { color: '#202124', fontSize: 16, fontWeight: '700', textAlign: 'center' },
   button: { minHeight: 54, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   primaryButton: { backgroundColor: '#65c52b' },
   secondaryButton: { backgroundColor: '#202820', borderWidth: 1, borderColor: '#374239' },
