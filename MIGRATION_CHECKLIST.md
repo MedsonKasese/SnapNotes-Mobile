@@ -50,7 +50,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 - [ ] Audit the PWA's real header, branding, navigation, editor, list, spacing, typography, and colour tokens before implementation.
 - [x] Recreate the SnapNotes visual identity and green primary accent in native-friendly layouts. (PR #9; user verified the app on Android.)
-- [x] Build a clear app header with menu/navigation, product identity, and note count. (PR #9 verified; account action remains out of scope until auth is migrated.)
+- [x] Build a clear app header with menu/navigation, product identity, and note count. (PR #9 verified; the optional account drawer entry is implemented in the email-auth stage, with Android verification pending.)
 - [x] Keep essential navigation/header elements fixed where appropriate instead of scrolling away with the note list. (PR #9 verified on Android.)
 - [x] Establish distinct, understandable Library and Editor experiences. (PR #9 verified on Android.)
 - [x] Implement and verify initial native empty states, loading/error states, and unsaved-change confirmation patterns. (Full PWA parity remains.)
@@ -99,7 +99,7 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 - [ ] Connect category destinations.
 - [ ] Connect folder destinations.
 - [ ] Connect Drafts, Private Notes, Archive, and Trash when those features are implemented.
-- [ ] Connect Settings and account actions when available.
+- [ ] Connect Settings and account actions when available. (The optional email/password account entry is implemented in this PR; full Settings remain out of scope and Android verification is required.)
 - [ ] Show accurate counts where the PWA does.
 - [ ] Highlight the current destination and preserve expected back navigation.
 - [ ] Never show a destination as available if it is not implemented; use a clear disabled/coming-soon state only if justified.
@@ -188,11 +188,11 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 - [x] Phase 0/1 Firebase persistence/auth-state spike prepared from `main`: Firebase JS SDK aligned with the PWA, React Native AsyncStorage persistence, typed observer state, and account-free mocked observer tests. See `docs/firebase-auth-spike.md`.
 - [ ] Verify Firebase initialization, persistent auth restoration, and sign-out on the owner's Android development build; confirm local notes remain unchanged (see `docs/firebase-auth-spike.md`).
-- [ ] Audit the PWA's sign-in providers, signup flow, verification, and account states.
-- [ ] Implement the agreed authentication experience for the native app.
+- [x] Audit the PWA's sign-in providers, signup flow, verification, and account states. (Compared `SnapNotes/js/auth.js`, `SnapNotes/index.html`, and `SnapNotes/js/firestore.js`; the mobile local-first boundary intentionally does not copy PWA note-cache merge or Firestore loading. See `docs/mobile-email-auth.md`.)
+- [ ] Implement the agreed authentication experience for the native app. (Phase 2 email/password registration, sign-in, optional account entry, and basic sign-out are implemented; automated and hosted checks plus owner Android testing are required before marking complete.)
 - [ ] Show profile name/photo and account details accurately when available.
 - [ ] Handle sign-in cancellation, expired sessions, network errors, and sign-out.
-- [ ] Implement email verification/password recovery only where supported by the chosen auth setup.
+- [ ] Implement email verification/password recovery only where supported by the chosen auth setup. (Registration sends Firebase verification email and supports retry only when the immediate post-create step fails; verification-pending, general resend/refresh, and password recovery remain Phase 3.)
 - [ ] Handle account deletion carefully and explain its data consequences.
 - [ ] Never expose secrets or privileged service keys in the client app.
 
@@ -287,12 +287,12 @@ Update this table as PRs merge and testing results are confirmed.
 | Local note storage foundation | Implemented | Initial JSON snapshot and per-note storage work merged |
 | Storage reliability | Implemented; regression testing remains | Serialization, cleanup, and recovery work merged |
 | Native note search | Verified by user | Search works correctly on Android after merge; PR #9 keeps search fixed and filters the library view. |
-| Main interface and navigation | **User verified on Android** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Categories/folders/archive/trash/settings/auth remain future destinations. |
+| Main interface and navigation | **User verified on Android; account entry testing required** | PR #9 merged; user reports all tests passed and the app worked perfectly. Fixed header/search, library/editor views, drawer, and Android back handling verified. Optional account entry is implemented; full Settings remain future work. |
 | Categories and folders | **Categories user verified; folders in PR #20 pending testing** | PR #13 merged; user verified category display and assignment on Android. Folders implemented and user verified in merged PR #20; appearance customization is pending PR #21 testing. |
 | Formatting and checklists | User reports rich editor tested and working on Android; additional regression testing remains | Six PWA-order icons, rich emphasis/lists/safe links and checkboxes; optional sanitized HTML with backward-compatible plain notes. Checkbox selection preserves text; checked styling and inline persistence remain. Typecheck, lint, automated tests, Expo compatibility and Android/iOS JavaScript exports pass. Native visual/keyboard/selection/font-scaling/accessibility QA and authenticated DeepCode/Snyk scanning remain owner gates; not release-ready or merged. |
 | Duplicate notes | **User verified and merged PR #19** | Duplicating notes works correctly on Android. |
 | Drafts and edit history | **In progress; Android testing required** | PR #10 implements one local editor recovery draft; initial CI lint failure fixed and local automated checks pass. Full Drafts library and edit history remain unimplemented. |
-| Authentication and cloud sync | Not started | Design only after data-model/security audit |
+| Authentication and cloud sync | Email/password account entry implemented; automated/hosted checks and Android testing required; cloud sync not started | Optional Firebase account UI is separate from device-local note storage. No note migration, merge, reassignment, upload, Firestore read/write, or vault coupling. See `docs/mobile-email-auth.md`. |
 | Attachments and document viewer | Not started | Audit PWA rules and Android file access |
 | Private Notes/security | Not started | Requires explicit privacy testing |
 | Settings, sharing, and AI | Not started | Scope based on PWA audit |

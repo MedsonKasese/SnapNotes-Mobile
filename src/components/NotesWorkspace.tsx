@@ -118,7 +118,7 @@ const coordinatedDeviceNotesStorage = createPrivateOrdinarySaveGuard(
   privateSharedCoordinator, deviceNotesStorage, privateVaultStorage,
 );
 
-export function NotesWorkspace() {
+export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void } = {}) {
   const [controller] = useState(() => createNotesController(coordinatedDeviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
@@ -1500,10 +1500,12 @@ export function NotesWorkspace() {
                 <FontAwesome name="upload" size={18} color="#65775c" accessible={false} />
                 <Text style={styles.menuRowTitle}>Import notes</Text>
               </Pressable>
+              <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
+              <MenuRow label="Account" icon="user-circle-o" detail="Optional account access" onPress={() => { closeDrawer(); onOpenAccount?.(); }} />
             </ScrollView>
             <View style={styles.drawerNotice}>
-              <Text style={styles.drawerNoticeTitle}>More of SnapNotes is on the way</Text>
-              <Text style={styles.drawerNoticeText}>Settings and account features will appear here as they are migrated and tested.</Text>
+              <Text style={styles.drawerNoticeTitle}>Your notes stay on this device</Text>
+              <Text style={styles.drawerNoticeText}>Account access is optional and never uploads or changes your local notes.</Text>
             </View>
             <View style={styles.drawerFooter}>
               <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>

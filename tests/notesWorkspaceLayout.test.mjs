@@ -10,14 +10,18 @@ test('native shell keeps branding and search outside the scrolling note list', (
   assert.doesNotMatch(source, /ListHeaderComponent=/);
 });
 
-test('navigation exposes only implemented destinations and explains upcoming migration areas', () => {
+test('navigation exposes implemented destinations and the optional local-first account entry', () => {
   assert.match(source, /label="All notes"/);
   assert.match(source, /label="New note"/);
   assert.match(source, /label="Archived" icon="archive"[\s\S]*?onPress={selectArchive}/);
   assert.match(source, /label="Trash" icon="trash"[\s\S]*?onPress={selectTrash}/);
   assert.match(source, /<Text style={styles\.drawerEyebrow}>FOLDERS<\/Text>/);
   assert.match(source, /<ScrollView[^>]*contentContainerStyle={styles\.drawerNavigation}/);
-  assert.match(source, /Settings and account features will appear here as they are migrated and tested/);
+  assert.match(source, /label="Account" icon="user-circle-o" detail="Optional account access"/);
+  assert.match(source, /onOpenAccount\?\.\(\)/);
+  assert.match(source, /Your notes stay on this device/);
+  assert.match(source, /Account access is optional and never uploads or changes your local notes/);
+  assert.doesNotMatch(source, /Settings and account features will appear here as they are migrated and tested/);
   assert.doesNotMatch(source, /Folders, Trash, settings/);
   assert.doesNotMatch(source, /Folders, archive, trash/);
   assert.doesNotMatch(source, /Categories, folders/);
