@@ -13,7 +13,7 @@ export function getAuthErrorMessage(error: unknown): string {
       return 'Choose a password that meets the minimum requirements.';
     case 'auth/email-already-in-use':
     case 'auth/email-already-exists':
-      return 'This email cannot be used to create an account. Try signing in instead.';
+      return 'We could not complete this request with the provided details. Check them and try again.';
     case 'auth/invalid-credential':
     case 'auth/invalid-login-credentials':
     case 'auth/wrong-password':

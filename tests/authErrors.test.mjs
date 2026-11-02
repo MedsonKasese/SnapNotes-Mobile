@@ -12,7 +12,14 @@ test('registration and provider restrictions have distinct, non-misleading messa
   const providerDisabled = getAuthErrorMessage({ code: 'auth/operation-not-allowed' });
   assert.match(providerDisabled, /Email and password authentication is not enabled/);
   assert.doesNotMatch(providerDisabled, /sign-in/);
-  assert.match(getAuthErrorMessage({ code: 'auth/email-already-in-use' }), /Try signing in instead/);
+});
+
+test('duplicate-email errors do not disclose whether an address is registered', () => {
+  const inUse = getAuthErrorMessage({ code: 'auth/email-already-in-use' });
+  const alreadyExists = getAuthErrorMessage({ code: 'auth/email-already-exists' });
+  assert.equal(inUse, 'We could not complete this request with the provided details. Check them and try again.');
+  assert.equal(alreadyExists, inUse);
+  assert.doesNotMatch(inUse, /email|already|exist|registered|sign[\s-]*in|account/i);
 });
 
 test('network, rate-limit, and unknown errors receive safe actionable messages', () => {
