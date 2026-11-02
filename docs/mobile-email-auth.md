@@ -50,4 +50,24 @@ git fetch origin
 git switch --track origin/feat/mobile-email-verification-recovery
 ```
 
-If that local branch already exists, use `git switch feat/mobile-email-verification-recovery` followed by `git pull --ff-only`. Do not merge this branch into local `main` before review. Because Termux's watcher limit prevents reliable local Metro operation, run Metro from the cloud development workspace/URL for the branch and open that URL in the existing Android development build. Use an already-available unverified owner test account: confirm “Verification pending,” resend and observe the countdown, open the newest email link, then refresh and confirm the verified state. Request password resets for an existing test address and a non-account address and confirm identical acknowledgement text. Compare ordinary local notes and Private Notes before/after; neither should change. These checks do not require new production accounts or Firebase Console changes.
+If that local branch already exists, update it with:
+
+```sh
+git switch feat/mobile-email-verification-recovery
+git pull --ff-only
+```
+
+Do not merge this branch into local `main` before review. Because Termux's watcher limit prevents reliable local Metro operation, check out the feature branch in the existing cloud development workspace and start the dev-client Metro tunnel there:
+
+```sh
+npx expo start --tunnel --dev-client
+```
+
+Open the printed tunnel URL in the existing Android development build. Using an already-available unverified owner test account, confirm “Verification pending,” request a resend, verify the countdown disables further sends, open the newest email link, return to the app, and refresh status until it shows verified. If an invalid or expired link is available, confirm the app gives safe guidance to request a fresh email. Request password resets for one existing test address and one non-account address and confirm the acknowledgement is identical. Compare ordinary local notes and Private Notes before and after; neither should change. These checks do not require new production accounts or Firebase Console changes.
+
+When finished testing, return to the merged `main` without merging the review branch:
+
+```sh
+git switch main
+git pull --ff-only origin main
+```
