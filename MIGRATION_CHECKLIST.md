@@ -186,6 +186,8 @@ For detailed work, add sub-checkboxes. Do not check a parent section until its a
 
 ## 14. Authentication and account management
 
+- [x] Phase 0/1 Firebase persistence/auth-state spike prepared from `main`: Firebase JS SDK aligned with the PWA, React Native AsyncStorage persistence, typed observer state, and account-free mocked observer tests. See `docs/firebase-auth-spike.md`.
+- [ ] Verify Firebase initialization, persistent auth restoration, and sign-out on the owner's Android development build; confirm local notes remain unchanged (see `docs/firebase-auth-spike.md`).
 - [ ] Audit the PWA's sign-in providers, signup flow, verification, and account states.
 - [ ] Implement the agreed authentication experience for the native app.
 - [ ] Show profile name/photo and account details accurately when available.
