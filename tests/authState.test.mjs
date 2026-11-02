@@ -1,11 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { authStateFromUser, INITIAL_AUTH_STATE } from '../src/auth/authState.ts';
+import {
+  authStateFromRefreshedUser,
+  authStateFromUser,
+  INITIAL_AUTH_STATE,
+} from '../src/auth/authState.ts';
 import { subscribeToAuthState } from '../src/auth/authStateSubscription.ts';
 
 test('auth state begins unresolved and only a null Firebase observer value means signed out', () => {
   assert.deepEqual(INITIAL_AUTH_STATE, { status: 'initializing' });
   assert.deepEqual(authStateFromUser(null), { status: 'signed-out' });
+});
+
+test('a verification reload publishes only while the exact Firebase user instance is still current', () => {
+  const originalUser = {
+    uid: 'same-user-id', email: 'owner@example.com', displayName: 'Owner', emailVerified: true,
+  };
+  const replacementSession = { ...originalUser, emailVerified: false };
+  assert.deepEqual(authStateFromRefreshedUser(originalUser, originalUser), authStateFromUser(originalUser));
+  assert.equal(authStateFromRefreshedUser(originalUser, replacementSession), null);
+  assert.equal(authStateFromRefreshedUser(originalUser, null), null);
 });
 
 test('mocked observer restoration maps a persisted user to a safe signed-in summary', () => {

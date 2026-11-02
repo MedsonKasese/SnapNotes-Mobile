@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
@@ -20,12 +20,13 @@ import { getAuthErrorMessage } from '../auth/authErrors';
 import {
   normalizeDisplayName,
   normalizeEmail,
+  validateEmailAddress,
   validateRegistration,
   validateSignIn,
   type AuthFieldErrors,
 } from '../auth/authValidation';
 
-type AccountScreen = 'welcome' | 'sign-in' | 'register' | 'account';
+type AccountScreen = 'welcome' | 'sign-in' | 'register' | 'password-reset' | 'account';
 type Feedback = { kind: 'success' | 'warning'; message: string };
 type AccountAccessModalProps = { visible: boolean; onClose: () => void };
 
@@ -34,6 +35,7 @@ type AccountFieldProps = {
   value: string;
   onChangeText: (value: string) => void;
   placeholder: string;
+  hideLabel?: boolean;
   error?: string;
   keyboardType?: TextInputProps['keyboardType'];
   autoComplete?: TextInputProps['autoComplete'];
@@ -49,6 +51,7 @@ function AccountField({
   value,
   onChangeText,
   placeholder,
+  hideLabel = false,
   error,
   keyboardType = 'default',
   autoComplete,
@@ -62,7 +65,7 @@ function AccountField({
   const visibilityTarget = label === 'Confirm password' ? 'confirmation password' : label.toLowerCase();
   return (
     <View style={styles.fieldGroup}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      {!hideLabel && <Text style={styles.fieldLabel}>{label}</Text>}
       <View style={[styles.fieldControl, secureTextEntry ? styles.passwordField : null]}>
         <TextInput
           accessibilityLabel={label}
@@ -75,7 +78,7 @@ function AccountField({
           onChangeText={onChangeText}
           onSubmitEditing={onSubmitEditing}
           placeholder={placeholder}
-          placeholderTextColor="#71806b"
+          placeholderTextColor="#89948b"
           returnKeyType={returnKeyType}
           secureTextEntry={secureTextEntry && !passwordVisible}
           style={[styles.input, secureTextEntry ? styles.passwordInput : null, error ? styles.inputError : null]}
@@ -91,7 +94,7 @@ function AccountField({
             onPress={() => setPasswordVisible((visible) => !visible)}
             style={styles.passwordVisibilityButton}
           >
-            <MaterialCommunityIcons name={passwordVisible ? 'eye-off' : 'eye'} size={22} color="#3b7f16" accessible={false} />
+            <MaterialCommunityIcons name={passwordVisible ? 'eye-off' : 'eye'} size={22} color="#84d64b" accessible={false} />
           </Pressable>
         ) : null}
         {error ? <Text accessibilityRole="alert" style={styles.fieldError}>{error}</Text> : null}
@@ -135,7 +138,11 @@ function safeMessage(error: unknown): string {
 }
 
 export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps) {
-  const { state, retry: retryAuthState } = useAuthState();
+  const {
+    state,
+    retry: retryAuthState,
+    refreshVerificationStatus: refreshAuthVerificationStatus,
+  } = useAuthState();
   const [screen, setScreen] = useState<AccountScreen>('welcome');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -148,7 +155,23 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
   const [pendingDisplayName, setPendingDisplayName] = useState<string | null>(null);
   const [verificationRetryAvailable, setVerificationRetryAvailable] = useState(false);
+  const [verificationCooldownMs, setVerificationCooldownMs] = useState(0);
   const requestInFlight = useRef(false);
+  const verificationUserId =
+    state.status === 'signed-in' && !state.user.emailVerified ? state.user.uid : null;
+
+  useEffect(() => {
+    if (!visible || !verificationUserId) return;
+    const updateCooldown = () => {
+      setVerificationCooldownMs(authService.getVerificationResendCooldownMs());
+    };
+    const initialUpdate = setTimeout(updateCooldown, 0);
+    const timer = setInterval(updateCooldown, 1000);
+    return () => {
+      clearTimeout(initialUpdate);
+      clearInterval(timer);
+    };
+  }, [visible, verificationUserId]);
 
   const clearTransientState = () => {
     setScreen('welcome');
@@ -203,6 +226,19 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     });
   };
 
+  const submitPasswordReset = async () => {
+    const emailError = validateEmailAddress(email);
+    const errors: AuthFieldErrors = emailError ? { email: emailError } : {};
+    setFieldErrors(errors);
+    setFormError(null);
+    setFeedback(null);
+    if (Object.keys(errors).length > 0) return;
+    await runAction(async () => {
+      const result = await authService.requestPasswordReset(email);
+      setFeedback({ kind: 'success', message: result.message });
+    });
+  };
+
   const submitRegistration = async () => {
     const errors = validateRegistration(displayName, email, password, confirmPassword);
     setFieldErrors(errors);
@@ -248,9 +284,28 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
 
   const retryVerificationEmail = async () => {
     await runAction(async () => {
-      await authService.retryRegistrationVerificationEmail();
+      await authService.resendVerificationEmail();
       setVerificationRetryAvailable(false);
-      setFeedback({ kind: 'success', message: 'The verification email was sent. Your local notes remain available while you verify.' });
+      setFeedback({ kind: 'success', message: 'Verification email sent. Use the newest email link; older or expired links may not work. Your local notes remain available.' });
+    }, 'account');
+  };
+
+  const refreshVerification = async () => {
+    await runAction(async () => {
+      const emailVerified = await refreshAuthVerificationStatus();
+      if (emailVerified === null) {
+        setFeedback({
+          kind: 'warning',
+          message: 'The account session changed while status was refreshing. Check the current account status again. Your local notes remain available.',
+        });
+        return;
+      }
+      setFeedback({
+        kind: 'success',
+        message: emailVerified
+          ? 'Email verified. Your local notes and Private Notes remain on this device; no sync occurred.'
+          : 'Verification is still pending. If the link was invalid or expired, request a new email and open the latest link. Your local notes remain available.',
+      });
     }, 'account');
   };
 
@@ -262,6 +317,12 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   };
 
   const accountView = state.status === 'signed-in' || screen === 'account';
+  const accountDisplayName = state.status === 'signed-in'
+    ? state.user.displayName?.trim() || state.user.email?.split('@')[0] || 'SnapNotes user'
+    : null;
+  const accountInitials = state.status === 'signed-in'
+    ? (state.user.displayName || state.user.email || 'U').trim().split(/\s+/).map((part) => part[0] ?? '').join('').slice(0, 2).toUpperCase() || 'U'
+    : 'U';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={close}>
@@ -290,16 +351,36 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                 <Text accessibilityRole="header" style={styles.title}>Account</Text>
                 {state.status === 'signed-in' ? (
                   <>
-                    <Text style={styles.accountEmail}>{state.user.email ?? 'Signed-in Firebase account'}</Text>
+                    <View accessibilityLabel={`Account profile for ${accountDisplayName}`} style={styles.accountSummary}>
+                      <View style={styles.accountAvatar}>
+                        <Text style={styles.accountAvatarText}>{accountInitials}</Text>
+                      </View>
+                      <View style={styles.accountDetails}>
+                        <Text numberOfLines={1} style={styles.accountDisplayName}>{accountDisplayName}</Text>
+                        {state.user.email ? <Text numberOfLines={1} style={styles.accountEmail}>{state.user.email}</Text> : null}
+                        <Text style={styles.accountProvider}>Email account</Text>
+                      </View>
+                    </View>
                     <View style={[styles.statusPill, state.user.emailVerified ? styles.statusVerified : styles.statusUnverified]}>
                       <Text style={[styles.statusText, state.user.emailVerified ? styles.statusTextVerified : null]}>
-                        {state.user.emailVerified ? 'Email verified' : 'Email not verified in this session'}
+                        {state.user.emailVerified ? 'Email verified' : 'Verification pending'}
                       </Text>
                     </View>
                     {!state.user.emailVerified && (
                       <Text style={styles.bodyText}>
-                        This status may remain stale after you open a verification link outside the app. Signing out and back in reloads account state; local notes work either way, and cloud sync is not part of this release.
+                        Your local notes stay available while you verify. Refresh after opening the email link; if a link is invalid or expired, request a new email and use the latest link. Verification never moves notes or changes Private Notes.
                       </Text>
+                    )}
+                    {!state.user.emailVerified && (
+                      <View style={styles.buttonStack}>
+                        <AccountButton label={busy ? 'Refreshing…' : 'Refresh verification status'} loading={busy} disabled={busy} secondary onPress={() => { void refreshVerification(); }} />
+                        <AccountButton
+                          label={busy ? 'Sending…' : verificationCooldownMs > 0 ? `Resend verification email in ${Math.ceil(verificationCooldownMs / 1000)}s` : 'Resend verification email'}
+                          loading={busy}
+                          disabled={busy || verificationCooldownMs > 0}
+                          onPress={() => { void retryVerificationEmail(); }}
+                        />
+                      </View>
                     )}
                   </>
                 ) : (
@@ -317,7 +398,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
 
                 {feedback && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={feedback.kind === 'success' ? styles.success : styles.warning}>{feedback.message}</Text>}
                 {pendingDisplayName !== null && <AccountButton label={busy ? 'Saving name…' : 'Retry saving account name'} loading={busy} disabled={busy} onPress={() => { void retryDisplayName(); }} />}
-                {verificationRetryAvailable && <AccountButton label={busy ? 'Sending…' : 'Retry verification email'} loading={busy} disabled={busy} secondary onPress={() => { void retryVerificationEmail(); }} />}
+                {verificationRetryAvailable && state.status !== 'signed-in' && <AccountButton label={busy ? 'Sending…' : 'Retry verification email'} loading={busy} disabled={busy} secondary onPress={() => { void retryVerificationEmail(); }} />}
                 <View style={styles.buttonStack}>
                   {state.status === 'signed-in' && <AccountButton label={busy ? 'Signing out…' : 'Sign out'} loading={busy} disabled={busy} secondary onPress={() => { void handleSignOut(); }} />}
                   <AccountButton label="Back to notes" secondary disabled={busy} onPress={close} />
@@ -330,6 +411,15 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                 <Text style={styles.bodyText}>
                   Signing in adds your Firebase account identity only. It does not upload, merge, or move notes from this device, and it does not unlock Private Notes.
                 </Text>
+                <View style={styles.accountSummary}>
+                  <View style={styles.accountAvatar}>
+                    <MaterialCommunityIcons name="account-outline" size={23} color="#ffffff" accessible={false} />
+                  </View>
+                  <View style={styles.accountDetails}>
+                    <Text style={styles.accountDisplayName}>Local mode</Text>
+                    <Text style={styles.accountEmail}>Your notes are stored on this device</Text>
+                  </View>
+                </View>
                 {state.status === 'initializing' && <Text accessibilityLiveRegion="polite" style={styles.hint}>Checking for a saved account session…</Text>}
                 {state.status === 'unavailable' && (
                   <View style={styles.inlineStatus}>
@@ -345,9 +435,61 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
               </View>
             ) : screen === 'sign-in' ? (
               <View style={styles.panel}>
-                <Text style={styles.eyebrow}>WELCOME BACK</Text>
-                <Text accessibilityRole="header" style={styles.title}>Sign in</Text>
+                <Text style={styles.eyebrow}>SNAPNOTES ACCOUNT</Text>
+                <Text accessibilityRole="header" style={styles.title}>Sign in to SnapNotes</Text>
                 <Text style={styles.bodyText}>Your device-local notes remain available and are not changed by signing in.</Text>
+                <AccountField
+                  label="Email"
+                  hideLabel
+                  value={email}
+                  onChangeText={(value) => { setEmail(value); setFieldErrors((current) => ({ ...current, email: undefined })); }}
+                  placeholder="Email"
+                  keyboardType="email-address"
+                  autoComplete="email"
+                  error={fieldErrors.email}
+                  returnKeyType="next"
+                />
+                <AccountField
+                  label="Password"
+                  hideLabel
+                  value={password}
+                  onChangeText={(value) => { setPassword(value); setFieldErrors((current) => ({ ...current, password: undefined })); }}
+                  placeholder="Password"
+                  secureTextEntry
+                  autoComplete="current-password"
+                  error={fieldErrors.password}
+                  returnKeyType="go"
+                  onSubmitEditing={() => { void submitSignIn(); }}
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: busy }}
+                  disabled={busy}
+                  onPress={() => { setFormError(null); setFieldErrors({}); setFeedback(null); setScreen('password-reset'); }}
+                  style={({ pressed }) => [styles.forgotPasswordLink, (pressed || busy) && styles.buttonDimmed]}
+                >
+                  <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                </Pressable>
+                {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
+                <View style={styles.buttonStack}>
+                  <AccountButton label={busy ? 'Signing in…' : 'Sign In'} loading={busy} disabled={busy} onPress={() => { void submitSignIn(); }} />
+                  <AccountButton label="Create Account" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: busy }}
+                    disabled={busy}
+                    onPress={close}
+                    style={({ pressed }) => [styles.cancelButton, (pressed || busy) && styles.buttonDimmed]}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : screen === 'password-reset' ? (
+              <View style={styles.panel}>
+                <Text style={styles.eyebrow}>ACCOUNT RECOVERY</Text>
+                <Text accessibilityRole="header" style={styles.title}>Reset password</Text>
+                <Text style={styles.bodyText}>Enter your email address. The response will not reveal whether an account exists for it.</Text>
                 <AccountField
                   label="Email"
                   value={email}
@@ -356,24 +498,14 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                   keyboardType="email-address"
                   autoComplete="email"
                   error={fieldErrors.email}
-                  returnKeyType="next"
-                />
-                <AccountField
-                  label="Password"
-                  value={password}
-                  onChangeText={(value) => { setPassword(value); setFieldErrors((current) => ({ ...current, password: undefined })); }}
-                  placeholder="Your password"
-                  secureTextEntry
-                  autoComplete="current-password"
-                  error={fieldErrors.password}
                   returnKeyType="go"
-                  onSubmitEditing={() => { void submitSignIn(); }}
+                  onSubmitEditing={() => { void submitPasswordReset(); }}
                 />
                 {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
+                {feedback && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.success}>{feedback.message}</Text>}
                 <View style={styles.buttonStack}>
-                  <AccountButton label={busy ? 'Signing in…' : 'Sign in'} loading={busy} disabled={busy} onPress={() => { void submitSignIn(); }} />
-                  <AccountButton label="Create an account" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
-                  <AccountButton label="Back" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setScreen('welcome'); }} />
+                  <AccountButton label={busy ? 'Requesting…' : 'Send reset instructions'} loading={busy} disabled={busy} onPress={() => { void submitPasswordReset(); }} />
+                  <AccountButton label="Back to sign in" secondary disabled={busy} onPress={() => { setFormError(null); setFeedback(null); setScreen('sign-in'); }} />
                 </View>
               </View>
             ) : (
@@ -443,47 +575,57 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
 }
 
 const styles = StyleSheet.create({
-  modalRoot: { flex: 1, backgroundColor: '#f7f9f5' },
+  modalRoot: { flex: 1, backgroundColor: '#0b0f0b' },
   keyboard: { flex: 1 },
-  header: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 18, paddingVertical: 10, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e4eadf' },
-  brandMark: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#48a111' },
+  header: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 18, paddingVertical: 10, backgroundColor: '#0b0f0b', borderBottomWidth: 1, borderBottomColor: '#202820' },
+  brandMark: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#65c52b' },
   brandMarkText: { color: '#ffffff', fontSize: 23, fontWeight: '900' },
   headerCopy: { flex: 1 },
-  brand: { color: '#20351d', fontSize: 17, fontWeight: '800' },
-  headerSubtitle: { color: '#64715e', fontSize: 12, marginTop: 2 },
-  closeButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#f3f7ef' },
-  closeText: { color: '#344b2d', fontSize: 28, lineHeight: 31 },
+  brand: { color: '#f0f4ef', fontSize: 17, fontWeight: '800' },
+  headerSubtitle: { color: '#a5afa6', fontSize: 12, marginTop: 2 },
+  closeButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#202820' },
+  closeText: { color: '#d8e0d8', fontSize: 28, lineHeight: 31 },
   content: { flexGrow: 1, padding: 18, paddingBottom: 34, gap: 14 },
-  panel: { padding: 18, borderRadius: 18, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e0e8da', gap: 15 },
-  eyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
-  title: { color: '#20351d', fontSize: 26, lineHeight: 32, fontWeight: '800', letterSpacing: -0.5 },
-  bodyText: { color: '#52634d', fontSize: 14, lineHeight: 21 },
+  panel: { padding: 22, borderRadius: 26, backgroundColor: '#171d17', borderWidth: 1, borderColor: '#252f27', gap: 16 },
+  eyebrow: { color: '#74cf37', fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
+  title: { color: '#f1f5f1', fontSize: 28, lineHeight: 35, fontWeight: '800', letterSpacing: -0.5 },
+  bodyText: { color: '#bbc5bc', fontSize: 14, lineHeight: 21 },
   fieldGroup: { gap: 6 },
   fieldControl: { gap: 6 },
-  fieldLabel: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
-  input: { minHeight: 50, paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: '#d5dfcd', borderRadius: 11, backgroundColor: '#f8faf6', color: '#20351d', fontSize: 16 },
+  fieldLabel: { color: '#e0e7e0', fontSize: 14, fontWeight: '700' },
+  input: { minHeight: 58, paddingHorizontal: 16, paddingVertical: 13, borderWidth: 1, borderColor: '#374239', borderRadius: 14, backgroundColor: '#202820', color: '#f1f5f1', fontSize: 17 },
   passwordField: { position: 'relative' },
   passwordInput: { paddingRight: 50 },
   passwordVisibilityButton: { position: 'absolute', right: 2, top: 1, bottom: 1, width: 46, alignItems: 'center', justifyContent: 'center' },
   inputError: { borderColor: '#b3261e' },
   fieldError: { color: '#b3261e', fontSize: 12, lineHeight: 17 },
-  formError: { color: '#a51d1d', fontSize: 13, lineHeight: 19 },
-  success: { color: '#2d6b1b', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#eff7e9' },
-  warning: { color: '#79520a', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#fff6db', borderWidth: 1, borderColor: '#f1e1ad' },
-  hint: { color: '#687763', fontSize: 13, lineHeight: 19 },
-  buttonStack: { gap: 9, marginTop: 3 },
-  button: { minHeight: 47, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  primaryButton: { backgroundColor: '#48a111' },
-  secondaryButton: { backgroundColor: '#f0f5eb', borderWidth: 1, borderColor: '#dce6d4' },
-  buttonText: { color: '#ffffff', fontSize: 14, fontWeight: '800', textAlign: 'center' },
-  secondaryButtonText: { color: '#3b6f25' },
+  formError: { color: '#ff827a', fontSize: 13, lineHeight: 19 },
+  success: { color: '#a4e180', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#1c2d1b' },
+  warning: { color: '#f2d078', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#302916', borderWidth: 1, borderColor: '#594a25' },
+  hint: { color: '#a5afa6', fontSize: 13, lineHeight: 19 },
+  buttonStack: { gap: 11, marginTop: 3 },
+  button: { minHeight: 54, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  primaryButton: { backgroundColor: '#65c52b' },
+  secondaryButton: { backgroundColor: '#202820', borderWidth: 1, borderColor: '#374239' },
+  buttonText: { color: '#ffffff', fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  secondaryButtonText: { color: '#f0f4ef' },
   buttonDimmed: { opacity: 0.62 },
-  accountEmail: { color: '#344b2d', fontSize: 15, fontWeight: '700' },
+  forgotPasswordLink: { alignSelf: 'flex-end', paddingVertical: 4 },
+  forgotPasswordText: { color: '#74cf37', fontSize: 15, fontWeight: '800', textDecorationLine: 'underline' },
+  cancelButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: 10 },
+  cancelButtonText: { color: '#f05a63', fontSize: 17, fontWeight: '800' },
+  accountSummary: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderWidth: 1, borderColor: '#374239', borderRadius: 12, backgroundColor: '#202820' },
+  accountAvatar: { width: 44, height: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#65c52b' },
+  accountAvatarText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
+  accountDetails: { minWidth: 0, flex: 1, gap: 2 },
+  accountDisplayName: { color: '#f0f4ef', fontSize: 14, fontWeight: '800' },
+  accountEmail: { color: '#a5afa6', fontSize: 12, fontWeight: '400' },
+  accountProvider: { color: '#84d64b', fontSize: 11, fontWeight: '800' },
   statusPill: { alignSelf: 'flex-start', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 16 },
-  statusVerified: { backgroundColor: '#e8f5df' },
-  statusUnverified: { backgroundColor: '#fff2d3' },
-  statusText: { color: '#79520a', fontSize: 12, fontWeight: '800' },
-  statusTextVerified: { color: '#347b0a' },
+  statusVerified: { backgroundColor: '#1c2d1b' },
+  statusUnverified: { backgroundColor: '#302916' },
+  statusText: { color: '#f2d078', fontSize: 12, fontWeight: '800' },
+  statusTextVerified: { color: '#a4e180' },
   inlineStatus: { gap: 8 },
-  localFirstNote: { color: '#62705c', fontSize: 12, lineHeight: 18, textAlign: 'center', paddingHorizontal: 8 },
+  localFirstNote: { color: '#a5afa6', fontSize: 12, lineHeight: 18, textAlign: 'center', paddingHorizontal: 8 },
 });

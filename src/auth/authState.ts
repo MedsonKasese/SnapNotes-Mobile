@@ -31,3 +31,11 @@ export function authStateFromUser(user: AuthUserLike | null): AuthState {
     },
   };
 }
+
+export function authStateFromRefreshedUser(
+  refreshedUser: AuthUserLike,
+  currentUser: AuthUserLike | null,
+): AuthState | null {
+  if (refreshedUser !== currentUser) return null;
+  return authStateFromUser(refreshedUser);
+}

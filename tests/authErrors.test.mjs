@@ -7,6 +7,15 @@ test('credential errors do not reveal whether an email account exists', () => {
   assert.equal(getAuthErrorMessage({ code: 'auth/user-not-found' }), 'The email or password is incorrect.');
 });
 
+test('invalid and expired verification links receive safe next-step guidance', () => {
+  const invalid = getAuthErrorMessage({ code: 'auth/invalid-action-code', message: 'private provider detail' });
+  const expired = getAuthErrorMessage({ code: 'auth/expired-action-code' });
+  assert.equal(invalid, expired);
+  assert.match(invalid, /invalid or expired/);
+  assert.match(invalid, /request a new verification email/i);
+  assert.doesNotMatch(invalid, /private provider detail/);
+});
+
 test('registration and provider restrictions have distinct, non-misleading messages', () => {
   assert.match(getAuthErrorMessage({ code: 'auth/admin-restricted-operation' }), /restricted this operation/);
   const providerDisabled = getAuthErrorMessage({ code: 'auth/operation-not-allowed' });

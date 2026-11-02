@@ -14,6 +14,7 @@ function mount() {
   const stateSlots = new Map();
   let activeComponent = '';
   let hookIndex = 0;
+  const useEffect = () => {};
   const useState = initialValue => {
     const key = `${activeComponent}:${hookIndex++}`;
     if (!stateSlots.has(key)) stateSlots.set(key, initialValue);
@@ -38,12 +39,12 @@ function mount() {
     Text: 'Text', TextInput: 'TextInput', View: 'View',
   };
   const stubs = {
-    react: { useRef, useState },
+    react: { useEffect, useRef, useState },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': native,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '../auth/AuthStateProvider': { useAuthState: () => ({ state: { status: 'signed-out' }, retry: async () => {} }) },
-    '../auth/authService': { AuthOperationError: class AuthOperationError extends Error {}, authService: {} },
+    '../auth/AuthStateProvider': { useAuthState: () => ({ state: { status: 'signed-out' }, retry: async () => {}, refreshVerificationStatus: async () => false }) },
+    '../auth/authService': { AuthOperationError: class AuthOperationError extends Error {}, authService: { getVerificationResendCooldownMs: () => 0 } },
     '../auth/authErrors': { getAuthErrorMessage: () => 'Mock auth error' },
     '../auth/authValidation': {
       normalizeDisplayName: value => value.trim(), normalizeEmail: value => value.trim().toLowerCase(),

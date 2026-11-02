@@ -19,6 +19,9 @@ export function getAuthErrorMessage(error: unknown): string {
     case 'auth/wrong-password':
     case 'auth/user-not-found':
       return 'The email or password is incorrect.';
+    case 'auth/invalid-action-code':
+    case 'auth/expired-action-code':
+      return 'This verification link is invalid or expired. Request a new verification email and use the latest link.';
     case 'auth/user-disabled':
       return 'This account is disabled. Contact the app owner for help.';
     case 'auth/network-request-failed':
