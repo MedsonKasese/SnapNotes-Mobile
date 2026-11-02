@@ -34,6 +34,31 @@ test('unverified users retain local notes and can refresh status or request a fr
   assert.match(source, /Your local notes stay available while you verify/);
 });
 
+test('account identity follows the PWA account card conventions', () => {
+  assert.match(source, /accountSummary/);
+  assert.match(source, /accountAvatarText/);
+  assert.match(source, /accountDisplayName/);
+  assert.match(source, /accountProvider/);
+  assert.match(source, /state\.user\.displayName\?\.trim\(\) \|\| state\.user\.email\?\.split\('@'\)\[0\] \|\| 'SnapNotes user'/);
+  assert.match(source, /Local mode/);
+  assert.match(source, /Your notes are stored on this device/);
+});
+
+test('sign-in uses the PWA dark sheet hierarchy with recovery, account creation, and cancel actions', () => {
+  assert.match(source, /SNAPNOTES ACCOUNT/);
+  assert.match(source, /Sign in to SnapNotes/);
+  assert.match(source, /hideLabel/);
+  assert.match(source, /placeholder="Email"/);
+  assert.match(source, /placeholder="Password"/);
+  assert.match(source, /forgotPasswordLink/);
+  assert.match(source, /Forgot password\?/);
+  assert.match(source, /Sign In/);
+  assert.match(source, /Create Account/);
+  assert.match(source, /Cancel/);
+  assert.match(source, /backgroundColor: '#171d17'/);
+  assert.doesNotMatch(source, /Continue with Google/);
+});
+
 test('password recovery has a neutral acknowledgement and does not gate the notes workspace', () => {
   assert.match(source, /Forgot password\?/);
   assert.match(source, /requestPasswordReset\(email\)/);
