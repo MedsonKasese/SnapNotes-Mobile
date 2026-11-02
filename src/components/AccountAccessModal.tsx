@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -57,27 +58,44 @@ function AccountField({
   returnKeyType = 'done',
   onSubmitEditing,
 }: AccountFieldProps) {
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const visibilityTarget = label === 'Confirm password' ? 'confirmation password' : label.toLowerCase();
   return (
     <View style={styles.fieldGroup}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        accessibilityHint={error}
-        autoCapitalize={autoCapitalize}
-        autoCorrect={false}
-        autoComplete={autoComplete}
-        keyboardType={keyboardType}
-        maxLength={maxLength}
-        onChangeText={onChangeText}
-        onSubmitEditing={onSubmitEditing}
-        placeholder={placeholder}
-        placeholderTextColor="#71806b"
-        returnKeyType={returnKeyType}
-        secureTextEntry={secureTextEntry}
-        style={[styles.input, error ? styles.inputError : null]}
-        value={value}
-      />
-      {error ? <Text accessibilityRole="alert" style={styles.fieldError}>{error}</Text> : null}
+      <View style={[styles.fieldControl, secureTextEntry ? styles.passwordField : null]}>
+        <TextInput
+          accessibilityLabel={label}
+          accessibilityHint={error}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={false}
+          autoComplete={autoComplete}
+          keyboardType={keyboardType}
+          maxLength={maxLength}
+          onChangeText={onChangeText}
+          onSubmitEditing={onSubmitEditing}
+          placeholder={placeholder}
+          placeholderTextColor="#71806b"
+          returnKeyType={returnKeyType}
+          secureTextEntry={secureTextEntry && !passwordVisible}
+          style={[styles.input, secureTextEntry ? styles.passwordInput : null, error ? styles.inputError : null]}
+          value={value}
+        />
+        {secureTextEntry ? (
+          <Pressable
+            accessibilityRole="togglebutton"
+            accessibilityLabel={`${passwordVisible ? 'Hide' : 'Show'} ${visibilityTarget}`}
+            accessibilityHint={passwordVisible ? 'Hides the password on screen' : 'Shows the password on screen'}
+            accessibilityState={{ checked: passwordVisible }}
+            hitSlop={8}
+            onPress={() => setPasswordVisible((visible) => !visible)}
+            style={styles.passwordVisibilityButton}
+          >
+            <MaterialCommunityIcons name={passwordVisible ? 'eye-off' : 'eye'} size={22} color="#3b7f16" accessible={false} />
+          </Pressable>
+        ) : null}
+        {error ? <Text accessibilityRole="alert" style={styles.fieldError}>{error}</Text> : null}
+      </View>
     </View>
   );
 }
@@ -441,8 +459,12 @@ const styles = StyleSheet.create({
   title: { color: '#20351d', fontSize: 26, lineHeight: 32, fontWeight: '800', letterSpacing: -0.5 },
   bodyText: { color: '#52634d', fontSize: 14, lineHeight: 21 },
   fieldGroup: { gap: 6 },
+  fieldControl: { gap: 6 },
   fieldLabel: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
   input: { minHeight: 50, paddingHorizontal: 12, paddingVertical: 11, borderWidth: 1, borderColor: '#d5dfcd', borderRadius: 11, backgroundColor: '#f8faf6', color: '#20351d', fontSize: 16 },
+  passwordField: { position: 'relative' },
+  passwordInput: { paddingRight: 50 },
+  passwordVisibilityButton: { position: 'absolute', right: 2, top: 1, bottom: 1, width: 46, alignItems: 'center', justifyContent: 'center' },
   inputError: { borderColor: '#b3261e' },
   fieldError: { color: '#b3261e', fontSize: 12, lineHeight: 17 },
   formError: { color: '#a51d1d', fontSize: 13, lineHeight: 19 },

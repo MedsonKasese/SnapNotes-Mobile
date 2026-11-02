@@ -9,10 +9,11 @@ export function normalizeDisplayName(displayName: string): string {
   return displayName.trim().replace(/\s+/g, ' ');
 }
 
-function emailError(email: string): string | undefined {
+export function validateEmailAddress(email: string): string | undefined {
   const normalized = normalizeEmail(email);
   if (!normalized) return 'Enter your email address.';
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+  // Check only for a basic address shape; Firebase decides whether it accepts the address.
+  if (!/^[^\s@]+@[^\s@]+$/.test(normalized)) {
     return 'Enter a valid email address.';
   }
   return undefined;
@@ -20,7 +21,7 @@ function emailError(email: string): string | undefined {
 
 export function validateSignIn(email: string, password: string): AuthFieldErrors {
   const errors: AuthFieldErrors = {};
-  const emailMessage = emailError(email);
+  const emailMessage = validateEmailAddress(email);
   if (emailMessage) errors.email = emailMessage;
   if (!password) errors.password = 'Enter your password.';
   return errors;
@@ -37,7 +38,7 @@ export function validateRegistration(
   if (!normalizedName) errors.displayName = 'Enter your name.';
   else if (normalizedName.length > 80) errors.displayName = 'Use 80 characters or fewer.';
 
-  const emailMessage = emailError(email);
+  const emailMessage = validateEmailAddress(email);
   if (emailMessage) errors.email = emailMessage;
 
   if (!password) errors.password = 'Enter a password.';

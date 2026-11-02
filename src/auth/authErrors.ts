@@ -25,8 +25,10 @@ export function getAuthErrorMessage(error: unknown): string {
       return 'Could not reach the sign-in service. Check your connection and try again.';
     case 'auth/too-many-requests':
       return 'There have been too many attempts. Wait a while, then try again.';
+    case 'auth/admin-restricted-operation':
+      return 'The authentication service has restricted this operation. Contact the app owner for help.';
     case 'auth/operation-not-allowed':
-      return 'Email and password sign-in is not available right now.';
+      return 'Email and password authentication is not enabled for this app. Contact the app owner.';
     default:
       return 'Something went wrong. Please try again. Your notes remain on this device.';
   }
