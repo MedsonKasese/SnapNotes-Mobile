@@ -271,8 +271,8 @@ test('empty categories explain the filter instead of claiming there are no saved
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
   const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'file-text-o', 'lock', 'trash', 'plus']);
-  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Drafts', 'Private Notes', 'Trash', 'New note']);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'file-text-o', 'lock', 'trash', 'plus', 'user-circle-o']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Drafts', 'Private Notes', 'Trash', 'New note', 'Account']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');
@@ -846,7 +846,7 @@ test('drawer shows section dividers, transfer actions, and an explicit Private N
   const app = workspace();
   app.setFoldersReady(true);
   const tree = app.render();
-  assert.equal(elements(tree).filter(element => element.props.testID === 'drawer-section-divider').length, 3);
+  assert.equal(elements(tree).filter(element => element.props.testID === 'drawer-section-divider').length, 4);
   const exportButton = find(tree, element => element.props.accessibilityLabel === 'Export notes');
   const importButton = find(tree, element => element.props.accessibilityLabel === 'Import notes');
   assert.equal(exportButton.props.accessibilityRole, 'button');
