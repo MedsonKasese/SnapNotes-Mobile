@@ -10,6 +10,7 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   INITIAL_AUTH_STATE,
+  authStateFromRefreshedUser,
   authStateFromUser,
   type AuthState,
 } from './authState';
@@ -20,7 +21,7 @@ import { getMobileAuth } from '../firebase/firebaseAuth';
 type AuthStateContextValue = {
   state: AuthState;
   retry: () => void;
-  refreshVerificationStatus: () => Promise<boolean>;
+  refreshVerificationStatus: () => Promise<boolean | null>;
 };
 
 const AuthStateContext = createContext<AuthStateContextValue | null>(null);
@@ -60,8 +61,14 @@ export function AuthStateProvider({ children }: PropsWithChildren) {
   }, []);
   const refreshVerificationStatus = useCallback(async () => {
     const user = await authService.refreshVerificationStatus();
-    setState(authStateFromUser(user));
-    return user.emailVerified;
+    const currentUser = getMobileAuth().currentUser;
+    const refreshedState = authStateFromRefreshedUser(user, currentUser);
+    if (!refreshedState) {
+      setState(authStateFromUser(currentUser));
+      return null;
+    }
+    setState(refreshedState);
+    return refreshedState.status === 'signed-in' ? refreshedState.user.emailVerified : false;
   }, []);
   const value = useMemo(
     () => ({ state, retry, refreshVerificationStatus }),

@@ -291,6 +291,13 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const refreshVerification = async () => {
     await runAction(async () => {
       const emailVerified = await refreshAuthVerificationStatus();
+      if (emailVerified === null) {
+        setFeedback({
+          kind: 'warning',
+          message: 'The account session changed while status was refreshing. Check the current account status again. Your local notes remain available.',
+        });
+        return;
+      }
       setFeedback({
         kind: 'success',
         message: emailVerified
