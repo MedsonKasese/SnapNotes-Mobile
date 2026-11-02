@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAuthService, AuthOperationError } from '../src/auth/authServiceCore.ts';
+import {
+  createAuthService,
+  AuthOperationError,
+  PASSWORD_RESET_NEUTRAL_MESSAGE,
+  VERIFICATION_RESEND_COOLDOWN_MS,
+} from '../src/auth/authServiceCore.ts';
 import { getAuthErrorMessage } from '../src/auth/authErrors.ts';
 
 function makeService(overrides = {}) {
   const calls = [];
+  let clock = 0;
   const user = {
     uid: 'firebase-user-1',
     email: 'ada@example.com',
@@ -29,12 +35,25 @@ function makeService(overrides = {}) {
     sendEmailVerification: async (target) => {
       calls.push(['send-verification', target.uid]);
     },
+    reloadUser: async (target) => {
+      calls.push(['reload-user', target.uid]);
+    },
+    sendPasswordResetEmail: async (_auth, email) => {
+      calls.push(['password-reset', email]);
+    },
     signOut: async (target) => {
       calls.push(['sign-out', target === auth]);
     },
+    now: () => clock,
     ...overrides,
   };
-  return { service: createAuthService(dependencies), calls, user, auth };
+  return {
+    service: createAuthService(dependencies),
+    calls,
+    user,
+    auth,
+    setNow: (value) => { clock = value; },
+  };
 }
 
 test('registration normalizes identity fields, preserves the password, and sends verification after account creation', async () => {
@@ -101,6 +120,60 @@ test('failed registration follow-ups can be retried against the existing Firebas
     ['send-verification', user.uid],
   ]);
   assert.equal(calls.some(([name]) => name === 'create'), false);
+});
+
+test('verification status refresh reloads the current Firebase user and returns its updated summary', async () => {
+  const { service, calls, user } = makeService({
+    reloadUser: async (target) => {
+      calls.push(['reload-user', target.uid]);
+      target.emailVerified = true;
+    },
+  });
+  const refreshed = await service.refreshVerificationStatus();
+  assert.equal(refreshed.emailVerified, true);
+  assert.deepEqual(calls, [['reload-user', user.uid]]);
+});
+
+test('verification resend can retry a failed request, enforces a cooldown after success, then allows retry', async () => {
+  let failNextSend = true;
+  const { service, calls, setNow } = makeService({
+    sendEmailVerification: async (target) => {
+      calls.push(['send-verification', target.uid]);
+      if (failNextSend) {
+        failNextSend = false;
+        throw Object.assign(new Error('private provider text'), { code: 'auth/network-request-failed' });
+      }
+    },
+  });
+
+  await assert.rejects(service.resendVerificationEmail(), /Check your connection/);
+  assert.equal(service.getVerificationResendCooldownMs(), 0);
+  await service.retryRegistrationVerificationEmail();
+  assert.equal(service.getVerificationResendCooldownMs(), VERIFICATION_RESEND_COOLDOWN_MS);
+  await assert.rejects(service.resendVerificationEmail(), /Wait 60 seconds/);
+  assert.equal(calls.filter(([name]) => name === 'send-verification').length, 2);
+
+  setNow(VERIFICATION_RESEND_COOLDOWN_MS + 1);
+  await service.resendVerificationEmail();
+  assert.equal(calls.filter(([name]) => name === 'send-verification').length, 3);
+});
+
+test('password-reset success and account-specific Firebase errors produce identical neutral copy', async () => {
+  const success = makeService();
+  const successfulResult = await success.service.requestPasswordReset(' ADA@Example.COM ');
+  const missing = makeService({
+    sendPasswordResetEmail: async (_auth, email) => {
+      missing.calls.push(['password-reset', email]);
+      throw Object.assign(new Error('account lookup must not escape'), { code: 'auth/user-not-found' });
+    },
+  });
+  const missingResult = await missing.service.requestPasswordReset(' ADA@Example.COM ');
+
+  assert.deepEqual(success.calls, [['password-reset', 'ada@example.com']]);
+  assert.deepEqual(missing.calls, [['password-reset', 'ada@example.com']]);
+  assert.equal(successfulResult.message, PASSWORD_RESET_NEUTRAL_MESSAGE);
+  assert.equal(missingResult.message, successfulResult.message);
+  assert.doesNotMatch(missingResult.message, /not found|no account|registered|exists\?/i);
 });
 
 test('Firebase errors map to safe copy and never expose raw provider details', () => {

@@ -26,7 +26,17 @@ test('successful explicit sign-out clears account form state after Firebase Auth
   assert.doesNotMatch(body, /AsyncStorage|notesStorage|Firestore|privateVault/i);
 });
 
-test('verification UI warns that an external-link result may be stale in this session', () => {
-  assert.match(source, /Email not verified in this session/);
-  assert.match(source, /status may remain stale after you open a verification link outside the app/);
+test('unverified users retain local notes and can refresh status or request a fresh verification email', () => {
+  assert.match(source, /Verification pending/);
+  assert.match(source, /Refresh verification status/);
+  assert.match(source, /Resend verification email/);
+  assert.match(source, /invalid or expired/);
+  assert.match(source, /Your local notes stay available while you verify/);
+});
+
+test('password recovery has a neutral acknowledgement and does not gate the notes workspace', () => {
+  assert.match(source, /Forgot password\?/);
+  assert.match(source, /requestPasswordReset\(email\)/);
+  assert.match(source, /response will not reveal whether an account exists/);
+  assert.match(source, /Local notes remain on this device whether you sign in, sign out, or stay offline/);
 });

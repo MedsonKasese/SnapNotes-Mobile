@@ -12,7 +12,9 @@ Password fields start masked and include independent, accessible eye controls to
 
 Registration sends Firebase's verification email after account creation. If saving the display name or sending that email fails, the account remains created and signed in; the screen offers a retry for only the failed follow-up operation. Retrying does not call account creation again, and the registration result/retry state survives the Firebase observer's signed-in update. A successful explicit sign-out clears that transient account/form state.
 
-The account screen displays `emailVerified` from the current Firebase user state. After opening a verification link outside the app, that indicator may remain stale until Firebase refreshes the user/session or the user signs in again; this stage does not call `user.reload()` or provide a refresh button. It does not add a verification-pending route, general resend/refresh controls, password reset, deep links, or verification-link handling; those are in roadmap Phase 3. An unverified user can still use the local notes workspace.
+An unverified signed-in account now has a pending state, a Firebase user reload action, and a resend-verification action. The displayed status is updated from the reloaded user; if the link was invalid or expired, safe guidance tells the user to request a fresh email and use the newest link. Resends have a 60-second client cooldown after a successful send, in addition to Firebase's server-side rate limits. The app does not add a custom email-action deep-link handler or change Firebase Console settings. Unverified users continue to use the local notes workspace.
+
+The sign-in screen includes password recovery. Firebase `sendPasswordResetEmail` receives the normalized email, and success plus account-specific responses such as `user-not-found` use the same acknowledgement: “If an account exists for this email address, you'll receive password-reset instructions.” Network failures remain generic and never include provider details. This flow only requests Firebase's email; password completion remains on Firebase's action page.
 
 ## Local-first and security boundary
 
@@ -24,10 +26,28 @@ Only the public Firebase client configuration already reviewed in `src/firebase/
 
 The PWA account dialog is defined in `SnapNotes/js/auth.js` and `SnapNotes/index.html`. Its registration flow asks for a full name, email, and password, updates the Firebase display name, and sends a verification email. The mobile form adds confirmation, client-side email/password checks, loading protection, and field-level validation because the roadmap requires them.
 
-The PWA's unverified sign-in UI asks the user to verify before continuing and includes a resend control. The mobile app instead lets Firebase establish the account session and explicitly keeps local notes usable while unverified, following the local-first roadmap; this mobile release has no cloud-dependent account feature to unlock. Verification status is shown without claiming that local notes are synced. General resend/refresh and recovery UI remains Phase 3.
+The PWA has a resend control but relies on Firebase throttling rather than a client countdown. Its forgot-password handler distinguishes `auth/user-not-found` and can reveal that an address is not registered (`SnapNotes/js/auth.js`); Mobile returns the same neutral reset acknowledgement for success and account-specific responses. PWA sign-in copy asks an unverified user to verify, but its auth observer still restores the account library and begins Firestore loading; Mobile intentionally keeps unverified users in the device-local workspace and does not start cloud access. Mobile now refreshes `emailVerified` on demand and adds a 60-second resend cooldown.
 
 The PWA observer can merge local and account caches and begin Firestore loading after sign-in (`SnapNotes/js/auth.js` and `SnapNotes/js/firestore.js`). Mobile deliberately does not copy that behavior: the roadmap forbids note migration, reassignment, merge, or upload during authentication. PWA sign-out also switches between local/account snapshots; mobile has one device-local workspace, so sign-out only ends the Firebase session and clears account-scoped UI state.
 
 ## Checks and owner validation
 
-Automated tests cover form validation and normalization, safe error mapping, independent accessible password visibility toggles, operation order, follow-up retry without duplicate account creation, and sign-out isolation. Run `npm run check`, `npx expo install --check`, and an Android JavaScript bundle export before review. A cloud Metro tunnel is recommended for the owner's existing Android development APK because Termux's file-watcher limit prevents reliable local Metro operation. Successful bundling and automated tests do not prove an on-device Firebase sign-in or persistence restore; owner testing is still required before merge.
+Automated tests cover form validation and normalization, safe error mapping, independent accessible password visibility toggles, registration follow-up retry, verification reload, resend retry/cooldown, neutral password-reset responses, and sign-out isolation. Run `npm run check`, `npx expo install --check`, and an Android JavaScript bundle export before review. No new package is required.
+
+To update an Android/Termux checkout of the merged `main` after PR #44, run:
+
+```sh
+cd ~/SnapNotes-Mobile
+git fetch origin
+git switch main
+git pull --ff-only origin main
+```
+
+To check out this review branch while the PR is still open:
+
+```sh
+git fetch origin
+git switch --track origin/feat/mobile-email-verification-recovery
+```
+
+If that local branch already exists, use `git switch feat/mobile-email-verification-recovery` followed by `git pull --ff-only`. Do not merge this branch into local `main` before review. Because Termux's watcher limit prevents reliable local Metro operation, run Metro from the cloud development workspace/URL for the branch and open that URL in the existing Android development build. Use an already-available unverified owner test account: confirm “Verification pending,” resend and observe the countdown, open the newest email link, then refresh and confirm the verified state. Request password resets for an existing test address and a non-account address and confirm identical acknowledgement text. Compare ordinary local notes and Private Notes before/after; neither should change. These checks do not require new production accounts or Firebase Console changes.

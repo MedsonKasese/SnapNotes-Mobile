@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
@@ -20,12 +20,13 @@ import { getAuthErrorMessage } from '../auth/authErrors';
 import {
   normalizeDisplayName,
   normalizeEmail,
+  validateEmailAddress,
   validateRegistration,
   validateSignIn,
   type AuthFieldErrors,
 } from '../auth/authValidation';
 
-type AccountScreen = 'welcome' | 'sign-in' | 'register' | 'account';
+type AccountScreen = 'welcome' | 'sign-in' | 'register' | 'password-reset' | 'account';
 type Feedback = { kind: 'success' | 'warning'; message: string };
 type AccountAccessModalProps = { visible: boolean; onClose: () => void };
 
@@ -135,7 +136,11 @@ function safeMessage(error: unknown): string {
 }
 
 export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps) {
-  const { state, retry: retryAuthState } = useAuthState();
+  const {
+    state,
+    retry: retryAuthState,
+    refreshVerificationStatus: refreshAuthVerificationStatus,
+  } = useAuthState();
   const [screen, setScreen] = useState<AccountScreen>('welcome');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -148,7 +153,23 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
   const [pendingDisplayName, setPendingDisplayName] = useState<string | null>(null);
   const [verificationRetryAvailable, setVerificationRetryAvailable] = useState(false);
+  const [verificationCooldownMs, setVerificationCooldownMs] = useState(0);
   const requestInFlight = useRef(false);
+  const verificationUserId =
+    state.status === 'signed-in' && !state.user.emailVerified ? state.user.uid : null;
+
+  useEffect(() => {
+    if (!visible || !verificationUserId) return;
+    const updateCooldown = () => {
+      setVerificationCooldownMs(authService.getVerificationResendCooldownMs());
+    };
+    const initialUpdate = setTimeout(updateCooldown, 0);
+    const timer = setInterval(updateCooldown, 1000);
+    return () => {
+      clearTimeout(initialUpdate);
+      clearInterval(timer);
+    };
+  }, [visible, verificationUserId]);
 
   const clearTransientState = () => {
     setScreen('welcome');
@@ -203,6 +224,19 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     });
   };
 
+  const submitPasswordReset = async () => {
+    const emailError = validateEmailAddress(email);
+    const errors: AuthFieldErrors = emailError ? { email: emailError } : {};
+    setFieldErrors(errors);
+    setFormError(null);
+    setFeedback(null);
+    if (Object.keys(errors).length > 0) return;
+    await runAction(async () => {
+      const result = await authService.requestPasswordReset(email);
+      setFeedback({ kind: 'success', message: result.message });
+    });
+  };
+
   const submitRegistration = async () => {
     const errors = validateRegistration(displayName, email, password, confirmPassword);
     setFieldErrors(errors);
@@ -248,9 +282,21 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
 
   const retryVerificationEmail = async () => {
     await runAction(async () => {
-      await authService.retryRegistrationVerificationEmail();
+      await authService.resendVerificationEmail();
       setVerificationRetryAvailable(false);
-      setFeedback({ kind: 'success', message: 'The verification email was sent. Your local notes remain available while you verify.' });
+      setFeedback({ kind: 'success', message: 'Verification email sent. Use the newest email link; older or expired links may not work. Your local notes remain available.' });
+    }, 'account');
+  };
+
+  const refreshVerification = async () => {
+    await runAction(async () => {
+      const emailVerified = await refreshAuthVerificationStatus();
+      setFeedback({
+        kind: 'success',
+        message: emailVerified
+          ? 'Email verified. Your local notes and Private Notes remain on this device; no sync occurred.'
+          : 'Verification is still pending. If the link was invalid or expired, request a new email and open the latest link. Your local notes remain available.',
+      });
     }, 'account');
   };
 
@@ -293,13 +339,24 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                     <Text style={styles.accountEmail}>{state.user.email ?? 'Signed-in Firebase account'}</Text>
                     <View style={[styles.statusPill, state.user.emailVerified ? styles.statusVerified : styles.statusUnverified]}>
                       <Text style={[styles.statusText, state.user.emailVerified ? styles.statusTextVerified : null]}>
-                        {state.user.emailVerified ? 'Email verified' : 'Email not verified in this session'}
+                        {state.user.emailVerified ? 'Email verified' : 'Verification pending'}
                       </Text>
                     </View>
                     {!state.user.emailVerified && (
                       <Text style={styles.bodyText}>
-                        This status may remain stale after you open a verification link outside the app. Signing out and back in reloads account state; local notes work either way, and cloud sync is not part of this release.
+                        Your local notes stay available while you verify. Refresh after opening the email link; if a link is invalid or expired, request a new email and use the latest link. Verification never moves notes or changes Private Notes.
                       </Text>
+                    )}
+                    {!state.user.emailVerified && (
+                      <View style={styles.buttonStack}>
+                        <AccountButton label={busy ? 'Refreshing…' : 'Refresh verification status'} loading={busy} disabled={busy} secondary onPress={() => { void refreshVerification(); }} />
+                        <AccountButton
+                          label={busy ? 'Sending…' : verificationCooldownMs > 0 ? `Resend verification email in ${Math.ceil(verificationCooldownMs / 1000)}s` : 'Resend verification email'}
+                          loading={busy}
+                          disabled={busy || verificationCooldownMs > 0}
+                          onPress={() => { void retryVerificationEmail(); }}
+                        />
+                      </View>
                     )}
                   </>
                 ) : (
@@ -317,7 +374,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
 
                 {feedback && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={feedback.kind === 'success' ? styles.success : styles.warning}>{feedback.message}</Text>}
                 {pendingDisplayName !== null && <AccountButton label={busy ? 'Saving name…' : 'Retry saving account name'} loading={busy} disabled={busy} onPress={() => { void retryDisplayName(); }} />}
-                {verificationRetryAvailable && <AccountButton label={busy ? 'Sending…' : 'Retry verification email'} loading={busy} disabled={busy} secondary onPress={() => { void retryVerificationEmail(); }} />}
+                {verificationRetryAvailable && state.status !== 'signed-in' && <AccountButton label={busy ? 'Sending…' : 'Retry verification email'} loading={busy} disabled={busy} secondary onPress={() => { void retryVerificationEmail(); }} />}
                 <View style={styles.buttonStack}>
                   {state.status === 'signed-in' && <AccountButton label={busy ? 'Signing out…' : 'Sign out'} loading={busy} disabled={busy} secondary onPress={() => { void handleSignOut(); }} />}
                   <AccountButton label="Back to notes" secondary disabled={busy} onPress={close} />
@@ -372,8 +429,32 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                 {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
                 <View style={styles.buttonStack}>
                   <AccountButton label={busy ? 'Signing in…' : 'Sign in'} loading={busy} disabled={busy} onPress={() => { void submitSignIn(); }} />
+                  <AccountButton label="Forgot password?" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setFeedback(null); setScreen('password-reset'); }} />
                   <AccountButton label="Create an account" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
                   <AccountButton label="Back" secondary disabled={busy} onPress={() => { setFormError(null); setFieldErrors({}); setScreen('welcome'); }} />
+                </View>
+              </View>
+            ) : screen === 'password-reset' ? (
+              <View style={styles.panel}>
+                <Text style={styles.eyebrow}>ACCOUNT RECOVERY</Text>
+                <Text accessibilityRole="header" style={styles.title}>Reset password</Text>
+                <Text style={styles.bodyText}>Enter your email address. The response will not reveal whether an account exists for it.</Text>
+                <AccountField
+                  label="Email"
+                  value={email}
+                  onChangeText={(value) => { setEmail(value); setFieldErrors((current) => ({ ...current, email: undefined })); }}
+                  placeholder="you@example.com"
+                  keyboardType="email-address"
+                  autoComplete="email"
+                  error={fieldErrors.email}
+                  returnKeyType="go"
+                  onSubmitEditing={() => { void submitPasswordReset(); }}
+                />
+                {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
+                {feedback && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.success}>{feedback.message}</Text>}
+                <View style={styles.buttonStack}>
+                  <AccountButton label={busy ? 'Requesting…' : 'Send reset instructions'} loading={busy} disabled={busy} onPress={() => { void submitPasswordReset(); }} />
+                  <AccountButton label="Back to sign in" secondary disabled={busy} onPress={() => { setFormError(null); setFeedback(null); setScreen('sign-in'); }} />
                 </View>
               </View>
             ) : (
