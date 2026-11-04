@@ -1,13 +1,29 @@
 export type NativeCryptoProvider = Pick<Crypto, 'getRandomValues' | 'subtle'>;
 
+export type NativeCryptoProviderErrorCode = 'PV-CRYPTO-LOAD' | 'PV-CRYPTO-API';
+
 type NativeCryptoModule = {
   default?: unknown;
   getRandomValues?: unknown;
   subtle?: unknown;
 };
 
-const NATIVE_CRYPTO_UNAVAILABLE_MESSAGE =
-  'Native secure cryptography is unavailable. Private Notes encryption requires the SnapNotes development build; Expo Go does not include this native module.';
+const NATIVE_CRYPTO_FAILURE_MESSAGES: Record<NativeCryptoProviderErrorCode, string> = {
+  'PV-CRYPTO-LOAD':
+    'Quick Crypto/Nitro could not be loaded. Verify the installed development APK includes and initializes these native modules; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]',
+  'PV-CRYPTO-API':
+    'Quick Crypto loaded, but its required Web Crypto APIs are unavailable. Verify the APK and Metro bundle use the same Quick Crypto version. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-API]',
+};
+
+export class NativeCryptoProviderUnavailableError extends Error {
+  readonly code: NativeCryptoProviderErrorCode;
+
+  constructor(code: NativeCryptoProviderErrorCode) {
+    super(NATIVE_CRYPTO_FAILURE_MESSAGES[code]);
+    this.name = 'NativeCryptoProviderUnavailableError';
+    this.code = code;
+  }
+}
 
 function isNativeCryptoProvider(value: unknown): value is NativeCryptoProvider {
   if (!value || typeof value !== 'object') return false;
@@ -31,21 +47,27 @@ function isNativeCryptoProvider(value: unknown): value is NativeCryptoProvider {
 export async function createNativeCryptoProvider(
   loadModule: () => Promise<unknown> = () => import('react-native-quick-crypto'),
 ): Promise<NativeCryptoProvider> {
+  let loaded: unknown;
   try {
-    const loaded = await loadModule();
+    loaded = await loadModule();
+  } catch {
+    // Do not surface Nitro, Metro, or native implementation details.
+    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-LOAD');
+  }
+
+  try {
     const moduleDefault = loaded && typeof loaded === 'object'
       ? (loaded as NativeCryptoModule).default
       : undefined;
     const provider = isNativeCryptoProvider(moduleDefault) ? moduleDefault : loaded;
 
     if (!isNativeCryptoProvider(provider)) {
-      throw new Error('Quick Crypto did not export the required Web Crypto APIs.');
+      throw new Error('Required Web Crypto APIs are missing.');
     }
 
     return provider;
   } catch {
-    // Native loader errors may include implementation details. Keep them out of
-    // the UI, logs, and rejected error causes while still failing closed.
-    throw new Error(NATIVE_CRYPTO_UNAVAILABLE_MESSAGE);
+    // Keep malformed or incompatible provider details out of UI and causes.
+    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-API');
   }
 }

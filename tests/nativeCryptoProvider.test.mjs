@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { createNativeCryptoProvider } from '../src/nativeCryptoProvider.ts';
+import {
+  createNativeCryptoProvider,
+  NativeCryptoProviderUnavailableError,
+} from '../src/nativeCryptoProvider.ts';
 
-const unavailableMessage =
-  'Native secure cryptography is unavailable. Private Notes encryption requires the SnapNotes development build; Expo Go does not include this native module.';
+const loadFailureMessage =
+  'Quick Crypto/Nitro could not be loaded. Verify the installed development APK includes and initializes these native modules; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]';
+const apiFailureMessage =
+  'Quick Crypto loaded, but its required Web Crypto APIs are unavailable. Verify the APK and Metro bundle use the same Quick Crypto version. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-API]';
 
 test('uses Quick Crypto exports directly without calling the global install hook', async () => {
   let installCalls = 0;
@@ -39,28 +44,32 @@ test('fails closed instead of falling back to ambient Web Crypto when native exp
   await assert.rejects(
     createNativeCryptoProvider(async () => ({ install() {} })),
     error => {
-      assert.equal(error.message, unavailableMessage);
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-API');
+      assert.equal(error.message, apiFailureMessage);
       assert.equal(error.cause, undefined);
       return true;
     },
   );
 });
 
-test('sanitizes native module load failures without preserving their cause', async () => {
+test('sanitizes Quick Crypto/Nitro module load failures into a distinct fixed diagnostic', async () => {
   await assert.rejects(
     createNativeCryptoProvider(async () => {
-      throw new Error('native-module-private-diagnostic-sentinel');
+      throw new Error('TurboModuleRegistry-private-diagnostic-sentinel');
     }),
     error => {
-      assert.equal(error.message, unavailableMessage);
-      assert.equal(error.message.includes('native-module-private-diagnostic-sentinel'), false);
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-LOAD');
+      assert.equal(error.message, loadFailureMessage);
+      assert.equal(error.message.includes('TurboModuleRegistry-private-diagnostic-sentinel'), false);
       assert.equal(error.cause, undefined);
       return true;
     },
   );
 });
 
-test('rejects a partial Web Crypto implementation that lacks required key operations', async () => {
+test('rejects a partial Web Crypto implementation with the API diagnostic', async () => {
   await assert.rejects(
     createNativeCryptoProvider(async () => ({
       default: {
@@ -68,6 +77,11 @@ test('rejects a partial Web Crypto implementation that lacks required key operat
         subtle: { importKey() {} },
       },
     })),
-    error => error.message === unavailableMessage,
+    error => {
+      assert.equal(error.code, 'PV-CRYPTO-API');
+      assert.equal(error.message, apiFailureMessage);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
   );
 });
