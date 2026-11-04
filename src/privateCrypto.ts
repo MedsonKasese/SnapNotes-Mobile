@@ -1,4 +1,5 @@
 import { gcm } from '@noble/ciphers/aes.js';
+import { createNativeCryptoProvider, type NativeCryptoProvider } from './nativeCryptoProvider.ts';
 
 // Compatible with the PWA's private-notes.js version 1 encrypted payload.
 // Native builds use Quick Crypto so PBKDF2 runs in native code rather than a
@@ -15,7 +16,7 @@ export type PrivateCipherRecord = {
   iv: string;
   ciphertext: string;
 };
-type CryptoLike = Pick<Crypto, 'getRandomValues' | 'subtle'>;
+type CryptoLike = NativeCryptoProvider;
 type PrivateKey = CryptoKey | Uint8Array;
 
 // Keep native exception details out of the UI: errors may contain inputs. These
@@ -32,27 +33,14 @@ export class PrivatePayloadError extends Error {
 
 let nativeCryptoProviderPromise: Promise<CryptoLike> | undefined;
 
-function unavailableError(): Error {
-  return new Error(
-    'Native secure cryptography is unavailable. Private Notes encryption requires the SnapNotes development build; Expo Go does not include this native module.',
-  );
-}
-
-async function getNativeCryptoProvider(): Promise<CryptoLike> {
+function getNativeCryptoProvider(): Promise<CryptoLike> {
   if (!nativeCryptoProviderPromise) {
-    nativeCryptoProviderPromise = (async () => {
-      try {
-        const { install } = await import('react-native-quick-crypto');
-        install();
-        const provider = globalThis.crypto as CryptoLike | undefined;
-        if (!provider?.subtle || typeof provider.getRandomValues !== 'function') {
-          throw unavailableError();
-        }
-        return provider;
-      } catch {
-        throw unavailableError();
-      }
-    })();
+    nativeCryptoProviderPromise = createNativeCryptoProvider().catch(error => {
+      // A transient loader failure must not poison the process-wide cache.
+      // The factory has already replaced native details with a fixed message.
+      nativeCryptoProviderPromise = undefined;
+      throw error;
+    });
   }
   return nativeCryptoProviderPromise;
 }
