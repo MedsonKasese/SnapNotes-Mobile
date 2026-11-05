@@ -7,7 +7,7 @@
     "@noble/ciphers": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~58.0.22",
+    "expo": "~58.0.23",
     "expo-crypto": "~58.0.7",
     "expo-dev-client": "~58.0.18",
     "expo-document-picker": "~58.0.4",
@@ -15,7 +15,7 @@
     "expo-font": "~58.0.11",
     "expo-screen-capture": "~58.0.6",
     "expo-secure-store": "~58.0.2",
-    "expo-sharing": "~58.0.21",
+    "expo-sharing": "~58.0.22",
     "expo-status-bar": "~58.0.4",
     "firebase": "12.14.0",
     "htmlparser2": "^12.0.0",
@@ -26,7 +26,7 @@
     "react-native-pdf": "^7.0.5",
     "react-native-quick-base64": "^3.0.1",
     "react-native-quick-crypto": "^1.1.8",
-    "react-native-safe-area-context": "~5.10.1",
+    "react-native-safe-area-context": "~5.11.1",
     "react-native-webview": "14.0.1"
   },
   "devDependencies": {
