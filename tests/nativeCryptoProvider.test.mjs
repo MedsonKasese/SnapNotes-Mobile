@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto';
 import {
   createNativeCryptoProvider as createNativeCryptoProviderImpl,
   NativeCryptoProviderUnavailableError,
+  probeRegisteredNitroModule,
 } from '../src/nativeCryptoProvider.ts';
 
 const createNativeCryptoProvider = (loadModule, probeNitroModule = async () => ({})) =>
@@ -114,6 +115,112 @@ test('does not let a diagnostic-only probe failure block a valid provider', asyn
     async () => webcrypto,
     async () => { throw new Error('private-probe-sentinel'); },
   );
+
+  assert.equal(provider, webcrypto);
+});
+
+test('classifies a React Native registry import failure without exposing the cause', async () => {
+  await assert.rejects(
+    probeRegisteredNitroModule(async () => {
+      throw new Error('private-rn-import-sentinel');
+    }),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE-IMPORT');
+      assert.match(error.message, /\[PV-CRYPTO-NITRO-PROBE-IMPORT\]$/);
+      assert.equal(error.message.includes('private-rn-import-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+});
+
+test('classifies a missing or inaccessible TurboModuleRegistry API safely', async () => {
+  const invalidModules = [
+    {},
+    { TurboModuleRegistry: { get: null } },
+    Object.defineProperty({}, 'TurboModuleRegistry', {
+      get() { throw new Error('private-registry-api-sentinel'); },
+    }),
+  ];
+
+  for (const module of invalidModules) {
+    await assert.rejects(
+      probeRegisteredNitroModule(async () => module),
+      error => {
+        assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+        assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE-API');
+        assert.match(error.message, /\[PV-CRYPTO-NITRO-PROBE-API\]$/);
+        assert.equal(error.message.includes('private-registry-api-sentinel'), false);
+        assert.equal(error.cause, undefined);
+        return true;
+      },
+    );
+  }
+});
+
+test('classifies an exception from TurboModuleRegistry.get without exposing it', async () => {
+  const module = {
+    TurboModuleRegistry: {
+      get(name) {
+        assert.equal(name, 'NitroModules');
+        throw new Error('private-registry-get-sentinel');
+      },
+    },
+  };
+
+  await assert.rejects(
+    probeRegisteredNitroModule(async () => module),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE-GET');
+      assert.match(error.message, /\[PV-CRYPTO-NITRO-PROBE-GET\]$/);
+      assert.equal(error.message.includes('private-registry-get-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+});
+
+test('preserves null registry results for the fail-closed missing-module path', async () => {
+  const module = {
+    TurboModuleRegistry: {
+      get(name) {
+        assert.equal(name, 'NitroModules');
+        return null;
+      },
+    },
+  };
+
+  assert.equal(await probeRegisteredNitroModule(async () => module), null);
+});
+
+test('reports a safe probe stage when provider loading also fails generically', async () => {
+  const probe = () => probeRegisteredNitroModule(async () => {
+    throw new Error('private-rn-import-sentinel');
+  });
+
+  await assert.rejects(
+    createNativeCryptoProvider(async () => {
+      throw new Error('private-provider-load-sentinel');
+    }, probe),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE-IMPORT');
+      assert.match(error.message, /\[PV-CRYPTO-NITRO-PROBE-IMPORT\]$/);
+      assert.equal(error.message.includes('private-rn-import-sentinel'), false);
+      assert.equal(error.message.includes('private-provider-load-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+});
+
+test('does not let a precise probe-stage failure block a valid provider', async () => {
+  const probe = () => probeRegisteredNitroModule(async () => {
+    throw new Error('private-rn-import-sentinel');
+  });
+  const provider = await createNativeCryptoProvider(async () => webcrypto, probe);
 
   assert.equal(provider, webcrypto);
 });

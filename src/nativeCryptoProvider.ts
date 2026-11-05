@@ -8,7 +8,10 @@ export type NativeCryptoProviderErrorCode =
   | 'PV-CRYPTO-NITRO-VERSION'
   | 'PV-CRYPTO-NITRO-MODULE'
   | 'PV-CRYPTO-NITRO-IMPORT'
-  | 'PV-CRYPTO-NITRO-PROBE';
+  | 'PV-CRYPTO-NITRO-PROBE'
+  | 'PV-CRYPTO-NITRO-PROBE-IMPORT'
+  | 'PV-CRYPTO-NITRO-PROBE-API'
+  | 'PV-CRYPTO-NITRO-PROBE-GET';
 
 type NativeCryptoModule = {
   default?: unknown;
@@ -33,6 +36,12 @@ const NATIVE_CRYPTO_FAILURE_MESSAGES: Record<NativeCryptoProviderErrorCode, stri
     'React Native found Nitro’s native TurboModule, but Quick Crypto failed to load or initialize. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-IMPORT]',
   'PV-CRYPTO-NITRO-PROBE':
     'The native Nitro status check could not complete, and Quick Crypto also failed to load. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-PROBE]',
+  'PV-CRYPTO-NITRO-PROBE-IMPORT':
+    'The React Native registry module could not be loaded while checking Nitro. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-PROBE-IMPORT]',
+  'PV-CRYPTO-NITRO-PROBE-API':
+    'The React Native TurboModuleRegistry API was unavailable while checking Nitro. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-PROBE-API]',
+  'PV-CRYPTO-NITRO-PROBE-GET':
+    'React Native TurboModuleRegistry.get threw while checking Nitro. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-PROBE-GET]',
 };
 
 export class NativeCryptoProviderUnavailableError extends Error {
@@ -67,9 +76,40 @@ function isNitroModuleNotFoundError(error: unknown): boolean {
 
 type NitroModuleProbe = () => unknown | Promise<unknown>;
 
-async function probeRegisteredNitroModule(): Promise<unknown> {
-  const { TurboModuleRegistry } = await import('react-native');
-  return TurboModuleRegistry.get('NitroModules');
+export async function probeRegisteredNitroModule(
+  loadReactNativeModule: () => Promise<unknown> = () => import('react-native'),
+): Promise<unknown> {
+  let reactNativeModule: unknown;
+  try {
+    reactNativeModule = await loadReactNativeModule();
+  } catch {
+    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-NITRO-PROBE-IMPORT');
+  }
+
+  let registry: unknown;
+  let get: unknown;
+  try {
+    const isObject = reactNativeModule !== null &&
+      (typeof reactNativeModule === 'object' || typeof reactNativeModule === 'function');
+    registry = isObject
+      ? (reactNativeModule as { TurboModuleRegistry?: unknown }).TurboModuleRegistry
+      : undefined;
+    const isRegistry = registry !== null &&
+      (typeof registry === 'object' || typeof registry === 'function');
+    get = isRegistry ? (registry as { get?: unknown }).get : undefined;
+  } catch {
+    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-NITRO-PROBE-API');
+  }
+
+  if (typeof get !== 'function') {
+    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-NITRO-PROBE-API');
+  }
+
+  try {
+    return Reflect.apply(get, registry, ['NitroModules']);
+  } catch {
+    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-NITRO-PROBE-GET');
+  }
 }
 
 function hasInstalledNitroProxy(): boolean {
@@ -150,9 +190,16 @@ export async function createNativeCryptoProvider(
       }
       nitroModuleAvailable = true;
     } catch (error) {
-      if (error instanceof NativeCryptoProviderUnavailableError) throw error;
+      if (
+        error instanceof NativeCryptoProviderUnavailableError &&
+        error.code === 'PV-CRYPTO-NITRO-LOOKUP'
+      ) {
+        throw error;
+      }
       // The probe is diagnostic only. Defer inconclusive errors to Quick Crypto's import path.
-      const code = getLoadFailureCode(error);
+      const code = error instanceof NativeCryptoProviderUnavailableError
+        ? error.code
+        : getLoadFailureCode(error);
       probeFailureCode = code === 'PV-CRYPTO-LOAD' ? 'PV-CRYPTO-NITRO-PROBE' : code;
     }
   }
