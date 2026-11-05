@@ -9,8 +9,8 @@ import {
 const createNativeCryptoProvider = (loadModule, probeNitroModule = async () => ({})) =>
   createNativeCryptoProviderImpl(loadModule, probeNitroModule);
 
-const loadFailureMessage =
-  'Quick Crypto/Nitro could not be loaded. Verify native runtime registration and initialization; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]';
+const probeFailureMessage =
+  'The native Nitro status check could not complete, and Quick Crypto also failed to load. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-PROBE]';
 const apiFailureMessage =
   'Quick Crypto loaded, but its required Web Crypto APIs are unavailable. Verify the APK and Metro bundle use the same Quick Crypto version. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-API]';
 
@@ -99,14 +99,23 @@ test('sanitizes Quick Crypto/Nitro module load failures into a distinct fixed di
     }, async () => { throw new Error('private-probe-sentinel'); }),
     error => {
       assert.ok(error instanceof NativeCryptoProviderUnavailableError);
-      assert.equal(error.code, 'PV-CRYPTO-LOAD');
-      assert.equal(error.message, loadFailureMessage);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE');
+      assert.equal(error.message, probeFailureMessage);
       assert.equal(error.message.includes('TurboModuleRegistry-private-diagnostic-sentinel'), false);
       assert.equal(error.message.includes('private-probe-sentinel'), false);
       assert.equal(error.cause, undefined);
       return true;
     },
   );
+});
+
+test('does not let a diagnostic-only probe failure block a valid provider', async () => {
+  const provider = await createNativeCryptoProvider(
+    async () => webcrypto,
+    async () => { throw new Error('private-probe-sentinel'); },
+  );
+
+  assert.equal(provider, webcrypto);
 });
 
 test('maps a known missing Nitro TurboModule error to a safe lookup diagnostic', async () => {

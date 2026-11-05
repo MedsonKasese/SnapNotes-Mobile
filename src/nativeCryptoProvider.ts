@@ -7,7 +7,8 @@ export type NativeCryptoProviderErrorCode =
   | 'PV-CRYPTO-NITRO-INIT'
   | 'PV-CRYPTO-NITRO-VERSION'
   | 'PV-CRYPTO-NITRO-MODULE'
-  | 'PV-CRYPTO-NITRO-IMPORT';
+  | 'PV-CRYPTO-NITRO-IMPORT'
+  | 'PV-CRYPTO-NITRO-PROBE';
 
 type NativeCryptoModule = {
   default?: unknown;
@@ -30,6 +31,8 @@ const NATIVE_CRYPTO_FAILURE_MESSAGES: Record<NativeCryptoProviderErrorCode, stri
     'Nitro reported a native-module error, but safe metadata cannot distinguish lookup from initialization. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-MODULE]',
   'PV-CRYPTO-NITRO-IMPORT':
     'React Native found Nitro’s native TurboModule, but Quick Crypto failed to load or initialize. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-IMPORT]',
+  'PV-CRYPTO-NITRO-PROBE':
+    'The native Nitro status check could not complete, and Quick Crypto also failed to load. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-PROBE]',
 };
 
 export class NativeCryptoProviderUnavailableError extends Error {
@@ -138,6 +141,7 @@ export async function createNativeCryptoProvider(
   probeNitroModule: NitroModuleProbe = probeRegisteredNitroModule,
 ): Promise<NativeCryptoProvider> {
   let nitroModuleAvailable = hasInstalledNitroProxy();
+  let probeFailureCode: NativeCryptoProviderErrorCode | undefined;
   if (!nitroModuleAvailable) {
     try {
       const nitroModule = await probeNitroModule();
@@ -148,6 +152,8 @@ export async function createNativeCryptoProvider(
     } catch (error) {
       if (error instanceof NativeCryptoProviderUnavailableError) throw error;
       // The probe is diagnostic only. Defer inconclusive errors to Quick Crypto's import path.
+      const code = getLoadFailureCode(error);
+      probeFailureCode = code === 'PV-CRYPTO-LOAD' ? 'PV-CRYPTO-NITRO-PROBE' : code;
     }
   }
 
@@ -158,8 +164,13 @@ export async function createNativeCryptoProvider(
     const code = getLoadFailureCode(error);
     // A generic failure after a positive registry check is more informative,
     // while still keeping native exception details private.
+    const safeCode = code !== 'PV-CRYPTO-LOAD'
+      ? code
+      : nitroModuleAvailable
+        ? 'PV-CRYPTO-NITRO-IMPORT'
+        : probeFailureCode ?? code;
     throw new NativeCryptoProviderUnavailableError(
-      code === 'PV-CRYPTO-LOAD' && nitroModuleAvailable ? 'PV-CRYPTO-NITRO-IMPORT' : code,
+      safeCode,
     );
   }
 
