@@ -5,7 +5,9 @@ export type NativeCryptoProviderErrorCode =
   | 'PV-CRYPTO-API'
   | 'PV-CRYPTO-NITRO-LOOKUP'
   | 'PV-CRYPTO-NITRO-INIT'
-  | 'PV-CRYPTO-NITRO-VERSION';
+  | 'PV-CRYPTO-NITRO-VERSION'
+  | 'PV-CRYPTO-NITRO-MODULE'
+  | 'PV-CRYPTO-NITRO-IMPORT';
 
 type NativeCryptoModule = {
   default?: unknown;
@@ -24,6 +26,10 @@ const NATIVE_CRYPTO_FAILURE_MESSAGES: Record<NativeCryptoProviderErrorCode, stri
     'Nitro’s native runtime did not complete initialization. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-INIT]',
   'PV-CRYPTO-NITRO-VERSION':
     'The native and JavaScript Nitro runtimes conflict. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-VERSION]',
+  'PV-CRYPTO-NITRO-MODULE':
+    'Nitro reported a native-module error, but safe metadata cannot distinguish lookup from initialization. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-MODULE]',
+  'PV-CRYPTO-NITRO-IMPORT':
+    'React Native found Nitro’s native TurboModule, but Quick Crypto failed to load or initialize. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-IMPORT]',
 };
 
 export class NativeCryptoProviderUnavailableError extends Error {
@@ -45,13 +51,41 @@ function getErrorCause(error: unknown): unknown {
   return (error as Error & { cause?: unknown }).cause;
 }
 
+function isNitroModuleNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  try {
+    const prototype = Object.getPrototypeOf(error) as { constructor?: unknown } | null;
+    return typeof prototype?.constructor === 'function' &&
+      prototype.constructor.name === 'ModuleNotFoundError';
+  } catch {
+    return false;
+  }
+}
+
+type NitroModuleProbe = () => unknown | Promise<unknown>;
+
+async function probeRegisteredNitroModule(): Promise<unknown> {
+  const { TurboModuleRegistry } = await import('react-native');
+  return TurboModuleRegistry.get('NitroModules');
+}
+
+function hasInstalledNitroProxy(): boolean {
+  try {
+    const runtimeGlobal = globalThis as typeof globalThis & { NitroModulesProxy?: unknown };
+    return runtimeGlobal.NitroModulesProxy != null;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Classify only known Nitro error signatures. Raw exception text and causes
- * are never returned to the UI; unknown failures retain the generic code.
+ * Classify known Nitro signatures and its package-specific error class without
+ * returning raw messages or causes to the UI.
  */
 function getLoadFailureCode(error: unknown): NativeCryptoProviderErrorCode {
   const message = getErrorMessage(error);
-  const causeMessage = getErrorMessage(getErrorCause(error));
+  const cause = getErrorCause(error);
+  const causeMessage = getErrorMessage(cause);
   const allMessages = `${message}\n${causeMessage}`;
 
   if (/Nitro was installed twice:/i.test(message)) {
@@ -71,6 +105,10 @@ function getLoadFailureCode(error: unknown): NativeCryptoProviderErrorCode {
       /NitroModules.*could not be found/i.test(causeMessage)
   ) {
     return 'PV-CRYPTO-NITRO-LOOKUP';
+  }
+
+  if (isNitroModuleNotFoundError(error) || isNitroModuleNotFoundError(cause)) {
+    return 'PV-CRYPTO-NITRO-MODULE';
   }
 
   return 'PV-CRYPTO-LOAD';
@@ -97,13 +135,32 @@ function isNativeCryptoProvider(value: unknown): value is NativeCryptoProvider {
  */
 export async function createNativeCryptoProvider(
   loadModule: () => Promise<unknown> = () => import('react-native-quick-crypto'),
+  probeNitroModule: NitroModuleProbe = probeRegisteredNitroModule,
 ): Promise<NativeCryptoProvider> {
+  let nitroModuleAvailable = hasInstalledNitroProxy();
+  if (!nitroModuleAvailable) {
+    try {
+      const nitroModule = await probeNitroModule();
+      if (nitroModule == null) {
+        throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-NITRO-LOOKUP');
+      }
+      nitroModuleAvailable = true;
+    } catch (error) {
+      if (error instanceof NativeCryptoProviderUnavailableError) throw error;
+      // The probe is diagnostic only. Defer inconclusive errors to Quick Crypto's import path.
+    }
+  }
+
   let loaded: unknown;
   try {
     loaded = await loadModule();
   } catch (error) {
-    // Keep native exception details private while surfacing a stable safe code.
-    throw new NativeCryptoProviderUnavailableError(getLoadFailureCode(error));
+    const code = getLoadFailureCode(error);
+    // A generic failure after a positive registry check is more informative,
+    // while still keeping native exception details private.
+    throw new NativeCryptoProviderUnavailableError(
+      code === 'PV-CRYPTO-LOAD' && nitroModuleAvailable ? 'PV-CRYPTO-NITRO-IMPORT' : code,
+    );
   }
 
   try {
