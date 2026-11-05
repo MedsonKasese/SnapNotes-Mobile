@@ -119,6 +119,12 @@ test('does not let a diagnostic-only probe failure block a valid provider', asyn
   assert.equal(provider, webcrypto);
 });
 
+test('accepts a synchronous Metro-style provider loader', async () => {
+  const provider = await createNativeCryptoProvider(() => webcrypto);
+
+  assert.equal(provider, webcrypto);
+});
+
 test('classifies a React Native registry import failure without exposing the cause', async () => {
   await assert.rejects(
     probeRegisteredNitroModule(async () => {
@@ -129,6 +135,34 @@ test('classifies a React Native registry import failure without exposing the cau
       assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE-IMPORT');
       assert.match(error.message, /\[PV-CRYPTO-NITRO-PROBE-IMPORT\]$/);
       assert.equal(error.message.includes('private-rn-import-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+});
+
+test('sanitizes synchronous Metro module-loader failures without retaining causes', async () => {
+  await assert.rejects(
+    probeRegisteredNitroModule(() => {
+      throw new Error('private-sync-rn-require-sentinel');
+    }),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-PROBE-IMPORT');
+      assert.equal(error.message.includes('private-sync-rn-require-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    createNativeCryptoProvider(() => {
+      throw new Error('private-sync-crypto-require-sentinel');
+    }),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-IMPORT');
+      assert.equal(error.message.includes('private-sync-crypto-require-sentinel'), false);
       assert.equal(error.cause, undefined);
       return true;
     },
