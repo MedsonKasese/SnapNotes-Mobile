@@ -1,6 +1,11 @@
 export type NativeCryptoProvider = Pick<Crypto, 'getRandomValues' | 'subtle'>;
 
-export type NativeCryptoProviderErrorCode = 'PV-CRYPTO-LOAD' | 'PV-CRYPTO-API';
+export type NativeCryptoProviderErrorCode =
+  | 'PV-CRYPTO-LOAD'
+  | 'PV-CRYPTO-API'
+  | 'PV-CRYPTO-NITRO-LOOKUP'
+  | 'PV-CRYPTO-NITRO-INIT'
+  | 'PV-CRYPTO-NITRO-VERSION';
 
 type NativeCryptoModule = {
   default?: unknown;
@@ -10,9 +15,15 @@ type NativeCryptoModule = {
 
 const NATIVE_CRYPTO_FAILURE_MESSAGES: Record<NativeCryptoProviderErrorCode, string> = {
   'PV-CRYPTO-LOAD':
-    'Quick Crypto/Nitro could not be loaded. Verify the installed development APK includes and initializes these native modules; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]',
+    'Quick Crypto/Nitro could not be loaded. Verify native runtime registration and initialization; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]',
   'PV-CRYPTO-API':
     'Quick Crypto loaded, but its required Web Crypto APIs are unavailable. Verify the APK and Metro bundle use the same Quick Crypto version. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-API]',
+  'PV-CRYPTO-NITRO-LOOKUP':
+    'React Native could not resolve Nitro’s native TurboModule at runtime. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-LOOKUP]',
+  'PV-CRYPTO-NITRO-INIT':
+    'Nitro’s native runtime did not complete initialization. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-INIT]',
+  'PV-CRYPTO-NITRO-VERSION':
+    'The native and JavaScript Nitro runtimes conflict. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-NITRO-VERSION]',
 };
 
 export class NativeCryptoProviderUnavailableError extends Error {
@@ -23,6 +34,46 @@ export class NativeCryptoProviderUnavailableError extends Error {
     this.name = 'NativeCryptoProviderUnavailableError';
     this.code = code;
   }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '';
+}
+
+function getErrorCause(error: unknown): unknown {
+  if (!error || typeof error !== 'object') return undefined;
+  return (error as Error & { cause?: unknown }).cause;
+}
+
+/**
+ * Classify only known Nitro error signatures. Raw exception text and causes
+ * are never returned to the UI; unknown failures retain the generic code.
+ */
+function getLoadFailureCode(error: unknown): NativeCryptoProviderErrorCode {
+  const message = getErrorMessage(error);
+  const causeMessage = getErrorMessage(getErrorCause(error));
+  const allMessages = `${message}\n${causeMessage}`;
+
+  if (/Nitro was installed twice:/i.test(message)) {
+    return 'PV-CRYPTO-NITRO-VERSION';
+  }
+
+  if (
+    /Failed to install Nitro:/i.test(message) ||
+    /NitroModules was installed, but `global\.NitroModulesProxy` was null/i.test(causeMessage)
+  ) {
+    return 'PV-CRYPTO-NITRO-INIT';
+  }
+
+  if (
+    /TurboModuleRegistry\.getEnforcing.*NitroModules.*could not be found/i.test(allMessages) ||
+    /Failed to get NitroModules: The native ["']NitroModules["'] Turbo\/Native-Module could not be found/i.test(message) &&
+      /NitroModules.*could not be found/i.test(causeMessage)
+  ) {
+    return 'PV-CRYPTO-NITRO-LOOKUP';
+  }
+
+  return 'PV-CRYPTO-LOAD';
 }
 
 function isNativeCryptoProvider(value: unknown): value is NativeCryptoProvider {
@@ -50,9 +101,9 @@ export async function createNativeCryptoProvider(
   let loaded: unknown;
   try {
     loaded = await loadModule();
-  } catch {
-    // Do not surface Nitro, Metro, or native implementation details.
-    throw new NativeCryptoProviderUnavailableError('PV-CRYPTO-LOAD');
+  } catch (error) {
+    // Keep native exception details private while surfacing a stable safe code.
+    throw new NativeCryptoProviderUnavailableError(getLoadFailureCode(error));
   }
 
   try {

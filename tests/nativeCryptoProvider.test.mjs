@@ -7,7 +7,7 @@ import {
 } from '../src/nativeCryptoProvider.ts';
 
 const loadFailureMessage =
-  'Quick Crypto/Nitro could not be loaded. Verify the installed development APK includes and initializes these native modules; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]';
+  'Quick Crypto/Nitro could not be loaded. Verify native runtime registration and initialization; Metro cannot add native code. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-LOAD]';
 const apiFailureMessage =
   'Quick Crypto loaded, but its required Web Crypto APIs are unavailable. Verify the APK and Metro bundle use the same Quick Crypto version. Private Notes remains locked and vault data is unchanged. [PV-CRYPTO-API]';
 
@@ -63,6 +63,65 @@ test('sanitizes Quick Crypto/Nitro module load failures into a distinct fixed di
       assert.equal(error.code, 'PV-CRYPTO-LOAD');
       assert.equal(error.message, loadFailureMessage);
       assert.equal(error.message.includes('TurboModuleRegistry-private-diagnostic-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+});
+
+test('maps a known missing Nitro TurboModule error to a safe lookup diagnostic', async () => {
+  const wrapped = new Error(
+    'Failed to get NitroModules: The native "NitroModules" Turbo/Native-Module could not be found.',
+    { cause: new Error("TurboModuleRegistry.getEnforcing(...): 'NitroModules' could not be found. private-diagnostic-sentinel") },
+  );
+
+  await assert.rejects(
+    createNativeCryptoProvider(async () => { throw wrapped; }),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-LOOKUP');
+      assert.match(error.message, /\[PV-CRYPTO-NITRO-LOOKUP\]$/);
+      assert.equal(error.message.includes('private-diagnostic-sentinel'), false);
+      assert.equal(error.cause, undefined);
+      return true;
+    },
+  );
+});
+
+test('maps Nitro install and missing-proxy failures to a safe initialization diagnostic', async () => {
+  const failures = [
+    new Error('Failed to install Nitro: private-install-sentinel'),
+    new Error(
+      'Failed to get NitroModules: The native "NitroModules" Turbo/Native-Module could not be found.',
+      { cause: new Error('NitroModules was installed, but `global.NitroModulesProxy` was null! private-proxy-sentinel') },
+    ),
+  ];
+
+  for (const failure of failures) {
+    await assert.rejects(
+      createNativeCryptoProvider(async () => { throw failure; }),
+      error => {
+        assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+        assert.equal(error.code, 'PV-CRYPTO-NITRO-INIT');
+        assert.match(error.message, /\[PV-CRYPTO-NITRO-INIT\]$/);
+        assert.equal(error.message.includes('private-'), false);
+        assert.equal(error.cause, undefined);
+        return true;
+      },
+    );
+  }
+});
+
+test('maps a duplicate Nitro runtime error to a safe version diagnostic', async () => {
+  await assert.rejects(
+    createNativeCryptoProvider(async () => {
+      throw new Error('Nitro was installed twice: native version 0.31.0 and JS version 0.37.1 private-version-sentinel');
+    }),
+    error => {
+      assert.ok(error instanceof NativeCryptoProviderUnavailableError);
+      assert.equal(error.code, 'PV-CRYPTO-NITRO-VERSION');
+      assert.match(error.message, /\[PV-CRYPTO-NITRO-VERSION\]$/);
+      assert.equal(error.message.includes('private-version-sentinel'), false);
       assert.equal(error.cause, undefined);
       return true;
     },
