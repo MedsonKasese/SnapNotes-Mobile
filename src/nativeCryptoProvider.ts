@@ -79,6 +79,7 @@ type NitroModuleProbe = () => unknown | Promise<unknown>;
 // Keep module names literal so Metro resolves them into the native bundle. The
 // require stays inside the loader, so native modules are still loaded on demand.
 export async function probeRegisteredNitroModule(
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep Metro loading lazy without a dynamic chunk.
   loadReactNativeModule: () => unknown | Promise<unknown> = () => require('react-native'),
 ): Promise<unknown> {
   let reactNativeModule: unknown;
@@ -179,6 +180,7 @@ function isNativeCryptoProvider(value: unknown): value is NativeCryptoProvider {
  * A supplied loader keeps this boundary testable without loading native code.
  */
 export async function createNativeCryptoProvider(
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep native crypto initialization on demand.
   loadModule: () => unknown | Promise<unknown> = () => require('react-native-quick-crypto'),
   probeNitroModule: NitroModuleProbe = probeRegisteredNitroModule,
 ): Promise<NativeCryptoProvider> {
