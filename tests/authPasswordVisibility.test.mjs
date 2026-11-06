@@ -46,6 +46,7 @@ function mount() {
     '../auth/AuthStateProvider': { useAuthState: () => ({ state: { status: 'signed-out' }, retry: async () => {}, refreshVerificationStatus: async () => false }) },
     '../auth/authService': { AuthOperationError: class AuthOperationError extends Error {}, authService: { getVerificationResendCooldownMs: () => 0 } },
     '../auth/authErrors': { getAuthErrorMessage: () => 'Mock auth error' },
+    '../auth/googleAuthService': { googleAuthService: { isConfigured: () => false, signIn: async () => ({ status: 'cancelled' }) } },
     '../auth/authValidation': {
       normalizeDisplayName: value => value.trim(), normalizeEmail: value => value.trim().toLowerCase(),
       validateRegistration: () => ({}), validateSignIn: () => ({}),

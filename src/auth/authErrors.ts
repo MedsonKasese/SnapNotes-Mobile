@@ -26,6 +26,14 @@ export function getAuthErrorMessage(error: unknown): string {
       return 'This account is disabled. Contact the app owner for help.';
     case 'auth/network-request-failed':
       return 'Could not reach the sign-in service. Check your connection and try again.';
+    case 'DEVELOPER_ERROR':
+      return 'Google sign-in setup is incomplete for this app. Contact the app owner to check its OAuth configuration.';
+    case 'PLAY_SERVICES_NOT_AVAILABLE':
+      return 'Google Play services is missing or out of date. Update it, then try again.';
+    case 'IN_PROGRESS':
+      return 'A Google sign-in request is already in progress. Wait a moment, then try again.';
+    case 'ONE_TAP_START_FAILED':
+      return 'Could not start Google sign-in. Check your connection and try again.';
     case 'auth/too-many-requests':
       return 'There have been too many attempts. Wait a while, then try again.';
     case 'auth/admin-restricted-operation':
