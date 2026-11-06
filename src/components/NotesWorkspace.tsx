@@ -27,6 +27,7 @@ import { ChecklistLabel } from './ChecklistLabel';
 import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
 import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
+import { getRandomAccountAvatarColor } from './drawerAvatar';
 import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { moveDeviceNoteToPrivate } from '../privateMoveService';
 import { NoteAttachmentSummary, NoteAttachments } from './NoteAttachments';
@@ -118,7 +119,10 @@ const coordinatedDeviceNotesStorage = createPrivateOrdinarySaveGuard(
   privateSharedCoordinator, deviceNotesStorage, privateVaultStorage,
 );
 
-export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void } = {}) {
+export function NotesWorkspace({ onOpenAccount, accountInitials }: {
+  onOpenAccount?: () => void;
+  accountInitials?: string | null;
+} = {}) {
   const [controller] = useState(() => createNotesController(coordinatedDeviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
@@ -126,6 +130,7 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
   const [view, setView] = useState<WorkspaceView>('library');
   const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [accountAvatarColor] = useState(getRandomAccountAvatarColor);
   const [transferBusy, setTransferBusy] = useState(false);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ id: string; revision: number } | null>(null);
   const folderActionsTarget = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
@@ -1486,7 +1491,6 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
                 detail={privateNoteCount === null ? 'Protected vault' : `${privateNoteCount} private ${privateNoteCount === 1 ? 'note' : 'notes'}`}
                 active={view === 'private'} onPress={selectPrivate} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
-              <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
               <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
               <Pressable accessibilityRole="button" accessibilityLabel="Export notes" disabled={transferBusy}
                 accessibilityState={{ disabled: transferBusy }} onPress={openExportFormatPicker}
@@ -1501,15 +1505,43 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
                 <Text style={styles.menuRowTitle}>Import notes</Text>
               </Pressable>
               <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
-              <MenuRow label="Account" icon="user-circle-o" detail="Optional account access" onPress={() => { closeDrawer(); onOpenAccount?.(); }} />
+              <View style={styles.drawerNotice}>
+                <Text style={styles.drawerNoticeTitle}>Your notes stay on this device</Text>
+                <Text style={styles.drawerNoticeText}>Account access is optional and never uploads or changes your local notes.</Text>
+              </View>
+              <View style={styles.drawerFooter}>
+                <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
+                <Text style={styles.drawerFooterText}>Save Your Mind.</Text>
+              </View>
             </ScrollView>
-            <View style={styles.drawerNotice}>
-              <Text style={styles.drawerNoticeTitle}>Your notes stay on this device</Text>
-              <Text style={styles.drawerNoticeText}>Account access is optional and never uploads or changes your local notes.</Text>
-            </View>
-            <View style={styles.drawerFooter}>
-              <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
-              <Text style={styles.drawerFooterText}>Save Your Mind.</Text>
+            <View testID="drawer-actions-footer" style={styles.drawerActionsFooter}>
+              <Pressable
+                testID="drawer-account-button"
+                accessibilityRole="button"
+                accessibilityLabel="Account access"
+                onPress={() => { closeDrawer(); onOpenAccount?.(); }}
+                style={({ pressed }) => [
+                  styles.drawerAccountAvatar,
+                  { backgroundColor: accountInitials ? accountAvatarColor : '#ed8a37' },
+                  pressed && styles.pressed,
+                ]}
+              >
+                {accountInitials
+                  ? <Text style={styles.drawerAccountInitials} accessible={false}>{accountInitials}</Text>
+                  : <FontAwesome name="user" size={20} color="#ffffff" accessible={false} />}
+              </Pressable>
+              <Pressable
+                testID="drawer-new-note-button"
+                accessibilityRole="button"
+                accessibilityLabel="New note, Capture New Thought"
+                accessibilityHint="Opens a blank note."
+                accessibilityState={{ selected: view === 'editor' && state.editingId === null }}
+                onPress={openNewNote}
+                style={({ pressed }) => [styles.drawerNewNoteButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.drawerNewNoteTitle}>+ New Note</Text>
+                <Text style={styles.drawerNewNoteDescription}>Capture New Thought</Text>
+              </Pressable>
             </View>
           </View>
           {folderActionsFolder && folderActionsMenu && <View style={styles.folderActionsLayer}>
@@ -1681,7 +1713,7 @@ const styles = StyleSheet.create({
   drawerEyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.3, marginBottom: 3 },
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
-  drawerNavigation: { paddingTop: 15, gap: 7 },
+  drawerNavigation: { paddingTop: 15, paddingBottom: 20, gap: 7 },
   drawerDivider: { width: '100%', height: 1, marginHorizontal: 12, marginTop: 10, marginBottom: 8, backgroundColor: '#e1e8dc' },
   folderNavigationRow: { flexDirection: 'row', alignItems: 'center' },
   folderNavigationButton: { flex: 1, minWidth: 0 },
@@ -1710,9 +1742,15 @@ const styles = StyleSheet.create({
   drawerNotice: { marginTop: 25, padding: 14, gap: 7, borderRadius: 14, backgroundColor: '#f7f9f5', borderWidth: 1, borderColor: '#e6ecdf' },
   drawerNoticeTitle: { color: '#334b2b', fontSize: 13, fontWeight: '800' },
   drawerNoticeText: { color: '#64715e', fontSize: 12, lineHeight: 18 },
-  drawerFooter: { marginTop: 'auto', paddingTop: 18, borderTopWidth: 1, borderTopColor: '#e8eee3' },
+  drawerFooter: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#e8eee3' },
   drawerFooterBrand: { color: '#304728', fontSize: 13, fontWeight: '800' },
   drawerFooterText: { color: '#73816d', fontSize: 12, marginTop: 3 },
+  drawerActionsFooter: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e8eee3' },
+  drawerAccountAvatar: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  drawerAccountInitials: { color: '#ffffff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+  drawerNewNoteButton: { flex: 1, minHeight: 58, justifyContent: 'center', paddingHorizontal: 18, borderRadius: 30, borderWidth: 1, borderColor: '#dbe9d3', backgroundColor: '#eff7e9' },
+  drawerNewNoteTitle: { color: '#315b21', fontSize: 14, fontWeight: '800' },
+  drawerNewNoteDescription: { color: '#73816d', fontSize: 11, marginTop: 2 },
   floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
   floatingAddText: { color: '#ffffff', fontSize: 34, lineHeight: 38, fontWeight: '400', marginTop: -2 },
 });

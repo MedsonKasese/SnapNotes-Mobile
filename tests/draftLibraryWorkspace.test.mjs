@@ -16,6 +16,7 @@ import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
+import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_DRAFT_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -97,6 +98,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
     '../noteTransfer': noteTransfer,
+    './drawerAvatar': drawerAvatar,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' }, './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
     './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },

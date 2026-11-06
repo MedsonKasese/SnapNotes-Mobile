@@ -15,6 +15,7 @@ import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
 import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
+import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -30,7 +31,7 @@ const savedNotes = [
 
 // Exercise real component JSX and handlers with native primitives stubbed out.
 // Effects/native layout are intentionally excluded; this does not replace device QA.
-function workspace(initialNotes = savedNotes, controllerOverride = null) {
+function workspace(initialNotes = savedNotes, controllerOverride = null, workspaceProps = {}) {
   let state = { ...notes.initialNotesState(), notes: initialNotes };
   let status = 'ready';
   const slots = [];
@@ -107,6 +108,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
       if (name === '../privateMoveService') return { moveDeviceNoteToPrivate: async () => { throw new Error('Unexpected Move to Private invocation in this test harness'); } };
       if (name === '../folders') return folders;
       if (name === '../draftLibrary') return draftLibrary;
+      if (name === './drawerAvatar') return drawerAvatar;
       if (name === '../deviceNotesStorage') return {};
       if (name === '../noteSearch') return { searchNotes };
       if (name === '../noteTransfer') return noteTransfer;
@@ -129,8 +131,9 @@ function workspace(initialNotes = savedNotes, controllerOverride = null) {
     },
   });
   return {
-    render() { cursor = 0; refCursor = 0; return exports.NotesWorkspace(); },
+    render() { cursor = 0; refCursor = 0; return exports.NotesWorkspace(workspaceProps); },
     controller, alerts, archiveCalls, trashCalls, pinCalls, duplicateCalls, events,
+    get view() { return slots[stateNames.indexOf('view')]; },
     setStatus(next) { status = next; },
     setPrivateNoteCount(value) { slots[stateNames.indexOf('privateNoteCount')] = value; },
     setFoldersReady(value) { slots[stateNames.indexOf('foldersReady')] = value; },
@@ -270,9 +273,10 @@ test('empty categories explain the filter instead of claiming there are no saved
 
 test('drawer icons retain their names and remain decorative within labelled buttons', () => {
   const app = workspace();
-  const rows = elements(app.render()).filter(element => typeof element.type === 'function' && element.props.icon);
-  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'file-text-o', 'lock', 'trash', 'plus', 'user-circle-o']);
-  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Drafts', 'Private Notes', 'Trash', 'New note', 'Account']);
+  const tree = app.render();
+  const rows = elements(tree).filter(element => typeof element.type === 'function' && element.props.icon);
+  assert.deepEqual(rows.map(row => row.props.icon), ['inbox', 'sticky-note-o', 'briefcase', 'user', 'lightbulb-o', 'star', 'archive', 'file-text-o', 'lock', 'trash']);
+  assert.deepEqual(rows.map(row => row.props.label), ['All notes', 'General', 'Work', 'Personal', 'Ideas', 'Important', 'Archived', 'Drafts', 'Private Notes', 'Trash']);
   for (const row of rows) {
     const rendered = row.type(row.props);
     assert.equal(rendered.props.accessibilityRole, 'button');
@@ -281,6 +285,13 @@ test('drawer icons retain their names and remain decorative within labelled butt
     assert.equal(icon.props.name, row.props.icon);
     assert.equal(icon.props.accessible, false);
   }
+  const accountButton = find(tree, element => element.props.testID === 'drawer-account-button');
+  const accountIcon = find(accountButton, element => element.type === 'FontAwesome');
+  assert.equal(accountIcon.props.name, 'user');
+  assert.equal(accountIcon.props.accessible, false);
+  const newNoteButton = find(tree, element => element.props.testID === 'drawer-new-note-button');
+  assert.equal(text(newNoteButton), '+ New NoteCapture New Thought');
+  assert.equal(elements(newNoteButton).some(element => element.type === 'FontAwesome'), false);
 });
 
 test('Private Notes drawer badge reports the current count', () => {
@@ -840,6 +851,51 @@ test('all existing library, archive, and trash menu actions retain their origina
       assert.ok(row.minHeight >= 44);
     }
   }
+});
+
+test('account and New Note controls stay fixed outside the scrolling drawer content', () => {
+  let accountOpens = 0;
+  const app = workspace(savedNotes, null, { onOpenAccount: () => { accountOpens += 1; } });
+  const tree = app.render();
+  const drawer = find(tree, element => element.type === 'Modal' &&
+    elements(element).some(child => child.props.accessibilityLabel === 'Close notes navigation'));
+  const scrollView = find(drawer, element => element.type === 'ScrollView' &&
+    element.props.contentContainerStyle?.paddingBottom === 20);
+  const footer = find(drawer, element => element.props.testID === 'drawer-actions-footer');
+  assert.equal(elements(scrollView).some(element => element.props.testID === 'drawer-actions-footer'), false);
+  assert.ok(elements(scrollView).some(element => element.props.label === 'Private Notes'));
+
+  const accountButton = find(footer, element => element.props.testID === 'drawer-account-button');
+  const newNoteButton = find(footer, element => element.props.testID === 'drawer-new-note-button');
+  assert.equal(accountButton.props.accessibilityLabel, 'Account access');
+  assert.equal(elements(accountButton).filter(element => element.type === 'Text').length, 0,
+    'signed-out account control shows only the user icon');
+  assert.equal(find(accountButton, element => element.type === 'FontAwesome').props.name, 'user');
+  assert.equal(text(newNoteButton), '+ New NoteCapture New Thought');
+  assert.equal(newNoteButton.props.accessibilityLabel, 'New note, Capture New Thought');
+
+  const newNoteStyle = Object.assign({}, ...newNoteButton.props.style({ pressed: false }).filter(Boolean));
+  assert.equal(newNoteStyle.flex, 1);
+  assert.equal(newNoteStyle.borderRadius, 30);
+  accountButton.props.onPress();
+  assert.equal(accountOpens, 1);
+
+  const newNoteApp = workspace();
+  find(newNoteApp.render(), element => element.props.testID === 'drawer-new-note-button').props.onPress();
+  assert.equal(newNoteApp.view, 'editor', 'the footer CTA reuses the existing blank-note action');
+});
+
+test('signed-in drawer avatar shows first/last initials on a stable random palette color', () => {
+  const app = workspace(savedNotes, null, { accountInitials: 'MK' });
+  const accountButton = find(app.render(), element => element.props.testID === 'drawer-account-button');
+  const initials = find(accountButton, element => element.type === 'Text');
+  assert.equal(text(initials), 'MK');
+  assert.equal(elements(accountButton).some(element => element.type === 'FontAwesome'), false);
+  const styleOf = button => Object.assign({}, ...button.props.style({ pressed: false }).filter(Boolean));
+  const selectedColor = styleOf(accountButton).backgroundColor;
+  assert.ok(drawerAvatar.ACCOUNT_AVATAR_COLORS.includes(selectedColor));
+  const rerenderedButton = find(app.render(), element => element.props.testID === 'drawer-account-button');
+  assert.equal(styleOf(rerenderedButton).backgroundColor, selectedColor);
 });
 
 test('drawer shows section dividers, transfer actions, and an explicit Private Notes export warning', () => {

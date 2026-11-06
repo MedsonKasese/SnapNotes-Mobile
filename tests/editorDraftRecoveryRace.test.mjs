@@ -15,6 +15,7 @@ import { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml } from '../src/noteFo
 import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
+import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -214,6 +215,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../noteTransfer') return noteTransfer;
       if (name === '../noteFormatting') return { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml,
         getNoteHtmlLines: html => [], normalizeNoteLink: value => value, updateChecklistHtml: (html, _line, checked) => html.replace(checked ? '☐' : '☑', checked ? '☑' : '☐') };
+      if (name === './drawerAvatar') return drawerAvatar;
       if (name === './ChecklistLabel') return { ChecklistLabel: 'ChecklistLabel' };
       if (name === './FormattedText') return { FormattedText: 'FormattedText' };
       if (name === './FormattingToolbar') return { FormattingToolbar: 'FormattingToolbar' };
