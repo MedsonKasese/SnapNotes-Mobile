@@ -32,6 +32,7 @@ async function makeHarness(options = {}) {
 
   const cryptoExports = execute(cryptoSource, 'privateCrypto.ts', specifier => {
     if (specifier === '@noble/ciphers/aes.js') return { gcm: () => { throw new Error('Unexpected non-WebCrypto path'); } };
+    if (specifier === './nativeCryptoProvider.ts') return { createNativeCryptoProvider: async () => webcrypto };
     throw new Error(`Unexpected crypto dependency: ${specifier}`);
   });
   const cryptoAdapter = {

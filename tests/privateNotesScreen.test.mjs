@@ -7,6 +7,7 @@ import ts from 'typescript';
 import { createPrivateSession } from '../src/privateSession.ts';
 import { createPrivateScreenCaptureProtection } from '../src/privateScreenCapture.ts';
 import { sanitizeNoteHtml } from '../src/noteFormatting.ts';
+import { NativeCryptoProviderUnavailableError } from '../src/nativeCryptoProvider.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_PRIVATE_SCREEN_SOURCE ?? new URL('../src/components/PrivateNotesScreen.tsx', import.meta.url), 'utf8');
@@ -41,6 +42,7 @@ async function screen({
   status = async () => 'locked', setup = async () => {}, unlock = async () => [],
   unlockWithKey = async () => [], exportBiometricKey = async () => Uint8Array.from({ length: 32 }, (_, index) => index + 1),
   biometricAvailable = false, biometricKey = null,
+  importKey = async key => ({ raw: Array.from(key) }),
   restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }),
   remove = async () => {}, onRestored = async () => {}, preventCapture = async () => {},
   allowCapture = async () => {}, initialState = 'active',
@@ -126,7 +128,7 @@ async function screen({
     },
     'expo-screen-capture': screenCapture,
     '../privateAccess': { createPrivateAccess: () => access },
-    '../privateCrypto': { importPrivateKey: async key => ({ raw: Array.from(key) }) },
+    '../privateCrypto': { importPrivateKey: async key => importKey(key) },
     '../privateBiometricUnlock': {
       PRIVATE_BIOMETRIC_ENABLED_FLAG: '@test/biometric-enabled',
       privateBiometricKeyStore: biometricKeyStore,
@@ -163,6 +165,7 @@ async function screen({
   render(); await flush();
   return {
     render, flush, calls, restoreCalls, mutationCalls, alerts, captureCalls, biometricCalls, asyncStorage, unlockedKey,
+    get storedBiometricKey() { return storedBiometricKey ? Uint8Array.from(storedBiometricKey) : null; },
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
     replayEffects() {
       for (const effect of effects) effect?.cleanup?.();
@@ -639,6 +642,34 @@ test('locked screen shows the reference biometric action while retaining passwor
   assert.equal(app.asyncStorage.get('@test/biometric-enabled'), 'enabled');
   assert.match(text(app.render()), /Secret body/);
   assert.ok(button(app, 'Remove biometric unlock'));
+});
+
+test('biometric provider load failure stays locked, preserves the stored key, and clears the read key buffer', async () => {
+  const storedKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const providerError = new NativeCryptoProviderUnavailableError('PV-CRYPTO-LOAD');
+  let importedKeyBytes;
+  const app = await screen({
+    biometricAvailable: true,
+    biometricKey: storedKey,
+    importKey: async key => {
+      importedKeyBytes = key;
+      throw providerError;
+    },
+  });
+
+  button(app, 'Use passkey or fingerprint').props.onPress();
+  await app.flush();
+
+  assert.equal(isUnlocked(app), false);
+  assert.match(text(app.render()), /\[PV-CRYPTO-LOAD\]/);
+  assert.equal(text(app.render()).includes('Expo Go'), false);
+  assert.deepEqual(app.calls, [], 'vault-session verification must not run before key import succeeds');
+  assert.deepEqual(app.biometricCalls.map(([operation]) => operation), ['read']);
+  assert.deepEqual(app.storedBiometricKey, storedKey, 'the stored credential remains available for retry');
+  assert.ok(importedKeyBytes instanceof Uint8Array);
+  assert.equal(importedKeyBytes.some(value => value !== 0), false, 'the in-memory biometric key buffer is cleared');
+  assert.ok(input(app), 'password fallback remains available');
+  assert.equal(app.asyncStorage.has('@test/biometric-enabled'), false);
 });
 
 test('an existing biometric key unlocks only through vault verification, while an invalid key leaves password fallback available', async () => {

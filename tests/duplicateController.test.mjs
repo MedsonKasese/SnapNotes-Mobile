@@ -72,10 +72,14 @@ test('failed duplication does not alter saved notes; retry works and IDs remain 
   assert.equal(persisted[0].id, 'local-note-4');
 });
 
-test('missing and trashed notes cannot be duplicated', async () => {
+test('missing and trashed notes cannot be duplicated', async t => {
+  // Keep the fixture within the 15-day Trash window so load does not purge it.
+  t.mock.method(Date, 'now', () => Date.parse(SECOND));
   let writes = 0;
   const controller = createNotesController({ async load() { return [{ ...original, deletedAt: FIRST }]; }, async save() { writes++; } });
   await controller.load();
+  assert.equal(controller.getSnapshot().state.notes.length, 1);
+  assert.equal(writes, 0, 'loading unexpired Trash should not rewrite storage');
   await controller.duplicateNote(original.id, SECOND);
   await controller.duplicateNote('missing', SECOND);
   assert.equal(writes, 0);
