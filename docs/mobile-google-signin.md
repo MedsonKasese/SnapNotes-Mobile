@@ -25,7 +25,7 @@ Use the owner's cloud Metro session, not Termux local Metro, because Termux can 
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID='your-web-client-id.apps.googleusercontent.com' npx expo start --tunnel --dev-client
 ```
 
-Then open the tunnel from the rebuilt development APK. Test Google sign-in, cancellation, an unavailable/misconfigured provider, and sign-out. Before and after each case, compare ordinary local notes and Private Notes: no note content, IDs, ownership, folder, attachment, draft, or vault data should change. Confirm the workspace remains usable offline and without an account.
+The owner previously confirmed Google Sign-In succeeded in an EAS development APK and ordinary local notes were unchanged. For later phone checks, also try cancelling the picker, unavailable/misconfigured provider errors, sign-out, and offline use; verify Private Notes and its vault remain unchanged.
 
 ## iOS configuration
 
@@ -33,9 +33,9 @@ The native module can also sign in on iOS when a separate iOS OAuth client is co
 
 ## Validation boundary
 
-Automated tests cover token exchange, cancellation, missing OAuth configuration, and safe error handling. Typecheck, lint, the regression suite, Expo dependency validation, and Android JavaScript bundling are code checks—not proof that Google OAuth works on the owner's signed APK. Keep the PR open and unmerged until the owner adds the Android fingerprint/configuration and confirms the rebuilt APK sign-in and local-data invariants on a phone.
+Automated tests cover token exchange, cancellation, missing OAuth configuration, and safe error handling. Typecheck, lint, regression tests, Expo dependency validation, and Android JavaScript bundling are code checks—not proof of native OAuth on every build. The owner reports that Google Sign-In succeeded in an EAS development APK and ordinary local notes were unchanged. Remaining useful phone checks include cancellation, provider/configuration errors, sign-out, offline use, and Private Notes invariants on the branch synced with current main. Keep PR #46 open and unmerged until the updated-branch checks and any remaining device tests are reviewed.
 
-The native package's peer range accepts React Native `>=0.76`, but its published compatibility matrix does not list this app's React Native `0.88.1` (the listed 2.0.x row ends at `0.87`, and the package's development dependency is `0.87.0`). The native Android build is therefore unverified on this app version and must pass in the owner's EAS development build before merging.
+The native package's peer range accepts React Native `>=0.76`, while its published compatibility notes do not list this app's React Native `0.88.1` (the listed 2.0.x row ends at `0.87`, and its development dependency is `0.87.0`). Despite that documentation gap, the owner reports a successful EAS development APK build and Google sign-in on the tested Android device. This validates that tested Android build only; it does not guarantee other React Native versions or iOS. The optional iOS path remains untested.
 
 ## Official setup references
 
