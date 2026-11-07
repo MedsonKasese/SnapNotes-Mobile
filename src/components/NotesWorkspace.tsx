@@ -35,11 +35,19 @@ import { RichNoteEditor, type FormattingAction, type FormattingState, type RichC
 import { ReminderControls } from './ReminderControls';
 import { addReminderReceivedListener, localReminderScheduler } from '../reminders/nativeNotifications';
 import { isValidReminderAt, normalizeReminderRepeat } from '../reminders/recurrence';
-import { reminderTargetKey, type PrivateReminderNavigationTarget, type ReminderNotificationTarget } from '../reminders/notificationResponse';
+import { reminderTargetKey, resolveRegularReminderDestination, type PrivateReminderNavigationTarget, type ReminderNotificationTarget } from '../reminders/notificationResponse';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
 type NoteAction = 'move-private' | 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
+
+function trackReminderOperation<T>(active: { current: Set<Promise<unknown>> }, operation: () => Promise<T>): Promise<T> {
+  const result = operation();
+  active.current.add(result);
+  void result.then(() => active.current.delete(result), () => active.current.delete(result));
+  return result;
+}
+
 type FolderAction = 'rename' | 'customize' | 'delete';
 const FOLDER_ACTIONS: { action: FolderAction; label: string; icon: FontAwesomeName }[] = [
   { action: 'rename', label: 'Rename folder', icon: 'pencil' },
@@ -166,6 +174,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
+  const privateMoveGuard = useRef<{ noteId: string | null; moving: boolean }>({ noteId: null, moving: false });
+  const ordinaryReminderSyncs = useRef(new Set<Promise<unknown>>());
   const [privateMovePassword, setPrivateMovePassword] = useState('');
   const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
   const [privateMoveBusy, setPrivateMoveBusy] = useState(false);
@@ -198,19 +208,22 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const syncOrdinaryReminders = useCallback(async (notes: Note[]) => {
+  const syncOrdinaryReminders = useCallback((notes: Note[]) => trackReminderOperation(ordinaryReminderSyncs, async () => {
     try {
       const vaultEntries = await privateVaultStorage.load();
-      const privateIds = vaultEntries.map(entry => entry.id);
-      const result = await localReminderScheduler.reconcileNotes(notes, privateIds);
+      const excludedIds = new Set(vaultEntries.map(entry => entry.id));
+      const moving = privateMoveGuard.current;
+      if (moving.moving && moving.noteId) excludedIds.add(moving.noteId);
+      const result = await localReminderScheduler.reconcileNotes(notes, [...excludedIds]);
       if (result.stateUpdates.length) await controller.updateReminderState(result.stateUpdates);
       return result;
     } catch {
       // If vault state cannot be verified, do not leave cleartext previews queued.
-      try { await localReminderScheduler.reconcileNotes([]); } catch { /* Keep the error generic and fail closed. */ }
+      try { await localReminderScheduler.reconcileNotes([]); }
+      catch { /* Keep the error generic and fail closed. */ }
       return null;
     }
-  }, [controller]);
+  }), [controller]);
   useEffect(() => {
     if (status === 'ready') void syncOrdinaryReminders(state.notes);
   }, [status, state.notes, syncOrdinaryReminders]);
@@ -952,6 +965,10 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
   }
 
   function openRegularReminder(noteId: string) {
+    if (privateMoveGuard.current.noteId === noteId) {
+      reminderTargetActions.current?.unavailable();
+      return;
+    }
     const note = controller.getSnapshot().state.notes.find(item => item.id === noteId);
     if (!note) {
       reminderTargetActions.current?.unavailable();
@@ -994,11 +1011,16 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
     }
 
     const noteId = notificationTarget.noteId;
-    void privateVaultStorage.load().then(entries => {
+    void resolveRegularReminderDestination(noteId, privateSharedCoordinator,
+      () => privateVaultStorage.load(), id => privateMoveGuard.current.noteId === id).then(destination => {
       if (handledNotificationTarget.current !== targetKey) return;
-      if (entries.some(entry => entry.id === noteId)) {
+      if (destination === 'private') {
         // A stale ordinary reminder must not open a duplicate that now belongs to the vault.
         reminderTargetActions.current?.openPrivateNote({ kind: 'private-note', noteId });
+        return;
+      }
+      if (destination === 'moving') {
+        reminderTargetActions.current?.unavailable();
         return;
       }
       reminderTargetActions.current?.openRegularNote(noteId);
@@ -1055,6 +1077,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
     const now = new Date().toISOString();
     switch (action) {
       case 'move-private':
+        privateMoveGuard.current = { noteId: id, moving: false };
         setPrivateMovePassword('');
         setPrivateMovePasswordVisible(false);
         setPrivateMoveId(id);
@@ -1069,18 +1092,31 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
     }
   }
 
+  function closePrivateMoveDialog() {
+    if (privateMoveBusy) return;
+    privateMoveGuard.current = { noteId: null, moving: false };
+    setPrivateMoveId(null);
+    setPrivateMovePassword('');
+    setPrivateMovePasswordVisible(false);
+  }
+
   async function confirmPrivateMove() {
     if (!privateMoveId || privateMoveBusy || controller.getSnapshot().status !== 'ready') return;
     const id = privateMoveId;
+    privateMoveGuard.current = { noteId: id, moving: true };
     setPrivateMoveBusy(true);
-    let ordinaryReminderCancelled = false;
+    let reminderCancellationAttempted = false;
     let transferOutcome: 'not-committed' | 'moved' | 'needs-recovery' = 'not-committed';
     let transferRecoveryMessage = '';
     try {
       // Remove any cleartext title/body notification before the encrypted move.
       // If this cannot be confirmed, leave the ordinary note untouched.
-      await localReminderScheduler.cancelNoteReminder(id);
-      ordinaryReminderCancelled = true;
+      const inFlightReminderSyncs = [...ordinaryReminderSyncs.current];
+      await Promise.all(inFlightReminderSyncs.map(sync => sync.catch(() => undefined)));
+      await privateSharedCoordinator.exclusive(async () => {
+        reminderCancellationAttempted = true;
+        await localReminderScheduler.cancelNoteReminder(id);
+      });
       const result = await moveDeviceNoteToPrivate(id, privateMovePassword);
       transferOutcome = result.status;
       if (result.status === 'needs-recovery') transferRecoveryMessage = result.reason;
@@ -1107,7 +1143,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
         Alert.alert('Moved to Private', 'Your note was encrypted and moved into Private Notes.' + privateReminderMessage);
       }
     } catch (cause) {
-      if (ordinaryReminderCancelled && transferOutcome === 'not-committed') {
+      if (reminderCancellationAttempted && transferOutcome === 'not-committed') {
+        privateMoveGuard.current = { noteId: null, moving: false };
         const snapshot = controller.getSnapshot();
         if (snapshot.status === 'ready' && snapshot.state.notes.some(note => note.id === id)) {
           void syncOrdinaryReminders(snapshot.state.notes);
@@ -1123,6 +1160,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
     } finally {
       void refreshPrivateNoteCount();
       setPrivateMoveBusy(false);
+      if (transferOutcome !== 'needs-recovery') privateMoveGuard.current = { noteId: null, moving: false };
     }
   }
 
@@ -1543,7 +1581,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
       )}
 
       <Modal testID="move-private-modal" visible={privateMoveId !== null} transparent animationType="fade"
-        onRequestClose={() => { if (!privateMoveBusy) { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); } }}>
+        onRequestClose={closePrivateMoveDialog}>
         <View style={{ flex: 1, backgroundColor: '#0009', justifyContent: 'center', padding: 24 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 14 }}>
             <Text style={{ fontSize: 20, fontWeight: '800', color: '#20351d' }}>Move to Private</Text>
@@ -1566,7 +1604,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
               <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '700' }}>{privateMoveBusy ? 'Encrypting…' : 'Move to Private'}</Text>
             </Pressable>
             <Pressable accessibilityRole="button" disabled={privateMoveBusy}
-              onPress={() => { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); }}>
+              onPress={closePrivateMoveDialog}>
               <Text style={{ textAlign: 'center', color: '#a32b2b', padding: 8 }}>Cancel</Text>
             </Pressable>
           </View>

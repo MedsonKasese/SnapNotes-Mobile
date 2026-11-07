@@ -82,3 +82,29 @@ export function registerReminderNotificationResponseHandler(
     subscription.remove();
   };
 }
+
+export type ReminderReadCoordinator = {
+  exclusive<T>(operation: () => Promise<T>): Promise<T>;
+};
+
+export type RegularReminderDestination = 'regular' | 'private' | 'moving';
+
+// Serialize the membership check with vault transfers. A move intent is also
+// checked inside the critical section so a queued tap cannot open a stale
+// cleartext copy after the transfer has started.
+export async function resolveRegularReminderDestination(
+  noteId: string,
+  coordinator: ReminderReadCoordinator,
+  loadVaultEntries: () => Promise<readonly { id: string }[]>,
+  isMovePending: (noteId: string) => boolean,
+): Promise<RegularReminderDestination> {
+  if (isMovePending(noteId)) return 'moving';
+  const belongsToPrivateVault = await coordinator.exclusive(async () => {
+    if (isMovePending(noteId)) return null;
+    const entries = await loadVaultEntries();
+    return entries.some(entry => entry.id === noteId);
+  });
+  if (belongsToPrivateVault === true) return 'private';
+  if (belongsToPrivateVault === null || isMovePending(noteId)) return 'moving';
+  return 'regular';
+}

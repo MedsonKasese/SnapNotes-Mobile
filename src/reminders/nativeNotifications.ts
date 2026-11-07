@@ -47,6 +47,7 @@ export const localReminderScheduler = createReminderScheduler({
     return isPermissionGranted(requested);
   },
   getAllScheduledNotificationsAsync: () => Notifications.getAllScheduledNotificationsAsync(),
+  getPresentedNotificationsAsync: () => Notifications.getPresentedNotificationsAsync(),
   scheduleNotificationAsync(request) {
     const androidDelivery = getAndroidReminderDelivery(Platform.OS, Platform.Version);
     return Notifications.scheduleNotificationAsync({
@@ -67,6 +68,7 @@ export const localReminderScheduler = createReminderScheduler({
     });
   },
   cancelScheduledNotificationAsync: identifier => Notifications.cancelScheduledNotificationAsync(identifier),
+  dismissNotificationAsync: identifier => Notifications.dismissNotificationAsync(identifier),
 });
 
 export function addReminderReceivedListener(listener: () => void): () => void {

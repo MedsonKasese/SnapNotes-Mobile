@@ -33,6 +33,9 @@ export type ScheduledReminder = {
   content: { title?: string | null; body?: string | null; data?: Record<string, unknown> };
   trigger: unknown;
 };
+export type PresentedReminder = {
+  request: { identifier: string; content: { data?: Record<string, unknown> } };
+};
 export type ReminderStateUpdate = { id: string; reminderAt: string | null; reminderNotified: boolean };
 export type ReminderSyncResult = {
   permissionGranted: boolean;
@@ -46,8 +49,10 @@ export type ReminderNotificationApi = {
   hasPermission(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
   getAllScheduledNotificationsAsync(): Promise<ScheduledReminder[]>;
+  getPresentedNotificationsAsync(): Promise<PresentedReminder[]>;
   scheduleNotificationAsync(request: { content: NotificationContent; trigger: DateTrigger }): Promise<string>;
   cancelScheduledNotificationAsync(identifier: string): Promise<void>;
+  dismissNotificationAsync(identifier: string): Promise<void>;
   maxPendingNotifications?: number;
 };
 
@@ -168,6 +173,20 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     return cancelled;
   }
 
+  async function dismissPresentedMatches(kind: string, ownerKey: 'noteId' | 'scheduleKey', ownerValue: string): Promise<void> {
+    let presented: PresentedReminder[];
+    try { presented = await api.getPresentedNotificationsAsync(); }
+    catch { throw new Error('A displayed local reminder could not be checked on this device.'); }
+    const matches = presented.filter(notification => {
+      const data = notification.request.content.data ?? {};
+      return data.kind === kind && data[ownerKey] === ownerValue;
+    });
+    for (const notification of matches) {
+      try { await api.dismissNotificationAsync(notification.request.identifier); }
+      catch { throw new Error('A displayed local reminder could not be dismissed on this device.'); }
+    }
+  }
+
   async function reconcilePlans(plans: DesiredRequest[], managedRequests: ScheduledReminder[], allRequests: ScheduledReminder[],
     permissionGranted: boolean, kind: string, ownerKey: 'noteId' | 'scheduleKey'): Promise<{ scheduled: number; cancelled: number; unscheduled: number }> {
     const desired = new Map(plans.map(plan => [plan.key, plan]));
@@ -272,14 +291,22 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     if (!scheduleKey) return 0;
     const scheduled = await api.getAllScheduledNotificationsAsync();
     const matches = scheduled.filter(request => matchingPrivate(request, scheduleKey));
-    return cancelRequests(matches);
+    const cancelled = await cancelRequests(matches);
+    await dismissPresentedMatches(PRIVATE_REMINDER_KIND, 'scheduleKey', scheduleKey);
+    await dismissPresentedMatches(PRIVATE_REMINDER_KIND, 'scheduleKey', scheduleKey);
+    return cancelled;
   }
 
   async function cancelNoteReminder(noteId: string | null | undefined): Promise<number> {
     if (!noteId) return 0;
     const scheduled = await api.getAllScheduledNotificationsAsync();
     const matches = scheduled.filter(request => matchingNormal(request, noteId));
-    return cancelRequests(matches);
+    const cancelled = await cancelRequests(matches);
+    // Sweep twice after cancelling alarms so a notification delivered during the
+    // cancellation boundary cannot retain a cleartext title/body in the tray.
+    await dismissPresentedMatches(NOTE_REMINDER_KIND, 'noteId', noteId);
+    await dismissPresentedMatches(NOTE_REMINDER_KIND, 'noteId', noteId);
+    return cancelled;
   }
 
   return { requestPermission, reconcileNotes, reconcilePrivateNotes, schedulePrivateSummary, cancelPrivateReminder, cancelNoteReminder };

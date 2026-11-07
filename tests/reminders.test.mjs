@@ -7,6 +7,7 @@ import { createReminderScheduler } from '../src/reminders/scheduler.ts';
 
 function fakeNotifications({ granted = true, now = Date.parse('2026-01-01T00:00:00.000Z'), maxPendingNotifications = 60 } = {}) {
   const requests = new Map();
+  const presented = new Map();
   let nextId = 0;
   let requestCalls = 0;
   let prepareCalls = 0;
@@ -16,14 +17,16 @@ function fakeNotifications({ granted = true, now = Date.parse('2026-01-01T00:00:
     async hasPermission() { return granted; },
     async requestPermission() { requestCalls += 1; return granted; },
     async getAllScheduledNotificationsAsync() { return [...requests.values()]; },
+    async getPresentedNotificationsAsync() { return [...presented.values()]; },
     async scheduleNotificationAsync(request) {
       const identifier = `local-${++nextId}`;
       requests.set(identifier, { identifier, ...request });
       return identifier;
     },
     async cancelScheduledNotificationAsync(identifier) { requests.delete(identifier); },
+    async dismissNotificationAsync(identifier) { presented.delete(identifier); },
   };
-  return { api, requests, setNow(value) { now = value; }, getNow() { return now; }, get requestCalls() { return requestCalls; }, get prepareCalls() { return prepareCalls; } };
+  return { api, requests, presented, setNow(value) { now = value; }, getNow() { return now; }, get requestCalls() { return requestCalls; }, get prepareCalls() { return prepareCalls; } };
 }
 
 function normalNote(overrides = {}) {
@@ -226,6 +229,38 @@ test('a note ID represented in the encrypted vault is excluded from ordinary cle
   assert.equal(result.cancelled, 1);
   assert.equal(result.scheduled, 0);
   assert.equal(fake.requests.size, 0);
+});
+
+test('canceling a regular reminder dismisses its delivered cleartext notification and preserves other notes', async () => {
+  const fake = fakeNotifications();
+  const scheduler = createReminderScheduler(fake.api, fake.getNow);
+  await scheduler.requestPermission();
+  await scheduler.reconcileNotes([normalNote(), normalNote({ id: 'note-2', title: 'Another note' })]);
+  const first = [...fake.requests.values()].find(request => request.content.data.noteId === 'note-1');
+  const second = [...fake.requests.values()].find(request => request.content.data.noteId === 'note-2');
+  assert.ok(first && second);
+  fake.presented.set(first.identifier, { request: first });
+  fake.presented.set(second.identifier, { request: second });
+
+  assert.equal(await scheduler.cancelNoteReminder('note-1'), 1);
+  assert.equal(fake.requests.has(first.identifier), false);
+  assert.equal(fake.requests.has(second.identifier), true);
+  assert.equal(fake.presented.has(first.identifier), false);
+  assert.equal(fake.presented.has(second.identifier), true);
+});
+
+test('a delivered cleartext reminder that cannot be dismissed makes cancellation fail closed', async () => {
+  const fake = fakeNotifications();
+  const scheduler = createReminderScheduler(fake.api, fake.getNow);
+  await scheduler.requestPermission();
+  await scheduler.reconcileNotes([normalNote()]);
+  const [request] = fake.requests.values();
+  fake.presented.set(request.identifier, { request });
+  fake.api.dismissNotificationAsync = async () => { throw new Error('native failure'); };
+
+  await assert.rejects(scheduler.cancelNoteReminder('note-1'), /could not be dismissed/);
+  assert.equal(fake.requests.size, 0, 'scheduled alarms are still cancelled before tray cleanup is reported');
+  assert.equal(fake.presented.size, 1, 'failed dismissal remains visible to the caller rather than being silently ignored');
 });
 
 

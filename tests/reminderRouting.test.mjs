@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import {
   parseReminderNotificationData,
   registerReminderNotificationResponseHandler,
+  resolveRegularReminderDestination,
   reminderTargetKey,
 } from '../src/reminders/notificationResponse.ts';
 import { getAndroidReminderDelivery } from '../src/reminders/androidDelivery.ts';
+import { createPrivateWriteCoordinator } from '../src/privateWriteCoordinator.ts';
 
 const DEFAULT_ACTION = 'default-tap';
 function response(identifier, data, actionIdentifier = DEFAULT_ACTION) {
@@ -41,6 +43,43 @@ test('navigation target keys distinguish regular, private-key, and private-ID ro
     reminderTargetKey({ kind: 'private-note', noteId: 'same' }),
   );
   assert.equal(reminderTargetKey({ kind: 'private', scheduleKey: 'opaque-key' }), 'private:opaque-key');
+});
+
+test('regular reminder routing waits for a concurrent private move and then targets the vault copy', async () => {
+  const coordinator = createPrivateWriteCoordinator();
+  let vaultEntries = [];
+  let releaseMove;
+  const moveBarrier = new Promise(resolve => { releaseMove = resolve; });
+  const move = coordinator.exclusive(async () => {
+    await moveBarrier;
+    vaultEntries = [{ id: 'note-1' }];
+  });
+  let routeResolved = false;
+  const route = resolveRegularReminderDestination('note-1', coordinator,
+    async () => vaultEntries, () => false).then(destination => {
+    routeResolved = true;
+    return destination;
+  });
+  await Promise.resolve();
+  assert.equal(routeResolved, false, 'the tap must wait behind the in-flight vault transaction');
+
+  releaseMove();
+  await move;
+  assert.equal(await route, 'private');
+});
+
+test('a pending move intent blocks regular navigation even before the vault copy is visible', async () => {
+  let vaultRead = false;
+  const destination = await resolveRegularReminderDestination('note-1', createPrivateWriteCoordinator(),
+    async () => { vaultRead = true; return []; }, noteId => noteId === 'note-1');
+  assert.equal(destination, 'moving');
+  assert.equal(vaultRead, false);
+});
+
+test('regular reminder routing stays on the regular path when the vault does not contain the note', async () => {
+  const destination = await resolveRegularReminderDestination('note-1', createPrivateWriteCoordinator(),
+    async () => [], () => false);
+  assert.equal(destination, 'regular');
 });
 
 test('cold-start and live notification taps route once, clear response state, and unsubscribe cleanly', () => {
