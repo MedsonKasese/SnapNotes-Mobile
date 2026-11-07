@@ -128,6 +128,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
+  const [storageInfoOpen, setStorageInfoOpen] = useState(false);
   const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [accountAvatarColor] = useState(getRandomAccountAvatarColor);
@@ -843,6 +844,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
       closeDrawer();
+      setStorageInfoOpen(false);
       setView('library');
     });
   }
@@ -851,6 +853,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
       closeDrawer();
+      setStorageInfoOpen(false);
       setView('editor');
     });
   }
@@ -863,6 +866,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     }
     confirmDiscard(() => {
       dispatch({ type: 'edit', id });
+      setStorageInfoOpen(false);
       setView('editor');
     });
   }
@@ -1136,18 +1140,38 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
-            <View style={styles.viewHeading}>
-              <View style={styles.headingCopy}>
-                <Text style={styles.eyebrow}>WRITE SOMETHING DOWN</Text>
-                <Text accessibilityRole="header" style={styles.screenTitle}>
-                  {state.editingId === null ? 'New note' : 'Edit note'}
-                </Text>
+            <View style={styles.editorHeadingGroup}>
+              <View style={styles.viewHeading}>
+                <View style={styles.headingCopy}>
+                  <Text style={styles.eyebrow}>WRITE SOMETHING DOWN</Text>
+                  <View testID="editor-title-with-storage-info" style={styles.editorTitleRow}>
+                    <Text accessibilityRole="header" style={styles.screenTitle}>
+                      {state.editingId === null ? 'New note' : 'Edit note'}
+                    </Text>
+                    <Pressable
+                      testID="editor-storage-info-button"
+                      accessibilityRole="button"
+                      accessibilityLabel={storageInfoOpen ? 'Hide note storage information' : 'Show note storage information'}
+                      accessibilityHint="Explains where notes are stored and whether they are encrypted, backed up, or synced."
+                      accessibilityState={{ expanded: storageInfoOpen }}
+                      hitSlop={6}
+                      onPress={() => setStorageInfoOpen(current => !current)}
+                      style={({ pressed }) => [styles.editorStorageInfoButton, pressed && styles.pressed]}
+                    >
+                      <FontAwesome name="info-circle" size={17} color="#79520a" accessible={false} />
+                    </Pressable>
+                  </View>
+                </View>
+                <Action label="All notes" secondary onPress={() => selectLibraryCategory('all')} disabled={saving} />
               </View>
-              <Action label="All notes" secondary onPress={() => selectLibraryCategory('all')} disabled={saving} />
-            </View>
-            <View style={styles.warning}>
-              <Text style={styles.warningTitle}>Stored on this device</Text>
-              <Text style={styles.warningText}>Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.</Text>
+              {storageInfoOpen && (
+                <View testID="editor-storage-info-tooltip" style={styles.storageInfoTooltip}>
+                  <Text style={styles.storageInfoTooltipText}>
+                    <Text style={styles.storageInfoTooltipTitle}>Stored on this device. </Text>
+                    {'Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.'}
+                  </Text>
+                </View>
+              )}
             </View>
             <View style={styles.editor}>
               <Text style={styles.label}>Category</Text>
@@ -1616,6 +1640,12 @@ const styles = StyleSheet.create({
   libraryHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 18, paddingTop: 20, paddingBottom: 5 },
   headingCopy: { flex: 1, gap: 4 },
   viewHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  editorHeadingGroup: { gap: 8 },
+  editorTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  editorStorageInfoButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
+  storageInfoTooltip: { padding: 12, borderRadius: 12, backgroundColor: '#fffaf0', borderWidth: 1, borderColor: '#f1e1ad' },
+  storageInfoTooltipTitle: { color: '#79520a', fontSize: 13, fontWeight: '800' },
+  storageInfoTooltipText: { color: '#685d3c', fontSize: 12, lineHeight: 18 },
   eyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
   screenTitle: { color: '#20351d', fontSize: 27, fontWeight: '800', letterSpacing: -0.7, marginTop: 2 },
   libraryHint: { color: '#64715e', fontSize: 13, paddingHorizontal: 18, paddingBottom: 8 },
@@ -1625,9 +1655,6 @@ const styles = StyleSheet.create({
   emptyMarkText: { color: '#48a111', fontSize: 34, fontWeight: '500' },
   emptyTitle: { color: '#20351d', fontSize: 21, fontWeight: '800', textAlign: 'center' },
   emptyText: { color: '#64715e', fontSize: 14, lineHeight: 21, textAlign: 'center', maxWidth: 290, marginBottom: 6 },
-  warning: { padding: 14, borderRadius: 13, backgroundColor: '#fff6db', borderWidth: 1, borderColor: '#f1e1ad', gap: 4 },
-  warningTitle: { color: '#79520a', fontSize: 13, fontWeight: '800' },
-  warningText: { color: '#79520a', fontSize: 12, lineHeight: 18 },
   editorContent: { padding: 18, paddingBottom: 40, gap: 16 },
   editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },

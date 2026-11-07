@@ -204,6 +204,39 @@ test('new-note editor explains attachments appear after save, and saved-note edi
   assert.equal(picker.props.noteId, savedNotes[0].id);
 });
 
+test('new-note editor shows device-storage information only when its accessible title control is tapped', () => {
+  const app = workspace();
+  action(app.render(), '+ New note').props.onPress();
+  const collapsed = app.render();
+  const titleRow = find(collapsed, element => element.props.testID === 'editor-title-with-storage-info');
+  assert.match(text(titleRow), /New note/);
+  const infoButton = find(titleRow, element => element.props.testID === 'editor-storage-info-button');
+  assert.equal(infoButton.props.accessibilityRole, 'button');
+  assert.equal(infoButton.props.accessibilityLabel, 'Show note storage information');
+  assert.equal(infoButton.props.accessibilityState.expanded, false);
+  assert.equal(text(collapsed).includes('Stored on this device.'), false);
+  assert.equal(elements(collapsed).some(element => element.props.testID === 'editor-storage-info-tooltip'), false);
+
+  infoButton.props.onPress();
+  const expanded = app.render();
+  const disclosure = 'Stored on this device. Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.';
+  assert.equal(text(expanded).includes(disclosure), true);
+  const tooltip = find(expanded, element => element.props.testID === 'editor-storage-info-tooltip');
+  assert.equal(tooltip.type, 'View');
+  assert.equal(text(tooltip), disclosure);
+  const hideButton = find(expanded, element => element.props.testID === 'editor-storage-info-button');
+  assert.equal(hideButton.props.accessibilityLabel, 'Hide note storage information');
+  assert.equal(hideButton.props.accessibilityState.expanded, true);
+
+  hideButton.props.onPress();
+  assert.equal(elements(app.render()).some(element => element.props.testID === 'editor-storage-info-tooltip'), false);
+  const showAgain = find(app.render(), element => element.props.testID === 'editor-storage-info-button');
+  showAgain.props.onPress();
+  action(app.render(), 'All notes').props.onPress();
+  action(app.render(), '+ New note').props.onPress();
+  assert.equal(elements(app.render()).some(element => element.props.testID === 'editor-storage-info-tooltip'), false);
+});
+
 test('saved note editor and attachment siblings use distinct React keys', () => {
   const note = { ...savedNotes[0], id: 'local-note-42' };
   const app = workspace([note]);
