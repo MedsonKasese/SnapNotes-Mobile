@@ -16,6 +16,8 @@ import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
 const sourcePath = process.env.SNAPNOTES_NOTESWORKSPACE_SOURCE
@@ -185,6 +187,7 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === 'react-native') return {
         ...Object.fromEntries(['BackHandler', 'FlatList', 'KeyboardAvoidingView', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(type => [type, type])),
         Alert: { alert: (...args) => alerts.push(args) },
+        AppState: { addEventListener: () => ({ remove() {} }) },
         BackHandler: { addEventListener: (_event, callback) => {
           backHandlerListeners.add(callback);
           return { remove() { backHandlerListeners.delete(callback); } };
@@ -222,6 +225,9 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === './RichNoteEditor') return { RichNoteEditor: 'RichNoteEditor' };
       if (name === './PrivateNotesScreen') return { PrivateNotesScreen: 'PrivateNotesScreen' };
       if (name === './NoteAttachments') return { NoteAttachments: 'NoteAttachments' };
+      if (name === './ReminderControls') return reminderControlsModule;
+      if (name === '../reminders/nativeNotifications') return reminderNativeNotifications;
+      if (name === '../reminders/recurrence') return reminderRecurrence;
       throw new Error(`Unexpected import: ${name}`);
     },
   });

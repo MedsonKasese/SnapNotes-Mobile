@@ -4,7 +4,6 @@ import { privateSharedCoordinator } from './privateSharedCoordinator.ts';
 import { decryptPrivatePayload, encryptPrivatePayload } from './privateCrypto.ts';
 import type { AuthenticatedPrivateSession } from './privateAccess.ts';
 import { deletePrivateNoteTransaction, updatePrivateNoteTransaction } from './privateNoteManagementTransaction.ts';
-import type { NoteDraft } from './notes.ts';
 
 const vault = createPrivateVaultStorage(AsyncStorage);
 const dependencies = (session: AuthenticatedPrivateSession) => ({
@@ -20,7 +19,7 @@ const dependencies = (session: AuthenticatedPrivateSession) => ({
 export function updateDevicePrivateNote(
   id: string,
   session: AuthenticatedPrivateSession,
-  changes: Partial<Pick<NoteDraft, 'title' | 'text' | 'html'>> & { pinned?: boolean },
+  changes: Parameters<typeof updatePrivateNoteTransaction>[1],
 ) {
   return updatePrivateNoteTransaction(id, changes, dependencies(session));
 }

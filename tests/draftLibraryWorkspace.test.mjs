@@ -17,6 +17,8 @@ import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_DRAFT_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -77,7 +79,8 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     'react-native': {
       ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(name => [name, name])),
       Alert: { alert: (...args) => alerts.push(args) }, BackHandler: { addEventListener: () => ({ remove() {} }) },
-      Keyboard: { dismiss() {} }, Platform: { OS: 'android' }, StyleSheet: { create: styles => styles, absoluteFill: {} },
+      AppState: { addEventListener: () => ({ remove() {} }) }, Keyboard: { dismiss() {} },
+      Platform: { OS: 'android' }, StyleSheet: { create: styles => styles, absoluteFill: {} },
     },
     'react-native-safe-area-context': { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' },
     'expo-document-picker': { getDocumentAsync: async () => ({ canceled: true, assets: null }) },
@@ -103,6 +106,9 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' }, './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
     './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },
     './NoteAttachments': { NoteAttachments: 'NoteAttachments' },
+    './ReminderControls': reminderControlsModule,
+    '../reminders/nativeNotifications': reminderNativeNotifications,
+    '../reminders/recurrence': reminderRecurrence,
   };
   vm.runInNewContext(outputText, {
     exports, require(name) { assert.ok(name in modules, `Unexpected import: ${name}`); return modules[name]; },

@@ -3,9 +3,11 @@ import { decryptPrivatePayload, encryptPrivatePayload } from './privateCrypto.ts
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
 import type { PrivateNotePreview } from './privateNoteReader.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
+import { isValidReminderAt, normalizeReminderRepeat } from './reminders/recurrence.ts';
 
 type Key = Parameters<typeof decryptPrivatePayload>[1];
-type Changes = Partial<Pick<NoteDraft, 'title' | 'text' | 'html'>> & { pinned?: boolean };
+type Changes = Partial<Pick<NoteDraft, 'title' | 'text' | 'html' | 'reminderAt' | 'reminderNotified' | 'reminderRepeat'>> &
+  { pinned?: boolean; reminderScheduleKey?: string | null };
 type Dependencies = {
   loadVault(): Promise<PrivateVaultEntry[]>;
   saveVault(entries: PrivateVaultEntry[]): Promise<void>;
@@ -27,6 +29,14 @@ function assertPrivatePayload(value: unknown): asserts value is Record<string, u
     !NOTE_CATEGORIES.includes(value.category as (typeof NOTE_CATEGORIES)[number])) {
     throw new Error('Encrypted private note has an unsupported payload. No changes were made.');
   }
+  if ((value.reminderAt !== undefined && !isValidReminderAt(value.reminderAt)) ||
+    (value.reminderNotified !== undefined && typeof value.reminderNotified !== 'boolean') ||
+    (value.reminderRepeat !== undefined && value.reminderRepeat !== null &&
+      (value.reminderAt == null || !normalizeReminderRepeat(value.reminderRepeat, value.reminderAt))) ||
+    (value.reminderScheduleKey !== undefined && value.reminderScheduleKey !== null &&
+      (typeof value.reminderScheduleKey !== 'string' || !/^private-reminder-[a-z0-9-]+$/.test(value.reminderScheduleKey)))) {
+    throw new Error('Encrypted private note has invalid reminder data. No changes were made.');
+  }
 }
 
 function asPreview(id: string, payload: Record<string, unknown>): PrivateNotePreview {
@@ -41,6 +51,10 @@ function asPreview(id: string, payload: Record<string, unknown>): PrivateNotePre
     ...(typeof payload.time === 'string' ? { time: payload.time } : {}),
     ...(typeof payload.createdAt === 'string' ? { createdAt: payload.createdAt } : {}),
     ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}),
+    ...(payload.reminderAt === undefined ? {} : { reminderAt: payload.reminderAt as string | null }),
+    ...(payload.reminderNotified === undefined ? {} : { reminderNotified: payload.reminderNotified as boolean }),
+    ...(payload.reminderRepeat === undefined ? {} : { reminderRepeat: payload.reminderRepeat as PrivateNotePreview['reminderRepeat'] }),
+    ...(payload.reminderScheduleKey === undefined ? {} : { reminderScheduleKey: payload.reminderScheduleKey as string | null }),
   };
 }
 
@@ -59,6 +73,8 @@ export async function updatePrivateNoteTransaction(
     assertPrivatePayload(current);
     const next: Record<string, unknown> = { ...current };
     const hasContentChange = changes.title !== undefined || changes.text !== undefined || changes.html !== undefined;
+    const hasReminderChange = changes.reminderAt !== undefined || changes.reminderNotified !== undefined ||
+      changes.reminderRepeat !== undefined || changes.reminderScheduleKey !== undefined;
     if (hasContentChange) {
       const draft: NoteDraft = {
         title: changes.title ?? current.title as string,
@@ -72,8 +88,33 @@ export async function updatePrivateNoteTransaction(
       next.title = normalized.title;
       next.text = normalized.text;
       next.html = normalized.html ?? '';
-      next.updatedAt = deps.now?.() ?? new Date().toISOString();
     }
+    if (changes.reminderAt !== undefined) {
+      if (!isValidReminderAt(changes.reminderAt)) throw new Error('Choose a valid reminder date and time.');
+      next.reminderAt = changes.reminderAt;
+      if (changes.reminderAt === null) {
+        next.reminderRepeat = null;
+        next.reminderNotified = false;
+        next.reminderScheduleKey = null;
+      }
+    }
+    if (changes.reminderNotified !== undefined) {
+      if (typeof changes.reminderNotified !== 'boolean') throw new Error('Invalid private reminder state.');
+      next.reminderNotified = changes.reminderNotified;
+    }
+    if (changes.reminderRepeat !== undefined) {
+      const reminderAt = changes.reminderAt === undefined ? current.reminderAt : changes.reminderAt;
+      if (changes.reminderRepeat !== null && (reminderAt == null || !normalizeReminderRepeat(changes.reminderRepeat, reminderAt))) {
+        throw new Error('Choose a valid repeat schedule.');
+      }
+      next.reminderRepeat = changes.reminderRepeat === null ? null : normalizeReminderRepeat(changes.reminderRepeat, reminderAt);
+    }
+    if (changes.reminderScheduleKey !== undefined) {
+      if (changes.reminderScheduleKey !== null && (typeof changes.reminderScheduleKey !== 'string' ||
+        !/^private-reminder-[a-z0-9-]+$/.test(changes.reminderScheduleKey))) throw new Error('Invalid private reminder state.');
+      next.reminderScheduleKey = changes.reminderScheduleKey;
+    }
+    if (hasContentChange || hasReminderChange) next.updatedAt = deps.now?.() ?? new Date().toISOString();
     if (changes.pinned !== undefined) {
       if (typeof changes.pinned !== 'boolean') throw new Error('Invalid private note pin state.');
       next.pinned = changes.pinned;

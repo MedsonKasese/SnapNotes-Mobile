@@ -1,4 +1,5 @@
 import type { Note } from './notes.ts';
+import { createOpaqueReminderKey } from './reminders/recurrence.ts';
 
 // Keep this compatible with the PWA's buildPrivatePayload in
 // SnapNotes/js/private-note-utils.js. This module does not persist or remove notes.
@@ -18,9 +19,10 @@ export function buildMobilePrivatePayload(note: Note) {
     tags: [],
     time: '',
     folderId: note.folderId || null,
-    reminderAt: null,
-    reminderNotified: false,
-    reminderRepeat: null,
+    reminderAt: note.reminderAt ?? null,
+    reminderNotified: Boolean(note.reminderNotified),
+    reminderRepeat: note.reminderRepeat ?? null,
+    ...(note.reminderAt ? { reminderScheduleKey: createOpaqueReminderKey() } : {}),
     attachments: [],
     history: [],
   };

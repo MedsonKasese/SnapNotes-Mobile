@@ -17,6 +17,8 @@ import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_FOLDER_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -97,6 +99,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
       ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(name => [name, name])),
       Alert: { alert: (...args) => alerts.push(args) },
       BackHandler: { addEventListener: () => ({ remove() {} }) },
+      AppState: { addEventListener: () => ({ remove() {} }) },
       Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
       StyleSheet: { create: styles => styles, absoluteFill: {} },
     },
@@ -127,6 +130,9 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
     './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },
     './NoteAttachments': { NoteAttachments: 'NoteAttachments' },
+    './ReminderControls': reminderControlsModule,
+    '../reminders/nativeNotifications': reminderNativeNotifications,
+    '../reminders/recurrence': reminderRecurrence,
   };
   vm.runInNewContext(outputText, {
     exports, setTimeout: () => 1, clearTimeout() {},
@@ -261,6 +267,7 @@ test('a failed folder removal reports that notes were safely unfiled and support
   assert.equal(JSON.parse(app.storedFolders).length, 1);
   assert.match(text(app.render()), /folder remains, but its notes are safely unfiled/);
   fail = false;
+  await app.flush(); // Allow the failed delete's finally block to release the action lock.
   requestDelete(app)();
   await app.flush();
   assert.deepEqual(JSON.parse(app.storedFolders), []);

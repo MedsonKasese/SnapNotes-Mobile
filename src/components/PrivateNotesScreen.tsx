@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from 'react';
 import {
   ActivityIndicator, Alert, AppState, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
@@ -18,10 +18,14 @@ import { sanitizeNoteHtml } from '../noteFormatting';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import type { PrivateNotePreview } from '../privateNoteReader';
 import { RichNoteEditor, type RichNoteEditorHandle } from './RichNoteEditor';
+import { ReminderControls } from './ReminderControls';
+import { addReminderReceivedListener, localReminderScheduler } from '../reminders/nativeNotifications';
+import { createOpaqueReminderKey } from '../reminders/recurrence';
 
 const access = createPrivateAccess(AsyncStorage);
 type FontAwesomeName = ComponentProps<typeof FontAwesome>['name'];
-type EditDraft = { id: string; title: string; text: string; html: string };
+type EditDraft = { id: string; title: string; text: string; html: string } & Pick<PrivateNotePreview,
+  'reminderAt' | 'reminderNotified' | 'reminderRepeat' | 'reminderScheduleKey'>;
 
 const PRIVATE_ACTIONS: { label: string; icon: FontAwesomeName }[] = [
   { label: 'Edit note', icon: 'pencil' },
@@ -60,6 +64,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
   const [privateNotes, setPrivateNotes] = useState<PrivateNotePreview[]>([]);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [editingNote, setEditingNote] = useState<EditDraft | null>(null);
+  const [reminderRevision, setReminderRevision] = useState(0);
   const [editorReady, setEditorReady] = useState(false);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [actionsAnchor, setActionsAnchor] = useState<MenuRect | null>(null);
@@ -90,6 +95,34 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     setActionsViewport(null);
     setActionsMenuHeight(0);
   }
+
+  const performPrivateMutation = useCallback(async function performPrivateMutation<T>(
+    operation: (session: AuthenticatedPrivateSession) => Promise<T>,
+  ): Promise<T | null> {
+    const lifecycleState = lifecycle.current;
+    const auth = authenticatedSession.current;
+    if (!lifecycleState.mounted || lifecycleState.busy || phase !== 'unlocked' ||
+      !auth || AppState.currentState !== 'active') return null;
+    const generation = sessionGuard.current.begin();
+    if (generation === null) return null;
+    lifecycleState.busy = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await operation(auth);
+      if (!sessionGuard.current.valid(generation) || !lifecycle.current.mounted || AppState.currentState !== 'active') return null;
+      return result;
+    } catch (cause) {
+      if (sessionGuard.current.valid(generation) && lifecycle.current.mounted && AppState.currentState === 'active') {
+        setError(cause instanceof Error ? cause.message : 'The private note action could not be completed.');
+      }
+      return null;
+    } finally {
+      lifecycleState.busy = false;
+      sessionGuard.current.finish(generation);
+      if (lifecycle.current.mounted) setBusy(false);
+    }
+  }, [phase]);
 
   function lock() {
     sessionGuard.current.invalidate();
@@ -164,6 +197,40 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     });
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => addReminderReceivedListener(() => setReminderRevision(revision => revision + 1)), []);
+
+  useEffect(() => {
+    if (phase !== 'unlocked' || busy || lifecycle.current.busy || !authenticatedSession.current || AppState.currentState !== 'active') return;
+    let active = true;
+    void (async () => {
+      const noteWithoutKey = privateNotes.find(note => Boolean(note.reminderAt) && !note.reminderScheduleKey);
+      if (noteWithoutKey) {
+        const updated = await performPrivateMutation(session => updateDevicePrivateNote(noteWithoutKey.id, session, {
+          reminderScheduleKey: createOpaqueReminderKey(),
+        }));
+        if (updated && lifecycle.current.mounted && authenticatedSession.current && AppState.currentState === 'active') {
+          setPrivateNotes(notes => notes.map(note => note.id === updated.id ? updated : note));
+        }
+        return;
+      }
+      const result = await localReminderScheduler.reconcilePrivateNotes(privateNotes);
+      if (!active) return;
+      const update = result.stateUpdates[0];
+      if (!update) return;
+      const updated = await performPrivateMutation(session => updateDevicePrivateNote(update.id, session, {
+        reminderAt: update.reminderAt, reminderNotified: update.reminderNotified,
+      }));
+      if (updated && lifecycle.current.mounted && authenticatedSession.current && AppState.currentState === 'active') {
+        setPrivateNotes(notes => notes.map(note => note.id === updated.id ? updated : note));
+      }
+    })().catch(() => {
+      if (active && lifecycle.current.mounted && AppState.currentState === 'active') {
+        setError('A private reminder could not be synchronized on this device.');
+      }
+    });
+    return () => { active = false; };
+  }, [phase, privateNotes, busy, reminderRevision, performPrivateMutation]);
 
   async function submit() {
     const session = lifecycle.current;
@@ -277,38 +344,22 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     ]);
   }
 
-  async function performPrivateMutation<T>(operation: (session: AuthenticatedPrivateSession) => Promise<T>): Promise<T | null> {
-    const lifecycleState = lifecycle.current;
-    const auth = authenticatedSession.current;
-    if (!lifecycleState.mounted || lifecycleState.busy || phase !== 'unlocked' ||
-      !auth || AppState.currentState !== 'active') return null;
-    const generation = sessionGuard.current.begin();
-    if (generation === null) return null;
-    lifecycleState.busy = true;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await operation(auth);
-      if (!sessionGuard.current.valid(generation) || !lifecycle.current.mounted || AppState.currentState !== 'active') return null;
-      return result;
-    } catch (cause) {
-      if (sessionGuard.current.valid(generation) && lifecycle.current.mounted && AppState.currentState === 'active') {
-        setError(cause instanceof Error ? cause.message : 'The private note action could not be completed.');
-      }
-      return null;
-    } finally {
-      lifecycleState.busy = false;
-      sessionGuard.current.finish(generation);
-      if (lifecycle.current.mounted) setBusy(false);
-    }
-  }
-
   function beginEdit(note: PrivateNotePreview) {
     closeActionsMenu();
     setSelectedNoteId(note.id);
-    setEditingNote({ id: note.id, title: note.title, text: note.text, html: note.html });
+    setEditingNote({ id: note.id, title: note.title, text: note.text, html: note.html,
+      reminderAt: note.reminderAt, reminderNotified: note.reminderNotified,
+      reminderRepeat: note.reminderRepeat, reminderScheduleKey: note.reminderScheduleKey,
+    });
     setEditorReady(false);
     setError(null);
+  }
+
+  function changeEditReminder(value: { reminderAt: string | null; reminderRepeat: NonNullable<PrivateNotePreview['reminderRepeat']> | null; reminderNotified: boolean }) {
+    setEditingNote(current => current ? {
+      ...current, ...value,
+      reminderScheduleKey: value.reminderAt ? current.reminderScheduleKey ?? createOpaqueReminderKey() : null,
+    } : current);
   }
 
   async function saveEdit() {
@@ -330,20 +381,46 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
       // validation so a quick Save cannot persist stale React state.
       const content = await editor.getContent();
       if (!sessionGuard.current.valid(generation) || !lifecycle.current.mounted || AppState.currentState !== 'active') return;
-      const snapshot = { id: edit.id, title: edit.title, text: content.text, html: content.html };
+      const snapshot: EditDraft = { ...edit, id: edit.id, title: edit.title, text: content.text, html: content.html,
+        reminderAt: edit.reminderAt ?? null, reminderNotified: Boolean(edit.reminderNotified),
+        reminderRepeat: edit.reminderRepeat ?? null, reminderScheduleKey: edit.reminderScheduleKey ?? null,
+      };
       setEditingNote(snapshot);
       const validation = validateDraft({
         title: snapshot.title, text: snapshot.text, html: snapshot.html,
         category: current.category as 'general' | 'work' | 'personal' | 'ideas' | 'important',
+        reminderAt: snapshot.reminderAt, reminderNotified: snapshot.reminderNotified, reminderRepeat: snapshot.reminderRepeat,
       });
       if (validation) { setError(validation); return; }
+      const hasReminderFields = current.reminderAt !== undefined || current.reminderNotified !== undefined ||
+        current.reminderRepeat !== undefined || current.reminderScheduleKey !== undefined ||
+        edit.reminderAt !== undefined || edit.reminderNotified !== undefined ||
+        edit.reminderRepeat !== undefined || edit.reminderScheduleKey !== undefined;
+      const reminderChanges = hasReminderFields ? {
+        reminderAt: snapshot.reminderAt, reminderNotified: snapshot.reminderNotified,
+        reminderRepeat: snapshot.reminderRepeat, reminderScheduleKey: snapshot.reminderScheduleKey,
+      } : {};
       const updated = await updateDevicePrivateNote(edit.id, auth, {
         title: snapshot.title, text: snapshot.text, html: snapshot.html,
+        ...reminderChanges,
       });
       if (!sessionGuard.current.valid(generation) || !lifecycle.current.mounted || AppState.currentState !== 'active') return;
+      const reminderChanged = (current.reminderAt ?? null) !== snapshot.reminderAt ||
+        JSON.stringify(current.reminderRepeat ?? null) !== JSON.stringify(snapshot.reminderRepeat ?? null);
+      let permissionGranted = true;
+      let permissionCheckFailed = false;
+      if (snapshot.reminderAt && reminderChanged) {
+        try { permissionGranted = await localReminderScheduler.requestPermission(); }
+        catch { permissionGranted = false; permissionCheckFailed = true; }
+      }
       setPrivateNotes(notes => notes.map(note => note.id === updated.id ? updated : note));
       setEditingNote(null);
       setEditorReady(false);
+      if (snapshot.reminderAt && reminderChanged && !permissionGranted) {
+        Alert.alert('Private reminder is off', permissionCheckFailed
+          ? 'Your encrypted note is saved, but notification permission could not be checked. Review device settings and reopen Private Notes to retry.'
+          : 'Your encrypted note is saved, but notifications are not allowed. Enable them in device settings to receive this private reminder.');
+      }
     } catch (cause) {
       if (sessionGuard.current.valid(generation) && lifecycle.current.mounted && AppState.currentState === 'active') {
         setError(cause instanceof Error ? cause.message : 'The private-note edit could not be saved.');
@@ -370,6 +447,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
 
   async function deletePrivateNote(id: string) {
     closeActionsMenu();
+    const deletedNote = privateNotes.find(note => note.id === id);
     const deleted = await performPrivateMutation(async session => {
       await deleteDevicePrivateNote(id, session);
       return true;
@@ -378,10 +456,13 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     setPrivateNotes(notes => notes.filter(note => note.id !== id));
     setSelectedNoteId(current => current === id ? null : current);
     setEditingNote(current => current?.id === id ? null : current);
+    try { await localReminderScheduler.cancelPrivateReminder(deletedNote?.reminderScheduleKey); }
+    catch { setError('The private note was deleted, but its scheduled reminder could not be cancelled yet.'); }
   }
 
   async function restoreSelected(id: string) {
     const auth = authenticatedSession.current;
+    const restoringNote = privateNotes.find(note => note.id === id);
     if (!auth || busy || lifecycle.current.busy || phase !== 'unlocked' || AppState.currentState !== 'active') return;
     const generation = sessionGuard.current.begin();
     if (generation === null) return;
@@ -395,6 +476,8 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
         setPrivateNotes(notes => notes.filter(note => note.id !== id));
         setSelectedNoteId(null);
         setEditingNote(null);
+        try { await localReminderScheduler.cancelPrivateReminder(restoringNote?.reminderScheduleKey); }
+        catch { setError('The note was restored, but its private reminder could not be cancelled yet.'); }
         if (onRestored) await onRestored();
       } else {
         setError('Restore needs recovery. Both copies may exist. Do not delete either copy.');
@@ -515,6 +598,8 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
                         editable={!busy} onReady={setEditorReady}
                         onChange={content => setEditingNote(current => current ? { ...current, ...content } : current)}
                         onSelection={() => undefined} />
+                      <ReminderControls reminderAt={editingNote.reminderAt} reminderRepeat={editingNote.reminderRepeat}
+                        disabled={busy} onChange={changeEditReminder} />
                       <View style={styles.editButtons}>
                         <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setEditingNote(null); setEditorReady(false); setError(null); }} style={styles.cancelEditButton}>
                           <Text style={styles.cancelEditText}>Cancel</Text>

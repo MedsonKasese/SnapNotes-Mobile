@@ -8,6 +8,8 @@ import { createPrivateSession } from '../src/privateSession.ts';
 import { createPrivateScreenCaptureProtection } from '../src/privateScreenCapture.ts';
 import { sanitizeNoteHtml } from '../src/noteFormatting.ts';
 import { NativeCryptoProviderUnavailableError } from '../src/nativeCryptoProvider.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_PRIVATE_SCREEN_SOURCE ?? new URL('../src/components/PrivateNotesScreen.tsx', import.meta.url), 'utf8');
@@ -85,6 +87,13 @@ async function screen({
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     useMemo(factory) { cursor++; return factory(); },
+    useCallback(callback, deps) {
+      const index = cursor++;
+      if (!slots[index] || deps.some((dep, i) => dep !== slots[index].deps[i]) || deps.length !== slots[index].deps.length) {
+        slots[index] = { callback, deps };
+      }
+      return slots[index].callback;
+    },
     useEffect(callback, deps) {
       const index = cursor++;
       if (!effects[index] || deps.some((dep, i) => dep !== effects[index].deps[i])) {
@@ -148,6 +157,9 @@ async function screen({
     '../noteFormatting': { sanitizeNoteHtml },
     '../noteActionsMenu': { getNoteActionsMenuLayout: () => ({ left: 0, top: 0, width: 216, maxHeight: 500 }) },
     './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
+    './ReminderControls': reminderControlsModule,
+    '../reminders/nativeNotifications': reminderNativeNotifications,
+    '../reminders/recurrence': reminderRecurrence,
   };
   const exports = {};
   vm.runInNewContext(outputText, {

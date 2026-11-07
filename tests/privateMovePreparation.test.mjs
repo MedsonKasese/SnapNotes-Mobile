@@ -16,6 +16,7 @@ test('private payload follows PWA field schema without mutating source', () => {
     'title', 'text', 'html', 'category', 'createdAt', 'updatedAt', 'pinned', 'tags', 'time', 'folderId',
     'reminderAt', 'reminderNotified', 'reminderRepeat', 'attachments', 'history',
   ]);
+  assert.equal('reminderScheduleKey' in payload, false);
   assert.equal(payload.title, note.title);
   assert.equal(payload.html, note.html);
   assert.equal(payload.createdAt, note.createdAt);
@@ -23,6 +24,19 @@ test('private payload follows PWA field schema without mutating source', () => {
   assert.equal(payload.folderId, note.folderId);
   assert.equal(payload.pinned, note.pinned);
   assert.deepEqual(note, before);
+});
+
+test('reminder state moves only into the private payload and receives an opaque cancellation key', () => {
+  const reminderAt = '2026-10-30T09:00:00.000Z';
+  const reminderRepeat = { frequency: 'monthly', interval: 2, timeZone: 'Africa/Blantyre', anchorAt: reminderAt };
+  const payload = buildMobilePrivatePayload({ ...note, reminderAt, reminderNotified: false, reminderRepeat });
+  assert.equal(payload.reminderAt, reminderAt);
+  assert.deepEqual(payload.reminderRepeat, reminderRepeat);
+  assert.equal(payload.reminderNotified, false);
+  assert.match(payload.reminderScheduleKey, /^private-reminder-[a-z0-9-]+$/);
+  assert.equal(payload.reminderScheduleKey.includes(note.id), false);
+  assert.equal(payload.reminderScheduleKey.includes(note.title), false);
+  assert.equal(payload.reminderScheduleKey.includes(note.text), false);
 });
 
 test('preflight blocks duplicate vault records and missing or duplicate source notes', () => {

@@ -23,3 +23,18 @@ test('draft IDs remain unique', () => {
   const id = newDraftId([], timestamp);
   assert.notEqual(newDraftId([{ ...first, id }], timestamp), id);
 });
+
+
+test('saved drafts preserve one-time and repeating reminder settings', () => {
+  const reminderAt = '2026-10-30T09:00:00.000Z';
+  const configured = { ...first, reminderAt, reminderNotified: false,
+    reminderRepeat: { frequency: 'monthly', interval: 2, timeZone: 'Africa/Blantyre', anchorAt: reminderAt } };
+  assert.deepEqual(parseDraftLibrary(JSON.stringify([configured])), [configured]);
+  assert.deepEqual(parseDraftLibrary(JSON.stringify([first])), [first]);
+});
+
+test('saved drafts reject invalid reminder dates and repeats without a date', () => {
+  assert.throws(() => parseDraftLibrary(JSON.stringify([{ ...first, reminderAt: 'not-a-date' }])), /reminder/);
+  assert.throws(() => parseDraftLibrary(JSON.stringify([{ ...first, reminderAt: null,
+    reminderRepeat: { frequency: 'daily', interval: 1, timeZone: 'UTC', anchorAt: first.savedAt } }])), /reminder/);
+});

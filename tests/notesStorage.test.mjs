@@ -452,3 +452,36 @@ test('rejects archived and trashed notes without changing previously committed b
   assert.deepEqual([...db.data.entries()], before);
   assert.deepEqual(await store.load(), [note('safe')]);
 });
+
+
+test('local reminder date, notified state, and repeat schedule round-trip while private schedule keys are omitted', async () => {
+  const db = backend();
+  const reminderAt = '2026-10-30T09:00:00.000Z';
+  const repeating = {
+    ...note('repeat-note'),
+    reminderAt,
+    reminderNotified: false,
+    reminderRepeat: { frequency: 'monthly', interval: 1, timeZone: 'Africa/Blantyre', anchorAt: reminderAt },
+    reminderScheduleKey: 'private-reminder-must-not-be-plain',
+  };
+  const store = createNotesStorage(db);
+  await store.save([repeating]);
+  const [loaded] = await store.load();
+  assert.equal(loaded.reminderAt, reminderAt);
+  assert.equal(loaded.reminderNotified, false);
+  assert.deepEqual(loaded.reminderRepeat, repeating.reminderRepeat);
+  assert.equal('reminderScheduleKey' in loaded, false);
+  assert.equal([...db.data.values()].some(value => value.includes('private-reminder-must-not-be-plain')), false);
+});
+
+test('invalid reminder timestamps and repeat schemas never commit to local note storage', async () => {
+  for (const invalid of [
+    { reminderAt: '2026-02-30T09:00:00.000Z' },
+    { reminderAt: '2026-10-30T09:00:00.000Z', reminderRepeat: { frequency: 'daily', interval: 0, timeZone: 'UTC', anchorAt: '2026-10-30T09:00:00.000Z' } },
+    { reminderAt: '2026-10-30T09:00:00.000Z', reminderRepeat: { frequency: 'daily', interval: 1, timeZone: 'Not/AZone', anchorAt: '2026-10-30T09:00:00.000Z' } },
+  ]) {
+    const db = backend();
+    await assert.rejects(createNotesStorage(db).save([{ ...note('invalid-reminder'), ...invalid }]), /reminder/);
+    assert.equal(db.data.size, 0);
+  }
+});
