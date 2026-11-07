@@ -210,10 +210,19 @@ test('new-note editor shows device-storage information only when its accessible 
   const collapsed = app.render();
   const titleRow = find(collapsed, element => element.props.testID === 'editor-title-with-storage-info');
   assert.match(text(titleRow), /New note/);
+  assert.equal(titleRow.props.style.flexDirection, 'row');
+  assert.equal(titleRow.props.style.alignItems, 'center');
+  const titleText = find(titleRow, element => element.type === 'Text' && text(element) === 'New note');
+  assert.equal(titleText.props.style.marginTop, 2);
   const infoButton = find(titleRow, element => element.props.testID === 'editor-storage-info-button');
   assert.equal(infoButton.props.accessibilityRole, 'button');
   assert.equal(infoButton.props.accessibilityLabel, 'Show note storage information');
   assert.equal(infoButton.props.accessibilityState.expanded, false);
+  const infoButtonStyle = infoButton.props.style({ pressed: false })[0];
+  assert.equal(infoButtonStyle.width, 44);
+  assert.equal(infoButtonStyle.height, 44);
+  assert.equal(infoButtonStyle.top, 1);
+  assert.equal(find(infoButton, element => element.type === 'FontAwesome').props.size, 17);
   assert.equal(text(collapsed).includes('Stored on this device.'), false);
   assert.equal(elements(collapsed).some(element => element.props.testID === 'editor-storage-info-tooltip'), false);
 

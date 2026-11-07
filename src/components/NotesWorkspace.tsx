@@ -1642,7 +1642,7 @@ const styles = StyleSheet.create({
   viewHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   editorHeadingGroup: { gap: 8 },
   editorTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  editorStorageInfoButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
+  editorStorageInfoButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, top: 1 },
   storageInfoTooltip: { padding: 12, borderRadius: 12, backgroundColor: '#fffaf0', borderWidth: 1, borderColor: '#f1e1ad' },
   storageInfoTooltipTitle: { color: '#79520a', fontSize: 13, fontWeight: '800' },
   storageInfoTooltipText: { color: '#685d3c', fontSize: 12, lineHeight: 18 },
