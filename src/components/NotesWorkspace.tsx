@@ -1748,7 +1748,7 @@ const styles = StyleSheet.create({
   drawerActionsFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e8eee3' },
   drawerAccountAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   drawerAccountInitials: { color: '#ffffff', fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
-  drawerNewNoteButton: { flexShrink: 0, minHeight: 48, justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 24, borderWidth: 1, borderColor: '#dbe9d3', backgroundColor: '#eff7e9' },
+  drawerNewNoteButton: { flexShrink: 0, minHeight: 48, justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#dbe9d3', backgroundColor: '#eff7e9' },
   drawerNewNoteTitle: { color: '#315b21', fontSize: 13, fontWeight: '800' },
   drawerNewNoteDescription: { color: '#73816d', fontSize: 11, marginTop: 2 },
   floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },

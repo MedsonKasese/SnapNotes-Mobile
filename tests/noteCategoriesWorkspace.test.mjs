@@ -881,11 +881,11 @@ test('compact account and content-sized New Note controls stay fixed opposite ea
   assert.equal(accountStyle.width, 44);
   assert.equal(accountStyle.height, 44);
   const newNoteStyle = Object.assign({}, ...newNoteButton.props.style({ pressed: false }).filter(Boolean));
-  assert.equal(newNoteStyle.flex, undefined, 'the pill should size to its text instead of filling the row');
+  assert.equal(newNoteStyle.flex, undefined, 'the button should size to its text instead of filling the row');
   assert.equal(newNoteStyle.flexShrink, 0);
   assert.equal(newNoteStyle.minHeight, 48);
   assert.equal(newNoteStyle.paddingHorizontal, 12);
-  assert.equal(newNoteStyle.borderRadius, 24);
+  assert.equal(newNoteStyle.borderRadius, 8);
   accountButton.props.onPress();
   assert.equal(accountOpens, 1);
 
