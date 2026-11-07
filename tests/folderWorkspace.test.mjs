@@ -23,7 +23,7 @@ const source = readFileSync(process.env.SNAPNOTES_FOLDER_WORKSPACE_SOURCE ?? new
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
-const NOW = '2026-10-23T09:00:00.000Z';
+const NOW = new Date(Date.now() - 60_000).toISOString();
 const folder = { id: 'folder-1', name: 'Research', icon: 'folder', color: '', createdAt: NOW, updatedAt: NOW };
 const note = { id: 'note-1', title: 'Research note', text: 'Important', html: '<p><strong>Important</strong></p>', category: 'work', createdAt: NOW, updatedAt: NOW, pinned: true, archived: false, deletedAt: null, folderId: folder.id };
 function deferred() {
