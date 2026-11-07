@@ -19,7 +19,6 @@ async function prepareNotifications() {
     await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
       name: 'Reminders',
       importance: AndroidImportance.DEFAULT,
-      sound: 'default',
       vibrationPattern: [0, 250, 250, 250],
     });
   }
@@ -53,7 +52,7 @@ export const localReminderScheduler = createReminderScheduler({
         title: request.content.title,
         body: request.content.body,
         data: request.content.data,
-        sound: 'default',
+        sound: true,
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,

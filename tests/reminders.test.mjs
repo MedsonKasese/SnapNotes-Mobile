@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { createPrivateReminderContent, PRIVATE_REMINDER_BODY, PRIVATE_REMINDER_TITLE } from '../src/reminders/content.ts';
 import { getNextReminderOccurrence, getReminderCompletionState, normalizeReminderRepeat } from '../src/reminders/recurrence.ts';
 import { createReminderScheduler } from '../src/reminders/scheduler.ts';
@@ -243,4 +244,15 @@ test('private repeat reminders retain generic redaction across the rolling occur
     assert.deepEqual(Object.keys(request.content.data).sort(), ['kind', 'occurrenceAt', 'scheduleKey']);
     assert.equal(JSON.stringify(request).includes('private-note-id-never-sent'), false);
   }
+});
+
+test('native reminders use system default sound without treating default as a custom asset', () => {
+  const source = readFileSync(new URL('../src/reminders/nativeNotifications.ts', import.meta.url), 'utf8');
+  const channelStart = source.indexOf('setNotificationChannelAsync(');
+  const channelEnd = source.indexOf('\n    });', channelStart);
+  assert.notEqual(channelStart, -1);
+  assert.notEqual(channelEnd, -1);
+  assert.doesNotMatch(source.slice(channelStart, channelEnd), /\bsound\s*:/);
+  assert.match(source, /\bsound\s*:\s*true\b/);
+  assert.doesNotMatch(source, /\bsound\s*:\s*['"]default['"]/);
 });
