@@ -3,6 +3,7 @@ import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
+import { isValidReminderAt, normalizeReminderRepeat } from './reminders/recurrence.ts';
 
 export type PrivateRestoreDependencies = {
   loadNotes(): Promise<Note[]>;
@@ -42,6 +43,9 @@ function matchesRestoredNote(actual: Note | undefined, expected: Note): boolean 
     actual.pinned === expected.pinned &&
     actual.archived === expected.archived &&
     actual.deletedAt === expected.deletedAt &&
+    (actual.reminderAt ?? null) === (expected.reminderAt ?? null) &&
+    Boolean(actual.reminderNotified) === Boolean(expected.reminderNotified) &&
+    JSON.stringify(actual.reminderRepeat ?? null) === JSON.stringify(expected.reminderRepeat ?? null) &&
     (actual.folderId ?? null) === (expected.folderId ?? null);
 }
 
@@ -66,13 +70,27 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
       noteHtmlToText(data.html).trim() !== data.text.replace(/\r/g, '').trim()) {
       throw Error('Unsupported private note payload.');
     }
+    if ((data.reminderAt !== undefined && !isValidReminderAt(data.reminderAt)) ||
+      (data.reminderNotified !== undefined && typeof data.reminderNotified !== 'boolean')) {
+      throw Error('Unsupported private reminder data.');
+    }
+    let reminderRepeat: Note['reminderRepeat'] = undefined;
+    if (data.reminderRepeat === null) reminderRepeat = null;
+    else if (data.reminderRepeat !== undefined) {
+      reminderRepeat = data.reminderAt == null ? null : normalizeReminderRepeat(data.reminderRepeat, data.reminderAt);
+      if (reminderRepeat === null) throw Error('Unsupported private reminder data.');
+    }
     const now = deps.now?.() ?? new Date().toISOString();
     const note: Note = { id, title: data.title, text: data.text, html: data.html,
       category: data.category as Note['category'],
       createdAt: typeof data.createdAt === 'string' ? data.createdAt : now,
       updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : now,
       pinned: typeof data.pinned === 'boolean' ? data.pinned : false, archived: false, deletedAt: null,
-      folderId: typeof data.folderId === 'string' ? data.folderId : null };
+      folderId: typeof data.folderId === 'string' ? data.folderId : null,
+      ...(data.reminderAt === undefined ? {} : { reminderAt: data.reminderAt as string | null }),
+      ...(data.reminderNotified === undefined ? {} : { reminderNotified: data.reminderNotified as boolean }),
+      ...(data.reminderRepeat === undefined ? {} : { reminderRepeat }),
+    };
     try {
       await deps.saveNotes([...ordinary, note]);
       const confirmed = await deps.loadNotes();

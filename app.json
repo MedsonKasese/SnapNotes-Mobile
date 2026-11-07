@@ -27,6 +27,12 @@
       "react-native-quick-crypto",
       "expo-font",
       [
+        "expo-notifications",
+        {
+          "enableRemoteNotifications": false
+        }
+      ],
+      [
         "expo-secure-store",
         {
           "faceIDPermission": "Allow SnapNotes to use Face ID to unlock Private Notes."

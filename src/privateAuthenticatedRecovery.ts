@@ -4,6 +4,15 @@ import { buildMobilePrivatePayload } from './privateMovePreparation.ts';
 import { inspectPrivateMoveRecovery } from './privateMoveRecovery.ts';
 import { decryptPrivatePayload } from './privateCrypto.ts';
 
+function withoutReminderScheduleKey(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (key !== 'reminderScheduleKey') result[key] = field;
+  }
+  return result;
+}
+
 // Recovery never deletes either copy. Authentication and payload equality are
 // required before the UI can offer to finish an interrupted migration.
 export async function inspectAuthenticatedPrivateRecovery(
@@ -22,7 +31,7 @@ export async function inspectAuthenticatedPrivateRecovery(
     try {
       const actual = await decrypt(encrypted.privateData, key);
       const expected = buildMobilePrivatePayload(note);
-      results.push({ id: finding.id, status: JSON.stringify(actual) === JSON.stringify(expected)
+      results.push({ id: finding.id, status: JSON.stringify(withoutReminderScheduleKey(actual)) === JSON.stringify(withoutReminderScheduleKey(expected))
         ? 'verified-duplicate' : 'conflict' });
     } catch {
       results.push({ id: finding.id, status: 'unreadable' });

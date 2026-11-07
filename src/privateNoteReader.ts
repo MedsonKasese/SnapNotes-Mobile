@@ -1,8 +1,23 @@
 import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
+import { isValidReminderAt, normalizeReminderRepeat, type ReminderRepeat } from './reminders/recurrence.ts';
 
-export type PrivateNotePreview = { id: string; title: string; text: string; html: string; category: string; pinned: boolean; time?: string; createdAt?: string; updatedAt?: string };
+export type PrivateNotePreview = {
+  id: string;
+  title: string;
+  text: string;
+  html: string;
+  category: string;
+  pinned: boolean;
+  time?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  reminderAt?: string | null;
+  reminderNotified?: boolean;
+  reminderRepeat?: ReminderRepeat | null;
+  reminderScheduleKey?: string | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -31,12 +46,35 @@ export async function readPrivateNotes(
       typeof payload.category !== 'string') {
       throw new Error('Encrypted private note has an unsupported payload. No changes were made.');
     }
+    const reminderAt = payload.reminderAt;
+    if (reminderAt !== undefined && !isValidReminderAt(reminderAt)) {
+      throw new Error('Encrypted private note has invalid reminder data. No changes were made.');
+    }
+    if (payload.reminderNotified !== undefined && typeof payload.reminderNotified !== 'boolean') {
+      throw new Error('Encrypted private note has invalid reminder data. No changes were made.');
+    }
+    let reminderRepeat: ReminderRepeat | null | undefined = undefined;
+    if (payload.reminderRepeat === null) reminderRepeat = null;
+    else if (payload.reminderRepeat !== undefined) {
+      reminderRepeat = reminderAt == null ? null : normalizeReminderRepeat(payload.reminderRepeat, reminderAt);
+      if (reminderRepeat === null) throw new Error('Encrypted private note has invalid reminder data. No changes were made.');
+    }
+    const reminderScheduleKey = payload.reminderScheduleKey;
+    if (reminderScheduleKey !== undefined && reminderScheduleKey !== null &&
+      (typeof reminderScheduleKey !== 'string' || !/^private-reminder-[a-z0-9-]+$/.test(reminderScheduleKey))) {
+      throw new Error('Encrypted private note has invalid reminder data. No changes were made.');
+    }
     results.push({ id: entry.id, title: payload.title, text: payload.text,
       html: payload.html, category: payload.category,
       pinned: typeof payload.pinned === 'boolean' ? payload.pinned : false,
       ...(typeof payload.time === 'string' ? { time: payload.time } : {}),
       ...(typeof payload.createdAt === 'string' ? { createdAt: payload.createdAt } : {}),
-      ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}) });
+      ...(typeof payload.updatedAt === 'string' ? { updatedAt: payload.updatedAt } : {}),
+      ...(reminderAt === undefined ? {} : { reminderAt: reminderAt as string | null }),
+      ...(payload.reminderNotified === undefined ? {} : { reminderNotified: payload.reminderNotified as boolean }),
+      ...(payload.reminderRepeat === undefined ? {} : { reminderRepeat }),
+      ...(payload.reminderScheduleKey === undefined ? {} : { reminderScheduleKey: reminderScheduleKey as string | null }),
+    });
   }
   return results;
 }

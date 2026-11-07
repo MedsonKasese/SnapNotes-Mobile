@@ -112,3 +112,30 @@ test('folder merge reuses existing IDs or names and maps imported IDs for note r
   assert.equal(merged.idMap.get('new-folder'), 'new-folder');
   assert.equal(merged.folders[1].name, 'Work');
 });
+
+
+test('ordinary reminder metadata round-trips through JSON while private scheduling keys stay excluded', () => {
+  const reminderAt = '2026-10-30T09:00:00.000Z';
+  const reminderRepeat = { frequency: 'weekly', interval: 2, timeZone: 'Africa/Blantyre', anchorAt: reminderAt };
+  const ordinary = { ...note, reminderAt, reminderNotified: false, reminderRepeat, reminderScheduleKey: 'must-not-be-exported' };
+  const privateNote = { ...ordinary, id: 'private-note', isPrivate: true, privateData: { ciphertext: 'private-ciphertext' } };
+  const payload = createPwaExportPayload([ordinary, privateNote], [], EXPORTED);
+  assert.equal(payload.notes.length, 1);
+  assert.equal(payload.notes[0].reminderAt, reminderAt);
+  assert.equal(payload.notes[0].reminderNotified, false);
+  assert.deepEqual(payload.notes[0].reminderRepeat, reminderRepeat);
+  assert.equal('reminderScheduleKey' in payload.notes[0], false);
+  assert.equal(JSON.stringify(payload).includes('must-not-be-exported'), false);
+  assert.equal(JSON.stringify(payload).includes('private-ciphertext'), false);
+
+  const imported = parsePwaImport(JSON.stringify(payload), EXPORTED);
+  assert.equal(imported.notes[0].reminderAt, reminderAt);
+  assert.equal(imported.notes[0].reminderNotified, false);
+  assert.deepEqual(imported.notes[0].reminderRepeat, reminderRepeat);
+});
+
+test('malformed repeating reminder metadata is rejected during PWA import', () => {
+  const bad = { ...note, reminderAt: '2026-10-30T09:00:00.000Z',
+    reminderRepeat: { frequency: 'daily', interval: 0, timeZone: 'UTC', anchorAt: '2026-10-30T09:00:00.000Z' } };
+  assert.throws(() => parsePwaImport(JSON.stringify([bad]), EXPORTED), /repeat schedule/);
+});

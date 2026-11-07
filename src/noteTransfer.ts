@@ -1,6 +1,7 @@
 import { MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, validateDraft, type Note, type NoteCategory } from './notes.ts';
 import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
 import { MAX_FOLDERS, MAX_FOLDER_NAME, makeFolderId, normalizeFolderColor, normalizeFolderIcon, type Folder } from './folders.ts';
+import { normalizeReminderRepeat, type ReminderRepeat } from './reminders/recurrence.ts';
 
 export type TransferFormat = 'json' | 'markdown' | 'txt';
 export type ImportedNote = Omit<Note, 'id'>;
@@ -65,6 +66,9 @@ export function createPwaExportPayload(notes: readonly Note[], folders: readonly
     archived: note.archived,
     deletedAt: note.deletedAt,
     ...(note.folderId === undefined ? {} : { folderId: note.folderId }),
+    ...(note.reminderAt === undefined ? {} : { reminderAt: note.reminderAt }),
+    ...(note.reminderNotified === undefined ? {} : { reminderNotified: note.reminderNotified }),
+    ...(note.reminderRepeat === undefined ? {} : { reminderRepeat: note.reminderRepeat }),
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
   }));
@@ -143,6 +147,13 @@ export function parsePwaImport(json: string, now: string): ParsedPwaImport {
     }
 
     const deletedAt = validTimestamp(raw.deletedAt) ? raw.deletedAt : null;
+    const reminderAt = raw.reminderAt === undefined ? undefined : validTimestamp(raw.reminderAt) ? raw.reminderAt : null;
+    let reminderRepeat: ReminderRepeat | null | undefined = raw.reminderRepeat === undefined ? undefined : null;
+    if (raw.reminderRepeat !== undefined && raw.reminderRepeat !== null) {
+      if (!reminderAt) throw new Error('A note in this file has a repeat schedule without a valid reminder time.');
+      reminderRepeat = normalizeReminderRepeat(raw.reminderRepeat, reminderAt);
+      if (!reminderRepeat) throw new Error('A note in this file has an invalid reminder repeat schedule.');
+    }
     const rawCategory = raw.category;
     const category: NoteCategory = typeof rawCategory === 'string' && (NOTE_CATEGORIES as readonly string[]).includes(rawCategory)
       ? rawCategory as NoteCategory
@@ -156,6 +167,9 @@ export function parsePwaImport(json: string, now: string): ParsedPwaImport {
       archived: deletedAt === null && Boolean(raw.archived),
       deletedAt,
       ...(typeof raw.folderId === 'string' && raw.folderId.trim() ? { folderId: raw.folderId } : {}),
+      ...(reminderAt === undefined ? {} : { reminderAt }),
+      ...(typeof raw.reminderNotified === 'boolean' ? { reminderNotified: raw.reminderNotified } : {}),
+      ...(raw.reminderRepeat === undefined ? {} : { reminderRepeat }),
     });
   }
 

@@ -2,6 +2,7 @@ import type { Note } from './notes.ts';
 import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 import { buildMobilePrivatePayload, assertPrivateMoveSafe } from './privateMovePreparation.ts';
 import { decryptPrivatePayload, encryptPrivatePayload } from './privateCrypto.ts';
+import type { ReminderRepeat } from './reminders/recurrence.ts';
 
 // Transaction core only: the UI/controller must supply exclusive coordination
 // with ordinary-note writes, a live unlocked key, and durable storage adapters.
@@ -23,7 +24,7 @@ type MoveDependencies = {
 };
 
 export type PrivateMoveResult =
-  | { status: 'moved' }
+  | { status: 'moved'; privateReminder?: { reminderAt: string; reminderRepeat: ReminderRepeat | null; scheduleKey: string } }
   | { status: 'needs-recovery'; reason: string };
 
 function sameJson(a: unknown, b: unknown): boolean {
@@ -44,7 +45,7 @@ export async function moveNoteToPrivateTransaction(
     // Abort rather than discard metadata added by future note-model changes.
     const supported = new Set([
       'id', 'title', 'text', 'html', 'category', 'createdAt', 'updatedAt',
-      'pinned', 'archived', 'deletedAt', 'folderId',
+      'pinned', 'archived', 'deletedAt', 'folderId', 'reminderAt', 'reminderNotified', 'reminderRepeat',
     ]);
     if (Object.keys(source).some(field => !supported.has(field))) {
       throw new Error('This note contains data that cannot yet be moved safely to Private.');
@@ -83,6 +84,8 @@ export async function moveNoteToPrivateTransaction(
     } catch {
       return { status: 'needs-recovery', reason: 'Source removal failed; original note retained or recovery required.' };
     }
-    return { status: 'moved' };
+    return { status: 'moved', ...(payload.reminderAt && typeof payload.reminderScheduleKey === 'string'
+      ? { privateReminder: { reminderAt: payload.reminderAt, reminderRepeat: payload.reminderRepeat, scheduleKey: payload.reminderScheduleKey } }
+      : {}) };
   });
 }

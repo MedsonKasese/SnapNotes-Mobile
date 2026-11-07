@@ -4,13 +4,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import {
-  Alert, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
+  Alert, AppState, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
-  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type NoteCategory,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type Note, type NoteCategory,
 } from '../notes';
 import { createNotesController } from '../notesController';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
@@ -32,10 +32,22 @@ import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { moveDeviceNoteToPrivate } from '../privateMoveService';
 import { NoteAttachmentSummary, NoteAttachments } from './NoteAttachments';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
+import { ReminderControls } from './ReminderControls';
+import { addReminderReceivedListener, localReminderScheduler } from '../reminders/nativeNotifications';
+import { isValidReminderAt, normalizeReminderRepeat } from '../reminders/recurrence';
+import { reminderTargetKey, resolveRegularReminderDestination, type PrivateReminderNavigationTarget, type ReminderNotificationTarget } from '../reminders/notificationResponse';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
 type NoteAction = 'move-private' | 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
+
+function trackReminderOperation<T>(active: { current: Set<Promise<unknown>> }, operation: () => Promise<T>): Promise<T> {
+  const result = operation();
+  active.current.add(result);
+  void result.then(() => active.current.delete(result), () => active.current.delete(result));
+  return result;
+}
+
 type FolderAction = 'rename' | 'customize' | 'delete';
 const FOLDER_ACTIONS: { action: FolderAction; label: string; icon: FontAwesomeName }[] = [
   { action: 'rename', label: 'Rename folder', icon: 'pencil' },
@@ -119,15 +131,26 @@ const coordinatedDeviceNotesStorage = createPrivateOrdinarySaveGuard(
   privateSharedCoordinator, deviceNotesStorage, privateVaultStorage,
 );
 
-export function NotesWorkspace({ onOpenAccount, accountInitials }: {
+export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTarget, onReminderTargetHandled }: {
   onOpenAccount?: () => void;
   accountInitials?: string | null;
+  notificationTarget?: ReminderNotificationTarget | null;
+  onReminderTargetHandled?: () => void;
 } = {}) {
   const [controller] = useState(() => createNotesController(coordinatedDeviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
+  const [privateReminderTarget, setPrivateReminderTarget] = useState<PrivateReminderNavigationTarget | null>(null);
+  const handledNotificationTarget = useRef<string | null>(null);
+  const reminderTargetActions = useRef<{
+    openRegularNote: (noteId: string) => void;
+    openPrivateNote: (target: PrivateReminderNavigationTarget) => void;
+    unavailable: () => void;
+  } | null>(null);
+  const onReminderTargetHandledRef = useRef(onReminderTargetHandled);
+  const handlePrivateReminderTargetHandled = useCallback(() => setPrivateReminderTarget(null), []);
   const [storageInfoOpen, setStorageInfoOpen] = useState(false);
   const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -151,6 +174,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
+  const privateMoveGuard = useRef<{ noteId: string | null; moving: boolean }>({ noteId: null, moving: false });
+  const ordinaryReminderSyncs = useRef(new Set<Promise<unknown>>());
   const [privateMovePassword, setPrivateMovePassword] = useState('');
   const [privateMovePasswordVisible, setPrivateMovePasswordVisible] = useState(false);
   const [privateMoveBusy, setPrivateMoveBusy] = useState(false);
@@ -183,6 +208,36 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
   const draftWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const draftRecoveryRevision = useRef(0);
   const { state, status, storageError } = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const syncOrdinaryReminders = useCallback((notes: Note[]) => trackReminderOperation(ordinaryReminderSyncs, async () => {
+    try {
+      const vaultEntries = await privateVaultStorage.load();
+      const excludedIds = new Set(vaultEntries.map(entry => entry.id));
+      const moving = privateMoveGuard.current;
+      if (moving.moving && moving.noteId) excludedIds.add(moving.noteId);
+      const result = await localReminderScheduler.reconcileNotes(notes, [...excludedIds]);
+      if (result.stateUpdates.length) await controller.updateReminderState(result.stateUpdates);
+      return result;
+    } catch {
+      // If vault state cannot be verified, do not leave cleartext previews queued.
+      try { await localReminderScheduler.reconcileNotes([]); }
+      catch { /* Keep the error generic and fail closed. */ }
+      return null;
+    }
+  }), [controller]);
+  useEffect(() => {
+    if (status === 'ready') void syncOrdinaryReminders(state.notes);
+  }, [status, state.notes, syncOrdinaryReminders]);
+  useEffect(() => {
+    const reconcileCurrentNotes = () => {
+      const snapshot = controller.getSnapshot();
+      if (snapshot.status === 'ready') void syncOrdinaryReminders(snapshot.state.notes);
+    };
+    const appState = AppState.addEventListener('change', next => {
+      if (next === 'active') reconcileCurrentNotes();
+    });
+    const removeNotificationListener = addReminderReceivedListener(reconcileCurrentNotes);
+    return () => { appState.remove(); removeNotificationListener(); };
+  }, [controller, syncOrdinaryReminders]);
   const refreshPrivateNoteCount = useCallback(async () => {
     try {
       setPrivateNoteCount(countPrivateVaultNotes(await privateVaultStorage.load()));
@@ -216,7 +271,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     const current = controller.getSnapshot().state.draft;
     // Merely choosing a category/navigation destination must not delete an
     // unreadable or still-pending recovery record from an otherwise empty editor.
-    claimEditorDraft(draftHydrated || action.type === 'change' || action.type === 'rich-change' || action.type === 'edit' ||
+    claimEditorDraft(draftHydrated || action.type === 'change' || action.type === 'rich-change' || action.type === 'reminder' || action.type === 'edit' ||
       Boolean(current.title.trim() || current.text.trim()));
     if (action.type === 'reset' || action.type === 'edit' || action.type === 'restore-draft') {
       if (action.type !== 'restore-draft') trackOpenedDraft(null);
@@ -290,6 +345,16 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
         if (typeof record.html === 'string' && noteHtmlToText(record.html).trim() !== record.text.replace(/\r/g, '').trim()) {
           throw new Error('Rich draft text does not match its formatting');
         }
+        if ((record.reminderAt !== undefined && !isValidReminderAt(record.reminderAt)) ||
+          (record.reminderNotified !== undefined && typeof record.reminderNotified !== 'boolean')) {
+          throw new Error('Invalid reminder state in recovery draft');
+        }
+        let reminderRepeat: ReturnType<typeof normalizeReminderRepeat> | undefined;
+        if (record.reminderRepeat === null) reminderRepeat = null;
+        else if (record.reminderRepeat !== undefined) {
+          reminderRepeat = record.reminderAt == null ? null : normalizeReminderRepeat(record.reminderRepeat, record.reminderAt);
+          if (reminderRepeat === null) throw new Error('Invalid repeat schedule in recovery draft');
+        }
 
         if (record.title.trim() || record.text.trim()) {
           // A checklist save changes the saved collection, not the editor.
@@ -311,7 +376,11 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
           controller.dispatch({
             type: 'restore-draft',
             draft: { title: record.title, text: record.text, category: normalizeCategory(record.category),
-              ...(typeof record.html === 'string' ? { html: sanitizeNoteHtml(record.html) } : {}) },
+              ...(typeof record.html === 'string' ? { html: sanitizeNoteHtml(record.html) } : {}),
+              ...(record.reminderAt === undefined ? {} : { reminderAt: record.reminderAt as string | null }),
+              ...(record.reminderNotified === undefined ? {} : { reminderNotified: record.reminderNotified as boolean }),
+              ...(record.reminderRepeat === undefined ? {} : { reminderRepeat }),
+            },
             editingId: record.editingId,
           });
           setView('editor');
@@ -347,6 +416,9 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
           ...(state.draft.html !== undefined ? { html: state.draft.html } : {}),
           category: normalizeCategory(state.draft.category),
           editingId: state.editingId,
+          ...(state.draft.reminderAt === undefined ? {} : { reminderAt: state.draft.reminderAt }),
+          ...(state.draft.reminderNotified === undefined ? {} : { reminderNotified: state.draft.reminderNotified }),
+          ...(state.draft.reminderRepeat === undefined ? {} : { reminderRepeat: state.draft.reminderRepeat }),
           ...(openedDraftId === null ? {} : { openedDraftId }),
           savedAt: new Date().toISOString(),
         })
@@ -366,7 +438,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.html, state.draft.category, state.editingId, openedDraftId]);
+  }, [draftHydrated, status, dirty, state.draft.title, state.draft.text, state.draft.html, state.draft.category,
+    state.draft.reminderAt, state.draft.reminderNotified, state.draft.reminderRepeat, state.editingId, openedDraftId]);
 
   function changeDraft(field: 'title' | 'text', value: string) {
     if (saveInFlight.current) return;
@@ -632,6 +705,9 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
         id: openedDraftIdRef.current ?? newDraftId(draftLibraryRef.current, now),
         title, text: current.draft.text, html: current.draft.html,
         category: normalizeCategory(current.draft.category), editingId: current.editingId, savedAt: now,
+        ...(current.draft.reminderAt === undefined ? {} : { reminderAt: current.draft.reminderAt }),
+        ...(current.draft.reminderNotified === undefined ? {} : { reminderNotified: current.draft.reminderNotified }),
+        ...(current.draft.reminderRepeat === undefined ? {} : { reminderRepeat: current.draft.reminderRepeat }),
       };
       if (await writeDraftLibrary(upsertDraft(draftLibraryRef.current, draft)) && session === editorSession.current) {
         dispatch({ type: 'reset' });
@@ -658,7 +734,12 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
         return;
       }
       const editingId = draft.editingId && controller.getSnapshot().state.notes.some(note => note.id === draft.editingId && note.deletedAt === null) ? draft.editingId : null;
-      dispatch({ type: 'restore-draft', draft: { title: draft.title, text: draft.text, ...(draft.html === undefined ? {} : { html: draft.html }), category: normalizeCategory(draft.category) }, editingId });
+      dispatch({ type: 'restore-draft', draft: { title: draft.title, text: draft.text,
+        ...(draft.html === undefined ? {} : { html: draft.html }), category: normalizeCategory(draft.category),
+        ...(draft.reminderAt === undefined ? {} : { reminderAt: draft.reminderAt }),
+        ...(draft.reminderNotified === undefined ? {} : { reminderNotified: draft.reminderNotified }),
+        ...(draft.reminderRepeat === undefined ? {} : { reminderRepeat: draft.reminderRepeat }),
+      }, editingId });
       trackOpenedDraft(draft.id);
       setView('editor');
     });
@@ -871,6 +952,83 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     });
   }
 
+  function openPrivateReminder(target: PrivateReminderNavigationTarget) {
+    confirmDiscard(() => {
+      dispatch({ type: 'reset' });
+      Keyboard.dismiss();
+      closeDrawer();
+      setStorageInfoOpen(false);
+      setPrivateReminderTarget(target);
+      setView('private');
+    });
+    onReminderTargetHandledRef.current?.();
+  }
+
+  function openRegularReminder(noteId: string) {
+    if (privateMoveGuard.current.noteId === noteId) {
+      reminderTargetActions.current?.unavailable();
+      return;
+    }
+    const note = controller.getSnapshot().state.notes.find(item => item.id === noteId);
+    if (!note) {
+      reminderTargetActions.current?.unavailable();
+      return;
+    }
+    editNote(note.id);
+    onReminderTargetHandledRef.current?.();
+  }
+
+  function reminderUnavailable() {
+    Alert.alert('Reminder unavailable', 'SnapNotes could not safely open this note. No note content was shown.');
+    onReminderTargetHandledRef.current?.();
+  }
+
+  useEffect(() => {
+    onReminderTargetHandledRef.current = onReminderTargetHandled;
+  }, [onReminderTargetHandled]);
+
+  useEffect(() => {
+    reminderTargetActions.current = {
+      openRegularNote: openRegularReminder,
+      openPrivateNote: openPrivateReminder,
+      unavailable: reminderUnavailable,
+    };
+  });
+
+  useEffect(() => {
+    if (!notificationTarget) {
+      handledNotificationTarget.current = null;
+      return;
+    }
+    const targetKey = reminderTargetKey(notificationTarget);
+    if (handledNotificationTarget.current === targetKey) return;
+    if (notificationTarget.kind === 'note' && status !== 'ready') return;
+    handledNotificationTarget.current = targetKey;
+
+    if (notificationTarget.kind !== 'note') {
+      reminderTargetActions.current?.openPrivateNote(notificationTarget);
+      return;
+    }
+
+    const noteId = notificationTarget.noteId;
+    void resolveRegularReminderDestination(noteId, privateSharedCoordinator,
+      () => privateVaultStorage.load(), id => privateMoveGuard.current.noteId === id).then(destination => {
+      if (handledNotificationTarget.current !== targetKey) return;
+      if (destination === 'private') {
+        // A stale ordinary reminder must not open a duplicate that now belongs to the vault.
+        reminderTargetActions.current?.openPrivateNote({ kind: 'private-note', noteId });
+        return;
+      }
+      if (destination === 'moving') {
+        reminderTargetActions.current?.unavailable();
+        return;
+      }
+      reminderTargetActions.current?.openRegularNote(noteId);
+    }).catch(() => {
+      if (handledNotificationTarget.current === targetKey) reminderTargetActions.current?.unavailable();
+    });
+  }, [notificationTarget, status]);
+
   function measureActionsMenu(id: string | null) {
     if (id === null || actionsRequest.current.id !== id) return;
     const trigger = actionTriggers.current.get(id);
@@ -919,6 +1077,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     const now = new Date().toISOString();
     switch (action) {
       case 'move-private':
+        privateMoveGuard.current = { noteId: id, moving: false };
         setPrivateMovePassword('');
         setPrivateMovePasswordVisible(false);
         setPrivateMoveId(id);
@@ -933,26 +1092,75 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
     }
   }
 
+  function closePrivateMoveDialog() {
+    if (privateMoveBusy) return;
+    privateMoveGuard.current = { noteId: null, moving: false };
+    setPrivateMoveId(null);
+    setPrivateMovePassword('');
+    setPrivateMovePasswordVisible(false);
+  }
+
   async function confirmPrivateMove() {
     if (!privateMoveId || privateMoveBusy || controller.getSnapshot().status !== 'ready') return;
     const id = privateMoveId;
+    privateMoveGuard.current = { noteId: id, moving: true };
     setPrivateMoveBusy(true);
+    let reminderCancellationAttempted = false;
+    let transferOutcome: 'not-committed' | 'moved' | 'needs-recovery' = 'not-committed';
+    let transferRecoveryMessage = '';
     try {
+      // Remove any cleartext title/body notification before the encrypted move.
+      // If this cannot be confirmed, leave the ordinary note untouched.
+      const inFlightReminderSyncs = [...ordinaryReminderSyncs.current];
+      await Promise.all(inFlightReminderSyncs.map(sync => sync.catch(() => undefined)));
+      await privateSharedCoordinator.exclusive(async () => {
+        reminderCancellationAttempted = true;
+        await localReminderScheduler.cancelNoteReminder(id);
+      });
       const result = await moveDeviceNoteToPrivate(id, privateMovePassword);
+      transferOutcome = result.status;
+      if (result.status === 'needs-recovery') transferRecoveryMessage = result.reason;
       setPrivateMovePassword('');
       setPrivateMovePasswordVisible(false);
       setPrivateMoveId(null);
       await controller.refreshAfterPrivateTransfer();
       if (result.status === 'needs-recovery') {
-        Alert.alert('Private transfer needs attention', result.reason + ' Do not delete either copy.');
+        Alert.alert('Private transfer needs attention', result.reason + ' Do not delete either copy. Its reminder was paused to prevent showing note details.');
       } else {
-        Alert.alert('Moved to Private', 'Your note was encrypted and moved into Private Notes.');
+        let privateReminderMessage = '';
+        if (result.privateReminder) {
+          try {
+            const permissionGranted = await localReminderScheduler.requestPermission();
+            if (permissionGranted) {
+              await localReminderScheduler.schedulePrivateSummary(result.privateReminder);
+            } else {
+              privateReminderMessage = ' Notifications are not allowed; enable them in device settings to receive this private reminder.';
+            }
+          } catch {
+            privateReminderMessage = ' The reminder could not be scheduled on this device; open Private Notes after notifications are enabled to retry.';
+          }
+        }
+        Alert.alert('Moved to Private', 'Your note was encrypted and moved into Private Notes.' + privateReminderMessage);
       }
     } catch (cause) {
-      Alert.alert('Could not move note', cause instanceof Error ? cause.message : 'Your note was not moved.');
+      if (reminderCancellationAttempted && transferOutcome === 'not-committed') {
+        privateMoveGuard.current = { noteId: null, moving: false };
+        const snapshot = controller.getSnapshot();
+        if (snapshot.status === 'ready' && snapshot.state.notes.some(note => note.id === id)) {
+          void syncOrdinaryReminders(snapshot.state.notes);
+        }
+      }
+      if (transferOutcome === 'moved') {
+        Alert.alert('Moved to Private', 'The note was encrypted and moved, but the regular notes list could not refresh. Its private reminder may need to be retried after reopening Private Notes.');
+      } else if (transferOutcome === 'needs-recovery') {
+        Alert.alert('Private transfer needs attention', transferRecoveryMessage + ' Do not delete either copy. Its reminder was paused to prevent showing note details.');
+      } else {
+        Alert.alert('Could not move note', cause instanceof Error ? cause.message : 'Your note was not moved.');
+      }
     } finally {
       void refreshPrivateNoteCount();
       setPrivateMoveBusy(false);
+      if (transferOutcome !== 'needs-recovery') privateMoveGuard.current = { noteId: null, moving: false };
     }
   }
 
@@ -1033,20 +1241,39 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
       if (!content) throw new Error('The editor is not ready. Please try saving again.');
       if (session !== editorSession.current) return;
       const current = controller.getSnapshot().state.draft;
+      const beforeState = controller.getSnapshot().state;
+      const previousNotes = beforeState.notes;
+      const previousNote = beforeState.editingId === null ? undefined : previousNotes.find(note => note.id === beforeState.editingId);
       // A blank Save is validation, not consent to replace an unreadable recovery record.
       if (content.text.trim() || current.text.trim() || current.title.trim() || current.html !== undefined) {
         dispatch({ type: 'rich-change', ...content });
       }
-      const previousNotes = controller.getSnapshot().state.notes;
       await controller.save(new Date().toISOString());
       const saved = controller.getSnapshot();
       if (saved.state.notes !== previousNotes && saved.status === 'ready' && saved.storageError === null && saved.state.error === null) {
+        const savedNote = beforeState.editingId === null
+          ? saved.state.notes.find(note => !previousNotes.some(previous => previous.id === note.id))
+          : saved.state.notes.find(note => note.id === beforeState.editingId);
+        const beforeReminder = JSON.stringify({ at: previousNote?.reminderAt ?? null, repeat: previousNote?.reminderRepeat ?? null });
+        const afterReminder = JSON.stringify({ at: savedNote?.reminderAt ?? null, repeat: savedNote?.reminderRepeat ?? null });
         // Notes and drafts are separate storage keys. Commit the note first;
         // a cleanup failure must retain both copies, never lose the only one.
         trackOpenedDraft(null);
         editorSession.current += 1;
         if (draftId !== null && !await writeDraftLibrary(removeDraft(draftLibraryRef.current, draftId))) {
           setDraftLibraryError('Your note was saved, but its saved draft could not be removed. Both copies are safe. Delete the extra draft from Drafts when storage is available.');
+        }
+        if (savedNote?.reminderAt && beforeReminder !== afterReminder) {
+          let permissionGranted = false;
+          try { permissionGranted = await localReminderScheduler.requestPermission(); }
+          catch { /* The note itself has already been committed locally. */ }
+          if (!permissionGranted) {
+            Alert.alert('Reminders are off', 'Your note is saved on this device, but this reminder cannot appear until notifications are allowed in device settings.');
+          }
+          const syncResult = await syncOrdinaryReminders(saved.state.notes);
+          if (permissionGranted && syncResult === null) {
+            Alert.alert('Reminder unavailable', 'Your note is saved, but SnapNotes could not schedule this reminder on the device.');
+          }
         }
       }
     } catch (error) {
@@ -1131,7 +1358,10 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
       {draftLibraryError !== null && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>{draftLibraryError}</Text>}
 
       {view === 'private' ? (
-        <PrivateNotesScreen onBack={() => { void refreshPrivateNoteCount(); openLibrary(); }}
+        <PrivateNotesScreen
+          reminderTarget={privateReminderTarget}
+          onReminderTargetHandled={handlePrivateReminderTargetHandled}
+          onBack={() => { setPrivateReminderTarget(null); void refreshPrivateNoteCount(); openLibrary(); }}
           onRestored={async () => { await controller.refreshAfterPrivateTransfer(); await refreshPrivateNoteCount(); }} />
       ) : view === 'editor' ? (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -1208,6 +1438,12 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
                 onChange={changeRichDraft}
                 onReady={setEditorReady}
                 onSelection={setFormattingState}
+              />
+              <ReminderControls
+                reminderAt={state.draft.reminderAt}
+                reminderRepeat={state.draft.reminderRepeat}
+                disabled={saving}
+                onChange={value => dispatch({ type: 'reminder', ...value })}
               />
               {state.editingId !== null
                 ? <NoteAttachments key={`note-attachments:${state.editingId}`} noteId={state.editingId} />
@@ -1345,7 +1581,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
       )}
 
       <Modal testID="move-private-modal" visible={privateMoveId !== null} transparent animationType="fade"
-        onRequestClose={() => { if (!privateMoveBusy) { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); } }}>
+        onRequestClose={closePrivateMoveDialog}>
         <View style={{ flex: 1, backgroundColor: '#0009', justifyContent: 'center', padding: 24 }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, gap: 14 }}>
             <Text style={{ fontSize: 20, fontWeight: '800', color: '#20351d' }}>Move to Private</Text>
@@ -1368,7 +1604,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
               <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '700' }}>{privateMoveBusy ? 'Encrypting…' : 'Move to Private'}</Text>
             </Pressable>
             <Pressable accessibilityRole="button" disabled={privateMoveBusy}
-              onPress={() => { setPrivateMoveId(null); setPrivateMovePassword(''); setPrivateMovePasswordVisible(false); }}>
+              onPress={closePrivateMoveDialog}>
               <Text style={{ textAlign: 'center', color: '#a32b2b', padding: 8 }}>Cancel</Text>
             </Pressable>
           </View>

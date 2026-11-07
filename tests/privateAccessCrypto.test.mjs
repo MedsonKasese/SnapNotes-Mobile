@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { createPrivateSession } from '../src/privateSession.ts';
 import { privateSharedCoordinator } from '../src/privateSharedCoordinator.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
 
 const projectRoot = new URL('../', import.meta.url);
 
@@ -65,6 +66,7 @@ async function makeHarness(options = {}) {
   const noteReaderExports = execute(noteReaderSource, 'privateNoteReader.ts', specifier => {
     if (specifier === './privateCrypto.ts') return cryptoAdapter;
     if (specifier === './privateAccess.ts') return privateAccessExports;
+    if (specifier === './reminders/recurrence.ts') return reminderRecurrence;
     throw new Error(`Unexpected private-note reader dependency: ${specifier}`);
   });
   accessExports = execute(accessSource, 'privateAccess.ts', specifier => {
