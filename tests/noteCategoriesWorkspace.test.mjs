@@ -853,7 +853,7 @@ test('all existing library, archive, and trash menu actions retain their origina
   }
 });
 
-test('account and New Note controls stay fixed outside the scrolling drawer content', () => {
+test('compact account and content-sized New Note controls stay fixed opposite each other', () => {
   let accountOpens = 0;
   const app = workspace(savedNotes, null, { onOpenAccount: () => { accountOpens += 1; } });
   const tree = app.render();
@@ -874,9 +874,18 @@ test('account and New Note controls stay fixed outside the scrolling drawer cont
   assert.equal(text(newNoteButton), '+ New NoteCapture New Thought');
   assert.equal(newNoteButton.props.accessibilityLabel, 'New note, Capture New Thought');
 
+  const footerStyle = Object.assign({}, footer.props.style);
+  assert.equal(footerStyle.flexDirection, 'row');
+  assert.equal(footerStyle.justifyContent, 'space-between');
+  const accountStyle = Object.assign({}, ...accountButton.props.style({ pressed: false }).filter(Boolean));
+  assert.equal(accountStyle.width, 44);
+  assert.equal(accountStyle.height, 44);
   const newNoteStyle = Object.assign({}, ...newNoteButton.props.style({ pressed: false }).filter(Boolean));
-  assert.equal(newNoteStyle.flex, 1);
-  assert.equal(newNoteStyle.borderRadius, 30);
+  assert.equal(newNoteStyle.flex, undefined, 'the pill should size to its text instead of filling the row');
+  assert.equal(newNoteStyle.flexShrink, 0);
+  assert.equal(newNoteStyle.minHeight, 48);
+  assert.equal(newNoteStyle.paddingHorizontal, 12);
+  assert.equal(newNoteStyle.borderRadius, 24);
   accountButton.props.onPress();
   assert.equal(accountOpens, 1);
 
