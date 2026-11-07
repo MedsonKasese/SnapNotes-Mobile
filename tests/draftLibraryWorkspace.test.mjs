@@ -16,13 +16,14 @@ import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
+import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_DRAFT_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
-const NOW = '2026-10-23T09:00:00.000Z';
+const NOW = new Date(Date.now() - 60_000).toISOString();
 const first = { id: 'draft-1', title: 'First', text: 'Rich body', html: '<p><strong>Rich body</strong></p>', category: 'work', editingId: null, savedAt: NOW };
 const second = { ...first, id: 'draft-2', title: 'Second' };
 const recoveryKey = '@snapnotes-mobile/editor-draft';
@@ -97,6 +98,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     '../deviceNotesStorage': { deviceNotesStorage },
     '../noteSearch': { searchNotes }, '../noteActionsMenu': { getNoteActionsMenuLayout }, '../noteFormatting': formatting,
     '../noteTransfer': noteTransfer,
+    './drawerAvatar': drawerAvatar,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' }, './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' }, './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
     './PrivateNotesScreen': { PrivateNotesScreen: 'PrivateNotesScreen' },

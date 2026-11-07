@@ -27,6 +27,7 @@ import { ChecklistLabel } from './ChecklistLabel';
 import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
 import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
+import { getRandomAccountAvatarColor } from './drawerAvatar';
 import { PrivateNotesScreen } from './PrivateNotesScreen';
 import { moveDeviceNoteToPrivate } from '../privateMoveService';
 import { NoteAttachmentSummary, NoteAttachments } from './NoteAttachments';
@@ -118,14 +119,19 @@ const coordinatedDeviceNotesStorage = createPrivateOrdinarySaveGuard(
   privateSharedCoordinator, deviceNotesStorage, privateVaultStorage,
 );
 
-export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void } = {}) {
+export function NotesWorkspace({ onOpenAccount, accountInitials }: {
+  onOpenAccount?: () => void;
+  accountInitials?: string | null;
+} = {}) {
   const [controller] = useState(() => createNotesController(coordinatedDeviceNotesStorage));
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<NoteCategory | 'all'>('all');
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('library');
+  const [storageInfoOpen, setStorageInfoOpen] = useState(false);
   const [privateNoteCount, setPrivateNoteCount] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [accountAvatarColor] = useState(getRandomAccountAvatarColor);
   const [transferBusy, setTransferBusy] = useState(false);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ id: string; revision: number } | null>(null);
   const folderActionsTarget = useRef<{ id: string | null; revision: number }>({ id: null, revision: 0 });
@@ -838,6 +844,7 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
       dispatch({ type: 'reset' });
       Keyboard.dismiss();
       closeDrawer();
+      setStorageInfoOpen(false);
       setView('library');
     });
   }
@@ -846,6 +853,7 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
     confirmDiscard(() => {
       dispatch({ type: 'reset' });
       closeDrawer();
+      setStorageInfoOpen(false);
       setView('editor');
     });
   }
@@ -858,6 +866,7 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
     }
     confirmDiscard(() => {
       dispatch({ type: 'edit', id });
+      setStorageInfoOpen(false);
       setView('editor');
     });
   }
@@ -1131,18 +1140,38 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
-            <View style={styles.viewHeading}>
-              <View style={styles.headingCopy}>
-                <Text style={styles.eyebrow}>WRITE SOMETHING DOWN</Text>
-                <Text accessibilityRole="header" style={styles.screenTitle}>
-                  {state.editingId === null ? 'New note' : 'Edit note'}
-                </Text>
+            <View style={styles.editorHeadingGroup}>
+              <View style={styles.viewHeading}>
+                <View style={styles.headingCopy}>
+                  <Text style={styles.eyebrow}>WRITE SOMETHING DOWN</Text>
+                  <View testID="editor-title-with-storage-info" style={styles.editorTitleRow}>
+                    <Text accessibilityRole="header" style={styles.screenTitle}>
+                      {state.editingId === null ? 'New note' : 'Edit note'}
+                    </Text>
+                    <Pressable
+                      testID="editor-storage-info-button"
+                      accessibilityRole="button"
+                      accessibilityLabel={storageInfoOpen ? 'Hide note storage information' : 'Show note storage information'}
+                      accessibilityHint="Explains where notes are stored and whether they are encrypted, backed up, or synced."
+                      accessibilityState={{ expanded: storageInfoOpen }}
+                      hitSlop={6}
+                      onPress={() => setStorageInfoOpen(current => !current)}
+                      style={({ pressed }) => [styles.editorStorageInfoButton, pressed && styles.pressed]}
+                    >
+                      <FontAwesome name="info-circle" size={17} color="#79520a" accessible={false} />
+                    </Pressable>
+                  </View>
+                </View>
+                <Action label="All notes" secondary onPress={() => selectLibraryCategory('all')} disabled={saving} />
               </View>
-              <Action label="All notes" secondary onPress={() => selectLibraryCategory('all')} disabled={saving} />
-            </View>
-            <View style={styles.warning}>
-              <Text style={styles.warningTitle}>Stored on this device</Text>
-              <Text style={styles.warningText}>Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.</Text>
+              {storageInfoOpen && (
+                <View testID="editor-storage-info-tooltip" style={styles.storageInfoTooltip}>
+                  <Text style={styles.storageInfoTooltipText}>
+                    <Text style={styles.storageInfoTooltipTitle}>Stored on this device. </Text>
+                    {'Saved notes survive app restarts, but are not encrypted, backed up to the cloud, or synced with the PWA. Clearing app data or uninstalling can remove them.'}
+                  </Text>
+                </View>
+              )}
             </View>
             <View style={styles.editor}>
               <Text style={styles.label}>Category</Text>
@@ -1486,7 +1515,6 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
                 detail={privateNoteCount === null ? 'Protected vault' : `${privateNoteCount} private ${privateNoteCount === 1 ? 'note' : 'notes'}`}
                 active={view === 'private'} onPress={selectPrivate} />
               <MenuRow label="Trash" icon="trash" detail={`${trashNotes.length} trashed notes`} active={view === 'trash'} onPress={selectTrash} />
-              <MenuRow label="New note" icon="plus" detail="Capture a new thought" active={view === 'editor' && state.editingId === null} onPress={openNewNote} />
               <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
               <Pressable accessibilityRole="button" accessibilityLabel="Export notes" disabled={transferBusy}
                 accessibilityState={{ disabled: transferBusy }} onPress={openExportFormatPicker}
@@ -1500,16 +1528,35 @@ export function NotesWorkspace({ onOpenAccount }: { onOpenAccount?: () => void }
                 <FontAwesome name="upload" size={18} color="#65775c" accessible={false} />
                 <Text style={styles.menuRowTitle}>Import notes</Text>
               </Pressable>
-              <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
-              <MenuRow label="Account" icon="user-circle-o" detail="Optional account access" onPress={() => { closeDrawer(); onOpenAccount?.(); }} />
             </ScrollView>
-            <View style={styles.drawerNotice}>
-              <Text style={styles.drawerNoticeTitle}>Your notes stay on this device</Text>
-              <Text style={styles.drawerNoticeText}>Account access is optional and never uploads or changes your local notes.</Text>
-            </View>
-            <View style={styles.drawerFooter}>
-              <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
-              <Text style={styles.drawerFooterText}>Save Your Mind.</Text>
+            <View testID="drawer-actions-footer" style={styles.drawerActionsFooter}>
+              <Pressable
+                testID="drawer-account-button"
+                accessibilityRole="button"
+                accessibilityLabel="Account access"
+                onPress={() => { closeDrawer(); onOpenAccount?.(); }}
+                style={({ pressed }) => [
+                  styles.drawerAccountAvatar,
+                  { backgroundColor: accountInitials ? accountAvatarColor : '#ed8a37' },
+                  pressed && styles.pressed,
+                ]}
+              >
+                {accountInitials
+                  ? <Text style={styles.drawerAccountInitials} accessible={false}>{accountInitials}</Text>
+                  : <FontAwesome name="user" size={20} color="#ffffff" accessible={false} />}
+              </Pressable>
+              <Pressable
+                testID="drawer-new-note-button"
+                accessibilityRole="button"
+                accessibilityLabel="New note, Capture New Thought"
+                accessibilityHint="Opens a blank note."
+                accessibilityState={{ selected: view === 'editor' && state.editingId === null }}
+                onPress={openNewNote}
+                style={({ pressed }) => [styles.drawerNewNoteButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.drawerNewNoteTitle}>+ New Note</Text>
+                <Text style={styles.drawerNewNoteDescription}>Capture New Thought</Text>
+              </Pressable>
             </View>
           </View>
           {folderActionsFolder && folderActionsMenu && <View style={styles.folderActionsLayer}>
@@ -1593,6 +1640,12 @@ const styles = StyleSheet.create({
   libraryHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 18, paddingTop: 20, paddingBottom: 5 },
   headingCopy: { flex: 1, gap: 4 },
   viewHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  editorHeadingGroup: { gap: 8 },
+  editorTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  editorStorageInfoButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, top: 1 },
+  storageInfoTooltip: { padding: 12, borderRadius: 12, backgroundColor: '#fffaf0', borderWidth: 1, borderColor: '#f1e1ad' },
+  storageInfoTooltipTitle: { color: '#79520a', fontSize: 13, fontWeight: '800' },
+  storageInfoTooltipText: { color: '#685d3c', fontSize: 12, lineHeight: 18 },
   eyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
   screenTitle: { color: '#20351d', fontSize: 27, fontWeight: '800', letterSpacing: -0.7, marginTop: 2 },
   libraryHint: { color: '#64715e', fontSize: 13, paddingHorizontal: 18, paddingBottom: 8 },
@@ -1602,9 +1655,6 @@ const styles = StyleSheet.create({
   emptyMarkText: { color: '#48a111', fontSize: 34, fontWeight: '500' },
   emptyTitle: { color: '#20351d', fontSize: 21, fontWeight: '800', textAlign: 'center' },
   emptyText: { color: '#64715e', fontSize: 14, lineHeight: 21, textAlign: 'center', maxWidth: 290, marginBottom: 6 },
-  warning: { padding: 14, borderRadius: 13, backgroundColor: '#fff6db', borderWidth: 1, borderColor: '#f1e1ad', gap: 4 },
-  warningTitle: { color: '#79520a', fontSize: 13, fontWeight: '800' },
-  warningText: { color: '#79520a', fontSize: 12, lineHeight: 18 },
   editorContent: { padding: 18, paddingBottom: 40, gap: 16 },
   editor: { backgroundColor: '#ffffff', borderColor: '#e0e8da', borderWidth: 1, borderRadius: 18, padding: 17, gap: 12 },
   label: { color: '#344b2d', fontSize: 14, fontWeight: '700' },
@@ -1681,7 +1731,7 @@ const styles = StyleSheet.create({
   drawerEyebrow: { color: '#478f1b', fontSize: 10, fontWeight: '800', letterSpacing: 1.3, marginBottom: 3 },
   drawerTitle: { color: '#20351d', fontSize: 23, fontWeight: '800' },
   closeGlyph: { color: '#344b2d', fontSize: 29, lineHeight: 32 },
-  drawerNavigation: { paddingTop: 15, gap: 7 },
+  drawerNavigation: { paddingTop: 15, paddingBottom: 20, gap: 7 },
   drawerDivider: { width: '100%', height: 1, marginHorizontal: 12, marginTop: 10, marginBottom: 8, backgroundColor: '#e1e8dc' },
   folderNavigationRow: { flexDirection: 'row', alignItems: 'center' },
   folderNavigationButton: { flex: 1, minWidth: 0 },
@@ -1707,12 +1757,12 @@ const styles = StyleSheet.create({
   menuRowTitleActive: { color: '#3b7f16' },
   menuRowDetail: { color: '#6a7764', fontSize: 12 },
   menuChevron: { color: '#6a7764', fontSize: 25 },
-  drawerNotice: { marginTop: 25, padding: 14, gap: 7, borderRadius: 14, backgroundColor: '#f7f9f5', borderWidth: 1, borderColor: '#e6ecdf' },
-  drawerNoticeTitle: { color: '#334b2b', fontSize: 13, fontWeight: '800' },
-  drawerNoticeText: { color: '#64715e', fontSize: 12, lineHeight: 18 },
-  drawerFooter: { marginTop: 'auto', paddingTop: 18, borderTopWidth: 1, borderTopColor: '#e8eee3' },
-  drawerFooterBrand: { color: '#304728', fontSize: 13, fontWeight: '800' },
-  drawerFooterText: { color: '#73816d', fontSize: 12, marginTop: 3 },
-  floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
+  drawerActionsFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e8eee3' },
+  drawerAccountAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  drawerAccountInitials: { color: '#ffffff', fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
+  drawerNewNoteButton: { flexShrink: 0, minHeight: 48, justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#dbe9d3', backgroundColor: '#eff7e9' },
+  drawerNewNoteTitle: { color: '#315b21', fontSize: 13, fontWeight: '800' },
+  drawerNewNoteDescription: { color: '#61705b', fontSize: 11, marginTop: 2 },
+  floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 28, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
   floatingAddText: { color: '#ffffff', fontSize: 34, lineHeight: 38, fontWeight: '400', marginTop: -2 },
 });

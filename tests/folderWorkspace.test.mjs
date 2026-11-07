@@ -16,13 +16,14 @@ import { countPrivateVaultNotes } from '../src/privateNoteReader.ts';
 import { searchNotes } from '../src/noteSearch.ts';
 import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
+import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_FOLDER_WORKSPACE_SOURCE ?? new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
-const NOW = '2026-10-23T09:00:00.000Z';
+const NOW = new Date(Date.now() - 60_000).toISOString();
 const folder = { id: 'folder-1', name: 'Research', icon: 'folder', color: '', createdAt: NOW, updatedAt: NOW };
 const note = { id: 'note-1', title: 'Research note', text: 'Important', html: '<p><strong>Important</strong></p>', category: 'work', createdAt: NOW, updatedAt: NOW, pinned: true, archived: false, deletedAt: null, folderId: folder.id };
 function deferred() {
@@ -119,6 +120,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     '../noteTransfer': noteTransfer,
     '../noteActionsMenu': { getNoteActionsMenuLayout },
     '../noteFormatting': formatting,
+    './drawerAvatar': drawerAvatar,
     './ChecklistLabel': { ChecklistLabel: 'ChecklistLabel' },
     './FormattedText': { FormattedText: 'FormattedText' },
     './FormattingToolbar': { FormattingToolbar: 'FormattingToolbar' },
