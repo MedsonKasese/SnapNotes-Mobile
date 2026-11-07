@@ -670,6 +670,15 @@ test('the standalone pin control is disabled and announced as disabled while sav
 const popup = tree => find(tree, element => element.props.testID === 'note-actions-menu');
 const popupLayer = tree => find(tree, element => element.props.testID === 'note-actions-layer');
 const flatStyle = style => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style]));
+const wcagContrastRatio = (foreground, background) => {
+  const luminance = color => {
+    const channels = [1, 3, 5].map(start => Number.parseInt(color.slice(start, start + 2), 16) / 255);
+    const linear = channels.map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+};
 
 function triggerFor(app, item, measureInWindow) {
   const card = list(app.render()).props.renderItem({ item });
@@ -867,6 +876,7 @@ test('compact account and content-sized New Note controls stay fixed opposite ea
 
   const accountButton = find(footer, element => element.props.testID === 'drawer-account-button');
   const newNoteButton = find(footer, element => element.props.testID === 'drawer-new-note-button');
+  const newNoteSubtitle = find(newNoteButton, element => element.type === 'Text' && text(element) === 'Capture New Thought');
   assert.equal(accountButton.props.accessibilityLabel, 'Account access');
   assert.equal(elements(accountButton).filter(element => element.type === 'Text').length, 0,
     'signed-out account control shows only the user icon');
@@ -881,11 +891,14 @@ test('compact account and content-sized New Note controls stay fixed opposite ea
   assert.equal(accountStyle.width, 44);
   assert.equal(accountStyle.height, 44);
   const newNoteStyle = Object.assign({}, ...newNoteButton.props.style({ pressed: false }).filter(Boolean));
+  const newNoteSubtitleStyle = flatStyle(newNoteSubtitle.props.style);
   assert.equal(newNoteStyle.flex, undefined, 'the button should size to its text instead of filling the row');
   assert.equal(newNoteStyle.flexShrink, 0);
   assert.equal(newNoteStyle.minHeight, 48);
   assert.equal(newNoteStyle.paddingHorizontal, 12);
   assert.equal(newNoteStyle.borderRadius, 8);
+  assert.ok(wcagContrastRatio(newNoteSubtitleStyle.color, newNoteStyle.backgroundColor) >= 4.5,
+    'the small New Note subtitle must meet WCAG AA minimum text contrast');
   accountButton.props.onPress();
   assert.equal(accountOpens, 1);
 
@@ -911,7 +924,7 @@ test('drawer shows section dividers, transfer actions, and an explicit Private N
   const app = workspace();
   app.setFoldersReady(true);
   const tree = app.render();
-  assert.equal(elements(tree).filter(element => element.props.testID === 'drawer-section-divider').length, 4);
+  assert.equal(elements(tree).filter(element => element.props.testID === 'drawer-section-divider').length, 3);
   const exportButton = find(tree, element => element.props.accessibilityLabel === 'Export notes');
   const importButton = find(tree, element => element.props.accessibilityLabel === 'Import notes');
   assert.equal(exportButton.props.accessibilityRole, 'button');

@@ -22,8 +22,13 @@ test('navigation keeps destinations scrollable and places account and New Note i
   assert.doesNotMatch(source, /<MenuRow label="New note"/);
   assert.match(source, /onOpenAccount\?\.\(\)/);
   assert.match(source, /drawerNavigation: \{[^}]*paddingBottom: 20/);
-  assert.match(source, /Your notes stay on this device/);
-  assert.match(source, /Account access is optional and never uploads or changes your local notes/);
+  const drawerStart = source.indexOf('visible={drawerOpen}');
+  const drawerEnd = source.indexOf('</Modal>', drawerStart);
+  assert.ok(drawerStart >= 0 && drawerEnd > drawerStart, 'drawer modal markup should remain present');
+  const drawerMarkup = source.slice(drawerStart, drawerEnd);
+  assert.doesNotMatch(drawerMarkup, /Your notes stay on this device/);
+  assert.doesNotMatch(drawerMarkup, /Account access is optional and never uploads or changes your local notes/);
+  assert.doesNotMatch(drawerMarkup, /SnapNotes Mobile|Save Your Mind\./);
   assert.doesNotMatch(source, /Settings and account features will appear here as they are migrated and tested/);
   assert.doesNotMatch(source, /Folders, Trash, settings/);
   assert.doesNotMatch(source, /Folders, archive, trash/);
@@ -31,6 +36,10 @@ test('navigation keeps destinations scrollable and places account and New Note i
   assert.match(source, /NOTE_CATEGORIES\.map\(category => <MenuRow/);
   assert.match(source, /onPress=\{\(\) => selectLibraryCategory\('all'\)\}/);
   assert.doesNotMatch(source, /data-category=/);
+});
+
+test('bottom-right Add Note control stays a fully round 56px circle', () => {
+  assert.match(source, /floatingAdd: \{[^}]*width: 56, height: 56[^}]*borderRadius: 28/);
 });
 
 test('drawer and actions backdrops fill the screen using the supported React Native API', () => {

@@ -1504,15 +1504,6 @@ export function NotesWorkspace({ onOpenAccount, accountInitials }: {
                 <FontAwesome name="upload" size={18} color="#65775c" accessible={false} />
                 <Text style={styles.menuRowTitle}>Import notes</Text>
               </Pressable>
-              <View testID="drawer-section-divider" style={styles.drawerDivider} accessible={false} />
-              <View style={styles.drawerNotice}>
-                <Text style={styles.drawerNoticeTitle}>Your notes stay on this device</Text>
-                <Text style={styles.drawerNoticeText}>Account access is optional and never uploads or changes your local notes.</Text>
-              </View>
-              <View style={styles.drawerFooter}>
-                <Text style={styles.drawerFooterBrand}>SnapNotes Mobile</Text>
-                <Text style={styles.drawerFooterText}>Save Your Mind.</Text>
-              </View>
             </ScrollView>
             <View testID="drawer-actions-footer" style={styles.drawerActionsFooter}>
               <Pressable
@@ -1739,18 +1730,12 @@ const styles = StyleSheet.create({
   menuRowTitleActive: { color: '#3b7f16' },
   menuRowDetail: { color: '#6a7764', fontSize: 12 },
   menuChevron: { color: '#6a7764', fontSize: 25 },
-  drawerNotice: { marginTop: 25, padding: 14, gap: 7, borderRadius: 14, backgroundColor: '#f7f9f5', borderWidth: 1, borderColor: '#e6ecdf' },
-  drawerNoticeTitle: { color: '#334b2b', fontSize: 13, fontWeight: '800' },
-  drawerNoticeText: { color: '#64715e', fontSize: 12, lineHeight: 18 },
-  drawerFooter: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#e8eee3' },
-  drawerFooterBrand: { color: '#304728', fontSize: 13, fontWeight: '800' },
-  drawerFooterText: { color: '#73816d', fontSize: 12, marginTop: 3 },
   drawerActionsFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e8eee3' },
   drawerAccountAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   drawerAccountInitials: { color: '#ffffff', fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
   drawerNewNoteButton: { flexShrink: 0, minHeight: 48, justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#dbe9d3', backgroundColor: '#eff7e9' },
   drawerNewNoteTitle: { color: '#315b21', fontSize: 13, fontWeight: '800' },
-  drawerNewNoteDescription: { color: '#73816d', fontSize: 11, marginTop: 2 },
-  floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
+  drawerNewNoteDescription: { color: '#61705b', fontSize: 11, marginTop: 2 },
+  floatingAdd: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 28, backgroundColor: '#48a111', elevation: 6, shadowColor: '#27600a', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 5 } },
   floatingAddText: { color: '#ffffff', fontSize: 34, lineHeight: 38, fontWeight: '400', marginTop: -2 },
 });
