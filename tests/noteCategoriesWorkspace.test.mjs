@@ -17,6 +17,7 @@ import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import * as reminderNavigation from '../src/reminders/notificationResponse.ts';
 import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
@@ -133,6 +134,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null, workspa
       if (name === './ReminderControls') return reminderControlsModule;
       if (name === '../reminders/nativeNotifications') return reminderNativeNotifications;
       if (name === '../reminders/recurrence') return reminderRecurrence;
+      if (name === '../reminders/notificationResponse') return reminderNavigation;
       throw new Error(`Unexpected import: ${name}`);
     },
   });

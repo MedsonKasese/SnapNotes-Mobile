@@ -18,6 +18,7 @@ import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import * as reminderNavigation from '../src/reminders/notificationResponse.ts';
 import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
@@ -38,8 +39,15 @@ const sameDeps = (a, b) => a !== undefined && b !== undefined && a.length === b.
 
 // Exercise real workspace JSX, effects and the real notes controller. Native
 // rendering is stubbed; content reads and storage writes may be held in flight.
-async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], recovery = null, saveDrafts = async () => {}, saveNotes = async () => {}, contentReads = [] } = {}) {
+async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], recovery = null, saveDrafts = async () => {}, saveNotes = async () => {}, contentReads = [], notificationTarget = null, onTargetHandled = () => {} } = {}) {
   const values = new Map([[drafts.DRAFT_LIBRARY_KEY, rawDrafts === undefined ? JSON.stringify(initialDrafts) : rawDrafts], [recoveryKey, recovery]]);
+  let activeNotificationTarget = notificationTarget;
+  const handledNotificationTargets = [];
+  function markNotificationTargetHandled() {
+    if (activeNotificationTarget) handledNotificationTargets.push(activeNotificationTarget);
+    activeNotificationTarget = null;
+    onTargetHandled();
+  }
   let storedNotes = initialNotes;
   const draftWrites = [], noteWrites = [], alerts = [], timers = new Map();
   let timerId = 0, contentCalls = 0;
@@ -109,6 +117,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
     './ReminderControls': reminderControlsModule,
     '../reminders/nativeNotifications': reminderNativeNotifications,
     '../reminders/recurrence': reminderRecurrence,
+    '../reminders/notificationResponse': reminderNavigation,
   };
   vm.runInNewContext(outputText, {
     exports, require(name) { assert.ok(name in modules, `Unexpected import: ${name}`); return modules[name]; },
@@ -116,7 +125,7 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
   });
   function render() {
     cursor = 0;
-    const tree = exports.NotesWorkspace();
+    const tree = exports.NotesWorkspace({ notificationTarget: activeNotificationTarget, onReminderTargetHandled: markNotificationTargetHandled });
     for (const editor of elements(tree).filter(item => item.type === 'RichNoteEditor')) {
       editor.props.ref.current = {
         getContent() {
@@ -133,6 +142,8 @@ async function workspace({ initialDrafts = [], rawDrafts, initialNotes = [], rec
   async function persistRecovery() { render(); for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } await flush(); }
   render(); await flush(); render();
   return { render, flush, persistRecovery, controller, controllerStorage, alerts, draftWrites, noteWrites,
+    setNotificationTarget(target) { activeNotificationTarget = target; return render(); },
+    get handledNotificationTargets() { return handledNotificationTargets; },
     get contentCalls() { return contentCalls; }, get storedDrafts() { return values.get(drafts.DRAFT_LIBRARY_KEY); },
     get recovery() { return values.get(recoveryKey) ?? null; }, get storedNotes() { return storedNotes; } };
 }
@@ -397,4 +408,33 @@ test('a failed editor snapshot preserves the draft and releases the save lock fo
   assert.equal(action(app, 'Save to Drafts').props.disabled, false);
   await saveDraft(app);
   assert.equal(app.draftWrites.length, 1);
+});
+
+
+test('regular reminder tap opens the exact saved note in the editor', async () => {
+  const note = {
+    id: 'note-reminder-target', title: 'Aviation exam checklist', text: 'Review the flight planning chapter.',
+    html: '<p>Review the flight planning chapter.</p>', category: 'personal', createdAt: NOW, updatedAt: NOW,
+    pinned: false, archived: false, deletedAt: null,
+  };
+  const target = { kind: 'note', noteId: note.id };
+  const app = await workspace({ initialNotes: [note], notificationTarget: target });
+  await app.flush();
+  app.render();
+  await app.flush();
+  const tree = app.render();
+  assert.equal(app.controller.getSnapshot().state.editingId, note.id);
+  assert.match(text(tree), /Edit note/);
+  assert.equal(titleInput(app).props.value, note.title);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.handledNotificationTargets)), [target]);
+});
+
+test('private reminder tap routes to Private Notes with only its opaque schedule key', async () => {
+  const target = { kind: 'private', scheduleKey: 'private-reminder-abc-1-random' };
+  const app = await workspace({ notificationTarget: target });
+  await app.flush();
+  const tree = app.render();
+  const privateScreen = find(tree, item => item.type === 'PrivateNotesScreen');
+  assert.deepEqual(JSON.parse(JSON.stringify(privateScreen.props.reminderTarget)), target);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.handledNotificationTargets)), [target]);
 });

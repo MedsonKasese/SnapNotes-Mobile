@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { AndroidImportance } from 'expo-notifications';
 import { Platform } from 'react-native';
 import { createReminderScheduler } from './scheduler';
+import { getAndroidReminderDelivery } from './androidDelivery';
 
 export const REMINDER_CHANNEL_ID = 'local-reminders';
 
@@ -47,6 +48,7 @@ export const localReminderScheduler = createReminderScheduler({
   },
   getAllScheduledNotificationsAsync: () => Notifications.getAllScheduledNotificationsAsync(),
   scheduleNotificationAsync(request) {
+    const androidDelivery = getAndroidReminderDelivery(Platform.OS, Platform.Version);
     return Notifications.scheduleNotificationAsync({
       content: {
         title: request.content.title,
@@ -57,7 +59,10 @@ export const localReminderScheduler = createReminderScheduler({
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: request.trigger.date,
-        ...(Platform.OS === 'android' ? { channelId: REMINDER_CHANNEL_ID } : {}),
+        ...(Platform.OS === 'android' ? {
+          channelId: REMINDER_CHANNEL_ID,
+          ...(androidDelivery ? { delivery: androidDelivery } : {}),
+        } : {}),
       },
     });
   },

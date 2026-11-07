@@ -18,6 +18,7 @@ import { getNoteActionsMenuLayout } from '../src/noteActionsMenu.ts';
 import * as noteTransfer from '../src/noteTransfer.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
 import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import * as reminderNavigation from '../src/reminders/notificationResponse.ts';
 import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
@@ -133,6 +134,7 @@ async function workspace({ initialNotes = [note], initialFolders = [folder], raw
     './ReminderControls': reminderControlsModule,
     '../reminders/nativeNotifications': reminderNativeNotifications,
     '../reminders/recurrence': reminderRecurrence,
+    '../reminders/notificationResponse': reminderNavigation,
   };
   vm.runInNewContext(outputText, {
     exports, setTimeout: () => 1, clearTimeout() {},

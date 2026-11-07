@@ -21,6 +21,7 @@ import { RichNoteEditor, type RichNoteEditorHandle } from './RichNoteEditor';
 import { ReminderControls } from './ReminderControls';
 import { addReminderReceivedListener, localReminderScheduler } from '../reminders/nativeNotifications';
 import { createOpaqueReminderKey } from '../reminders/recurrence';
+import { reminderTargetKey, type PrivateReminderNavigationTarget } from '../reminders/notificationResponse';
 
 const access = createPrivateAccess(AsyncStorage);
 type FontAwesomeName = ComponentProps<typeof FontAwesome>['name'];
@@ -49,7 +50,12 @@ function formatUpdatedNoteTime(updatedAt?: string, time?: string, createdAt?: st
   return `Updated ${formatNoteTime(time, createdAt)}`;
 }
 
-export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void; onRestored?: () => Promise<void> }) {
+export function PrivateNotesScreen({ onBack, onRestored, reminderTarget = null, onReminderTargetHandled }: {
+  onBack: () => void;
+  onRestored?: () => Promise<void>;
+  reminderTarget?: PrivateReminderNavigationTarget | null;
+  onReminderTargetHandled?: () => void;
+}) {
   const [phase, setPhase] = useState<'loading' | 'setup' | 'locked' | 'unlocked' | 'error'>('loading');
   const [captureProtection, setCaptureProtection] = useState<'pending' | 'ready' | 'error'>('pending');
   const [password, setPassword] = useState('');
@@ -77,6 +83,9 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
   const actionsLayer = useRef<ComponentRef<typeof View>>(null);
   const actionTriggers = useRef(new Map<string, ComponentRef<typeof View>>());
   const actionsRequest = useRef(0);
+  const handledReminderLockTarget = useRef<string | null>(null);
+  const handledReminderOpenTarget = useRef<string | null>(null);
+  const requiredFreshUnlockForReminder = useRef<string | null>(null);
   const actionsMenuLayout = useMemo(() => actionsAnchor && actionsViewport
     ? getNoteActionsMenuLayout(actionsAnchor, actionsViewport, actionsMenuHeight)
     : null, [actionsAnchor, actionsViewport, actionsMenuHeight]);
@@ -124,20 +133,27 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     }
   }, [phase]);
 
-  function lock() {
+  const lock = useCallback(() => {
     sessionGuard.current.invalidate();
     authenticatedSession.current = null;
     lifecycle.current.busy = false;
     setBusy(false);
     setPhase(current => current === 'unlocked' ? 'locked' : current);
-    clearSensitiveInputs();
+    setPassword('');
+    setConfirmation('');
+    setPasswordVisible(false);
+    setConfirmationVisible(false);
     setPrivateNotes([]);
     setSelectedNoteId(null);
     setEditingNote(null);
     setEditorReady(false);
-    closeActionsMenu();
+    actionsRequest.current += 1;
+    setActionsNoteId(null);
+    setActionsAnchor(null);
+    setActionsViewport(null);
+    setActionsMenuHeight(0);
     setError(null);
-  }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -182,6 +198,7 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
       sessionGuard.current.setActive(state === 'active');
       if (state !== 'active') {
         authenticatedSession.current = null;
+        handledReminderOpenTarget.current = null;
         lifecycle.current.busy = false;
         setBusy(false);
         setBiometricBusy(false);
@@ -197,6 +214,62 @@ export function PrivateNotesScreen({ onBack, onRestored }: { onBack: () => void;
     });
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    if (!reminderTarget) {
+      handledReminderLockTarget.current = null;
+      handledReminderOpenTarget.current = null;
+      return;
+    }
+    const targetKey = reminderTargetKey(reminderTarget);
+    if (handledReminderLockTarget.current === targetKey) return;
+    handledReminderLockTarget.current = targetKey;
+    if (phase !== 'unlocked' || !authenticatedSession.current || AppState.currentState !== 'active') return;
+    if (editingNote) {
+      Alert.alert('Discard unsaved private changes?', 'Your current private note edit has not been saved. Discard it before opening this reminder?', [
+        { text: 'Keep editing', style: 'cancel', onPress: () => onReminderTargetHandled?.() },
+        { text: 'Discard and continue', style: 'destructive', onPress: () => { requiredFreshUnlockForReminder.current = targetKey; lock(); } },
+      ]);
+    } else {
+      requiredFreshUnlockForReminder.current = targetKey;
+      void Promise.resolve().then(() => {
+        if (handledReminderLockTarget.current === targetKey &&
+          requiredFreshUnlockForReminder.current === targetKey &&
+          authenticatedSession.current && AppState.currentState === 'active') lock();
+      });
+    }
+  }, [reminderTarget, phase, editingNote, onReminderTargetHandled, lock]);
+
+  useEffect(() => {
+    if (reminderTarget && phase === 'locked' &&
+      requiredFreshUnlockForReminder.current === reminderTargetKey(reminderTarget)) {
+      requiredFreshUnlockForReminder.current = null;
+    }
+  }, [reminderTarget, phase]);
+
+  useEffect(() => {
+    if (!reminderTarget || phase !== 'unlocked' || !authenticatedSession.current || AppState.currentState !== 'active') return;
+    const targetKey = reminderTargetKey(reminderTarget);
+    if (requiredFreshUnlockForReminder.current === targetKey) return;
+    if (handledReminderOpenTarget.current === targetKey) return;
+    const note = privateNotes.find(item => reminderTarget.kind === 'private'
+      ? item.reminderScheduleKey === reminderTarget.scheduleKey
+      : item.id === reminderTarget.noteId);
+    handledReminderOpenTarget.current = targetKey;
+    void Promise.resolve().then(() => {
+      if (handledReminderOpenTarget.current !== targetKey || !authenticatedSession.current ||
+        AppState.currentState !== 'active') return;
+      if (note) {
+        setSelectedNoteId(note.id);
+        setEditingNote(null);
+        setEditorReady(false);
+        setError(null);
+      } else {
+        setError('This private reminder could not be matched to an available note.');
+      }
+      onReminderTargetHandled?.();
+    });
+  }, [reminderTarget, phase, privateNotes, onReminderTargetHandled]);
 
   useEffect(() => addReminderReceivedListener(() => setReminderRevision(revision => revision + 1)), []);
 
