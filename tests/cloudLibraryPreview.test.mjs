@@ -164,10 +164,11 @@ test('service surface is read-only; adapter is limited to getDoc/getDocs on the 
   const modal = await readFile(new URL('../src/components/AccountAccessModal.tsx', import.meta.url), 'utf8');
   assert.match(modal, /const loadCloudPreview = async \(\) => \{[\s\S]*?state\.user\.emailVerified[\s\S]*?cloudLibraryPreviewService\.load\(uid\)/);
   assert.match(modal, /onPress=\{\(\) => \{ void loadCloudPreview\(\); \}\}/);
-  assert.match(modal, /useEffect\(\(\) => \{\s*cloudPreviewGate\.current\.setVerifiedUid\(verifiedPreviewUid\);\s*setCloudPreview\(\{ status: 'idle' \}\);/);
+  assert.match(modal, /useEffect\(\(\) => \{\s*cloudPreviewGate\.current\.setVerifiedUid\(verifiedPreviewUid\);\s*\}, \[verifiedPreviewUid\]\);/);
   const effect = modal.slice(modal.indexOf('useEffect(() => {\n    cloudPreviewGate.current.setVerifiedUid'), modal.indexOf('}, [verifiedPreviewUid])') + 40);
-  assert.doesNotMatch(effect, /cloudLibraryPreviewService\.load/);
+  assert.doesNotMatch(effect, /setCloudPreview|cloudLibraryPreviewService\.load/);
   assert.match(modal, /cloudPreview\.uid === verifiedPreviewUid/);
+  assert.match(modal, /cloudPreviewGate\.current\.isCurrent\(cloudPreview\.uid, cloudPreview\.requestId\)/);
   assert.doesNotMatch(modal, /deviceNotesStorage|notesStorage|AsyncStorage|PrivateVaultStorage/);
 });
 

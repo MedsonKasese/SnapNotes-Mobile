@@ -31,7 +31,7 @@ import { createCloudPreviewRequestGate, type CloudLibraryPreview } from '../clou
 
 type AccountScreen = 'welcome' | 'sign-in' | 'register' | 'password-reset' | 'account';
 type Feedback = { kind: 'success' | 'warning'; message: string };
-type CloudPreviewState = { status: 'idle' } | { status: 'loading'; uid: string } | { status: 'error'; uid: string; message: string } | { status: 'ready'; uid: string; preview: CloudLibraryPreview };
+type CloudPreviewState = { status: 'idle' } | { status: 'loading'; uid: string; requestId: number } | { status: 'error'; uid: string; requestId: number; message: string } | { status: 'ready'; uid: string; requestId: number; preview: CloudLibraryPreview };
 type AccountAccessModalProps = { visible: boolean; onClose: () => void };
 
 type AccountFieldProps = {
@@ -186,18 +186,19 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [verificationCooldownMs, setVerificationCooldownMs] = useState(0);
   const googleSignInAvailable = googleAuthService.isConfigured();
   const requestInFlight = useRef(false);
+  const cloudPreviewGate = useRef(createCloudPreviewRequestGate());
   const [cloudPreview, setCloudPreview] = useState<CloudPreviewState>({ status: 'idle' });
   const verifiedPreviewUid = state.status === 'signed-in' && state.user.emailVerified ? state.user.uid : null;
-  const activeCloudPreview: CloudPreviewState = cloudPreview.status !== 'idle' && cloudPreview.uid === verifiedPreviewUid
+  const activeCloudPreview: CloudPreviewState = cloudPreview.status !== 'idle' &&
+    cloudPreview.uid === verifiedPreviewUid &&
+    cloudPreviewGate.current.isCurrent(cloudPreview.uid, cloudPreview.requestId)
     ? cloudPreview
     : { status: 'idle' };
-  const cloudPreviewGate = useRef(createCloudPreviewRequestGate());
   const verificationUserId =
     state.status === 'signed-in' && !state.user.emailVerified ? state.user.uid : null;
 
   useEffect(() => {
     cloudPreviewGate.current.setVerifiedUid(verifiedPreviewUid);
-    setCloudPreview({ status: 'idle' });
   }, [verifiedPreviewUid]);
 
   useEffect(() => {
@@ -377,14 +378,14 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     cloudPreviewGate.current.setVerifiedUid(uid);
     const requestId = cloudPreviewGate.current.begin(uid);
     if (requestId === null) return;
-    setCloudPreview({ status: 'loading', uid });
+    setCloudPreview({ status: 'loading', uid, requestId });
     try {
       const preview = await cloudLibraryPreviewService.load(uid);
       if (!cloudPreviewGate.current.isCurrent(uid, requestId)) return;
-      setCloudPreview({ status: 'ready', uid, preview });
+      setCloudPreview({ status: 'ready', uid, requestId, preview });
     } catch {
       if (!cloudPreviewGate.current.isCurrent(uid, requestId)) return;
-      setCloudPreview({ status: 'error', uid, message: 'Could not load the cloud preview. It is not being treated as an empty library; try again when the connection is available.' });
+      setCloudPreview({ status: 'error', uid, requestId, message: 'Could not load the cloud preview. It is not being treated as an empty library; try again when the connection is available.' });
     }
   };
 
