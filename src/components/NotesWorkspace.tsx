@@ -1553,7 +1553,7 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
                 {item.reminderAt && <View testID={`note-reminder-${item.id}`} accessible
                   accessibilityLabel={reminderLabel + (reminderRepeatLabel ? ` ${reminderRepeatLabel}` : '')}
                   style={styles.noteReminder}>
-                  <FontAwesome name="bell-o" size={15} color="#7a857c" accessible={false} />
+                  <FontAwesome name="bell-o" size={13} color="#7a857c" accessible={false} />
                   <Text style={styles.noteReminderText}>{reminderLabel}</Text>
                   {reminderRepeatLabel ? <Text style={styles.noteReminderRepeat}>{reminderRepeatLabel}</Text> : null}
                 </View>}

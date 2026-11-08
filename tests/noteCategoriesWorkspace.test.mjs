@@ -219,6 +219,7 @@ test('regular note cards show the PWA-style reminder date, bell, and repeat summ
   assert.equal(dailyRow.props.accessibilityLabel, `${dateLabel} Every day`);
   assert.deepEqual(elements(dailyRow).filter(element => element.type === 'Text').map(text), [dateLabel, 'Every day']);
   assert.equal(find(dailyRow, element => element.type === 'FontAwesome').props.name, 'bell-o');
+  assert.equal(find(dailyRow, element => element.type === 'FontAwesome').props.size, 13);
 
   const customRow = find(renderCard(custom), element => element.props.testID === 'note-reminder-custom-reminder');
   assert.deepEqual(elements(customRow).filter(element => element.type === 'Text').map(text), [dateLabel, 'Every 2 weeks']);
