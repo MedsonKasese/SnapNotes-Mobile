@@ -336,6 +336,41 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  async function updateReminderState(updates: readonly { id: string; reminderAt: string | null; reminderNotified: boolean }[]): Promise<boolean> {
+    if (snapshot.status !== 'ready' || updates.length === 0) return false;
+    const previous = snapshot.state;
+    const byId = new Map(updates.map(update => [update.id, update]));
+    let changed = false;
+    const notes = previous.notes.map(note => {
+      const update = byId.get(note.id);
+      if (!update || ((note.reminderAt ?? null) === update.reminderAt && Boolean(note.reminderNotified) === update.reminderNotified)) return note;
+      changed = true;
+      return { ...note, reminderAt: update.reminderAt, reminderNotified: update.reminderNotified };
+    });
+    if (!changed) return true;
+
+    let draft = previous.draft;
+    if (previous.editingId !== null) {
+      const current = previous.notes.find(note => note.id === previous.editingId);
+      const update = byId.get(previous.editingId);
+      if (current && update &&
+        (previous.draft.reminderAt ?? null) === (current.reminderAt ?? null) &&
+        JSON.stringify(previous.draft.reminderRepeat ?? null) === JSON.stringify(current.reminderRepeat ?? null) &&
+        Boolean(previous.draft.reminderNotified) === Boolean(current.reminderNotified)) {
+        draft = { ...previous.draft, reminderAt: update.reminderAt, reminderNotified: update.reminderNotified };
+      }
+    }
+    publish({ ...snapshot, status: 'saving', state: previous, storageError: null });
+    try {
+      await storage.save(notes);
+      publish({ ...snapshot, state: { ...previous, notes, draft }, status: 'ready', storageError: null });
+      return true;
+    } catch {
+      publish({ ...snapshot, state: previous, status: 'ready', storageError: 'A reminder status could not be saved on this device. Your note content has not been changed.' });
+      return false;
+    }
+  }
+
   // Import is additive: never replace the current library or editor draft. IDs
   // come from the guarded allocator so encrypted Private Notes keep their namespace.
   async function importNotes(importedNotes: Omit<Note, 'id'>[]): Promise<boolean> {
@@ -395,6 +430,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, refreshAfterPrivateTransfer, dispatch, save, importNotes, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
+    load, refreshAfterPrivateTransfer, dispatch, save, importNotes, updateReminderState, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }

@@ -1,4 +1,5 @@
 import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
+import { isValidReminderAt, normalizeReminderRepeat, type ReminderRepeat } from './reminders/recurrence.ts';
 
 export const MAX_NOTE_CHARACTERS = 1500;
 export const MAX_NOTE_HTML_LENGTH = 100_000;
@@ -8,7 +9,12 @@ export type NoteCategory = typeof NOTE_CATEGORIES[number];
 export function normalizeCategory(value: unknown): NoteCategory {
   return typeof value === 'string' && (NOTE_CATEGORIES as readonly string[]).includes(value) ? value as NoteCategory : 'general';
 }
-export type NoteDraft = { title: string; text: string; category?: NoteCategory; html?: string };
+export type ReminderFields = {
+  reminderAt?: string | null;
+  reminderNotified?: boolean;
+  reminderRepeat?: ReminderRepeat | null;
+};
+export type NoteDraft = { title: string; text: string; category?: NoteCategory; html?: string } & ReminderFields;
 export type Note = NoteDraft & {
   id: string;
   category: NoteCategory;
@@ -30,6 +36,7 @@ export type NotesAction =
   | { type: 'change'; field: 'title' | 'text'; value: string }
   | { type: 'rich-change'; text: string; html: string }
   | { type: 'category'; category: NoteCategory }
+  | { type: 'reminder'; reminderAt: string | null; reminderRepeat: ReminderRepeat | null; reminderNotified: boolean }
   | { type: 'edit'; id: string }
   | { type: 'reset' }
   | { type: 'restore-draft'; draft: NoteDraft; editingId: string | null }
@@ -48,6 +55,20 @@ export function initialNotesState(): NotesState {
   return { notes: [], draft: { title: '', text: '' }, editingId: null, error: null, notice: null };
 }
 
+function reminderDraftError(draft: NoteDraft): string | null {
+  if (draft.reminderAt !== undefined && !isValidReminderAt(draft.reminderAt)) {
+    return 'Choose a valid reminder date and time.';
+  }
+  if (draft.reminderNotified !== undefined && typeof draft.reminderNotified !== 'boolean') {
+    return 'The reminder state is invalid.';
+  }
+  if (draft.reminderRepeat !== undefined && draft.reminderRepeat !== null) {
+    if (draft.reminderAt == null) return 'Set a reminder date before choosing a repeat.';
+    if (!normalizeReminderRepeat(draft.reminderRepeat, draft.reminderAt)) return 'Choose a valid repeat schedule.';
+  }
+  return null;
+}
+
 export function normalizeDraft(draft: NoteDraft): NoteDraft {
   if (draft.html !== undefined && (typeof draft.html !== 'string' || draft.html.length > MAX_NOTE_HTML_LENGTH)) {
     throw new Error(`Rich note HTML exceeds the supported ${MAX_NOTE_HTML_LENGTH} character limit.`);
@@ -56,11 +77,19 @@ export function normalizeDraft(draft: NoteDraft): NoteDraft {
   if (html !== undefined && html.length > MAX_NOTE_HTML_LENGTH) {
     throw new Error(`Rich note HTML exceeds the supported ${MAX_NOTE_HTML_LENGTH} character limit.`);
   }
-  return {
+  const normalized: NoteDraft = {
     title: draft.title.trim(),
     text: draft.text.replace(/\r/g, '').trim(),
     ...(html === undefined ? {} : { html }),
   };
+  if (draft.reminderAt !== undefined || draft.reminderRepeat !== undefined || draft.reminderNotified !== undefined) {
+    const reminderAt = draft.reminderAt ?? null;
+    const repeat = draft.reminderRepeat == null ? null : normalizeReminderRepeat(draft.reminderRepeat, reminderAt);
+    normalized.reminderAt = reminderAt;
+    normalized.reminderRepeat = repeat;
+    normalized.reminderNotified = Boolean(draft.reminderNotified);
+  }
+  return normalized;
 }
 
 // Match the PWA inline editor's serialized title + body budget, not two separate limits.
@@ -80,6 +109,8 @@ export function validateDraft(draft: NoteDraft): string | null {
   if (draft.html !== undefined && noteHtmlToText(draft.html).trim() !== draft.text.replace(/\r/g, '').trim()) {
     return 'Rich note HTML does not match the note text.';
   }
+  const reminderError = reminderDraftError(draft);
+  if (reminderError) return reminderError;
   const { title, text } = normalizeDraft(draft);
   if (!title && !text) return 'Write a title or note before saving.';
   if (characterCount(draft) > MAX_NOTE_CHARACTERS) {
@@ -88,18 +119,28 @@ export function validateDraft(draft: NoteDraft): string | null {
   return null;
 }
 
+function reminderStateKey(note: ReminderFields | undefined): string {
+  const reminderAt = note?.reminderAt ?? null;
+  const reminderRepeat = note?.reminderRepeat == null ? null : normalizeReminderRepeat(note.reminderRepeat, reminderAt);
+  return JSON.stringify({ reminderAt, reminderNotified: Boolean(note?.reminderNotified), reminderRepeat });
+}
+
 export function hasUnsavedChanges(state: NotesState): boolean {
   const original = state.notes.find(note => note.id === state.editingId);
   const draftHtml = state.draft.html === undefined ? undefined : sanitizeNoteHtml(state.draft.html);
   const originalHtml = original?.html === undefined ? undefined : sanitizeNoteHtml(original.html);
   return state.draft.title !== (original?.title ?? '') || state.draft.text !== (original?.text ?? '') ||
-    draftHtml !== originalHtml || normalizeCategory(state.draft.category) !== normalizeCategory(original?.category);
+    draftHtml !== originalHtml || normalizeCategory(state.draft.category) !== normalizeCategory(original?.category) ||
+    reminderStateKey(state.draft) !== reminderStateKey(original);
 }
 
 export function notesReducer(state: NotesState, action: NotesAction): NotesState {
   switch (action.type) {
     case 'category':
       return { ...state, draft: { ...state.draft, category: action.category }, error: null, notice: null };
+    case 'reminder':
+      return { ...state, draft: { ...state.draft, reminderAt: action.reminderAt,
+        reminderRepeat: action.reminderRepeat, reminderNotified: action.reminderNotified }, error: null, notice: null };
     case 'change':
       if (action.field === 'text') {
         const { html: _discardedHtml, ...plainDraft } = state.draft;
@@ -113,7 +154,13 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
     case 'edit': {
       const note = state.notes.find(item => item.id === action.id);
       if (!note) return { ...state, error: 'This note could not be found.' };
-      return { ...state, draft: { title: note.title, text: note.text, category: normalizeCategory(note.category), ...(note.html === undefined ? {} : { html: sanitizeNoteHtml(note.html) }) }, editingId: note.id, error: null, notice: null };
+      return { ...state, draft: {
+        title: note.title, text: note.text, category: normalizeCategory(note.category),
+        ...(note.html === undefined ? {} : { html: sanitizeNoteHtml(note.html) }),
+        ...(note.reminderAt === undefined ? {} : { reminderAt: note.reminderAt }),
+        ...(note.reminderNotified === undefined ? {} : { reminderNotified: note.reminderNotified }),
+        ...(note.reminderRepeat === undefined ? {} : { reminderRepeat: note.reminderRepeat }),
+      }, editingId: note.id, error: null, notice: null };
     }
     case 'reset':
       return { ...initialNotesState(), notes: state.notes };
@@ -123,7 +170,12 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
         : null;
       return {
         ...state,
-        draft: { title: action.draft.title, text: action.draft.text, category: normalizeCategory(action.draft.category), ...(action.draft.html === undefined ? {} : { html: sanitizeNoteHtml(action.draft.html) }) },
+        draft: { title: action.draft.title, text: action.draft.text, category: normalizeCategory(action.draft.category),
+          ...(action.draft.html === undefined ? {} : { html: sanitizeNoteHtml(action.draft.html) }),
+          ...(action.draft.reminderAt === undefined ? {} : { reminderAt: action.draft.reminderAt }),
+          ...(action.draft.reminderNotified === undefined ? {} : { reminderNotified: action.draft.reminderNotified }),
+          ...(action.draft.reminderRepeat === undefined ? {} : { reminderRepeat: action.draft.reminderRepeat }),
+        },
         editingId,
         error: null,
         notice: 'Recovered unsaved draft from this device.',

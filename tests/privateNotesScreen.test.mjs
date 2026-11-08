@@ -8,6 +8,9 @@ import { createPrivateSession } from '../src/privateSession.ts';
 import { createPrivateScreenCaptureProtection } from '../src/privateScreenCapture.ts';
 import { sanitizeNoteHtml } from '../src/noteFormatting.ts';
 import { NativeCryptoProviderUnavailableError } from '../src/nativeCryptoProvider.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import * as reminderNavigation from '../src/reminders/notificationResponse.ts';
+import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(process.env.SNAPNOTES_PRIVATE_SCREEN_SOURCE ?? new URL('../src/components/PrivateNotesScreen.tsx', import.meta.url), 'utf8');
@@ -45,10 +48,12 @@ async function screen({
   importKey = async key => ({ raw: Array.from(key) }),
   restore = async () => 'restored', update = async (_id, _session, changes, note) => ({ ...note, ...changes }),
   remove = async () => {}, onRestored = async () => {}, preventCapture = async () => {},
-  allowCapture = async () => {}, initialState = 'active',
+  allowCapture = async () => {}, initialState = 'active', reminderTarget = null,
 } = {}) {
   const slots = [], effects = [], calls = [], listeners = new Map();
   const restoreCalls = [], mutationCalls = [], alerts = [], captureCalls = [], biometricCalls = [];
+  let activeReminderTarget = reminderTarget, handledReminderTargets = 0;
+  function markReminderTargetHandled() { handledReminderTargets += 1; activeReminderTarget = null; }
   const unlockedKey = { token: 'authenticated-test-key' };
   let storedBiometricKey = biometricKey ? Uint8Array.from(biometricKey) : null;
   const asyncStorage = new Map();
@@ -85,6 +90,13 @@ async function screen({
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     useMemo(factory) { cursor++; return factory(); },
+    useCallback(callback, deps) {
+      const index = cursor++;
+      if (!slots[index] || deps.some((dep, i) => dep !== slots[index].deps[i]) || deps.length !== slots[index].deps.length) {
+        slots[index] = { callback, deps };
+      }
+      return slots[index].callback;
+    },
     useEffect(callback, deps) {
       const index = cursor++;
       if (!effects[index] || deps.some((dep, i) => dep !== effects[index].deps[i])) {
@@ -148,6 +160,10 @@ async function screen({
     '../noteFormatting': { sanitizeNoteHtml },
     '../noteActionsMenu': { getNoteActionsMenuLayout: () => ({ left: 0, top: 0, width: 216, maxHeight: 500 }) },
     './RichNoteEditor': { RichNoteEditor: 'RichNoteEditor' },
+    './ReminderControls': reminderControlsModule,
+    '../reminders/nativeNotifications': reminderNativeNotifications,
+    '../reminders/recurrence': reminderRecurrence,
+    '../reminders/notificationResponse': reminderNavigation,
   };
   const exports = {};
   vm.runInNewContext(outputText, {
@@ -157,7 +173,8 @@ async function screen({
   let lastUnlockedNotes = [];
   function render() {
     cursor = 0;
-    const tree = exports.PrivateNotesScreen({ onBack() { backs += 1; }, onRestored });
+    const tree = exports.PrivateNotesScreen({ onBack() { backs += 1; }, onRestored,
+      reminderTarget: activeReminderTarget, onReminderTargetHandled: markReminderTargetHandled });
     for (const effect of effects) if (effect?.pending) { effect.pending = false; effect.cleanup = effect.callback(); }
     return tree;
   }
@@ -165,6 +182,8 @@ async function screen({
   render(); await flush();
   return {
     render, flush, calls, restoreCalls, mutationCalls, alerts, captureCalls, biometricCalls, asyncStorage, unlockedKey,
+    setReminderTarget(target) { activeReminderTarget = target; return render(); },
+    get handledReminderTargets() { return handledReminderTargets; },
     get storedBiometricKey() { return storedBiometricKey ? Uint8Array.from(storedBiometricKey) : null; },
     change(state) { appState.currentState = state; for (const callback of listeners.get('change') ?? []) callback(state); },
     replayEffects() {
@@ -717,4 +736,40 @@ test('backgrounding during password-verified enrollment invalidates the attempt 
   assert.equal(isUnlocked(app), false);
   app.unmount();
   assert.equal(app.writesAfterUnmount, 0);
+});
+
+
+test('private reminder tap requires a fresh unlock and selects only the matching decrypted note', async () => {
+  const preview = {
+    id: 'private-reminder-target', title: 'Confidential study plan', text: 'Sensitive schedule details',
+    html: '<p>Sensitive schedule details</p>', category: 'personal',
+    reminderAt: '2026-11-08T07:00:00.000Z', reminderScheduleKey: 'private-reminder-abc-1-random',
+  };
+  const target = { kind: 'private', scheduleKey: preview.reminderScheduleKey };
+  const app = await screen({ unlock: async () => [preview] });
+
+  enterPassword(app);
+  button(app, 'Unlock').props.onPress();
+  await app.flush();
+  assert.match(text(app.render()), /Confidential study plan/);
+
+  app.setReminderTarget(target);
+  await app.flush();
+  let lockedTree = app.render();
+  assert.doesNotMatch(text(lockedTree), /Confidential study plan|Sensitive schedule details/);
+  assert.ok(input(app), 'the ordinary password unlock remains available');
+  assert.ok(button(app, 'Unlock'));
+  assert.equal(app.handledReminderTargets, 0, 'do not consume the private target before authentication');
+
+  enterPassword(app);
+  button(app, 'Unlock').props.onPress();
+  await app.flush();
+  app.render();
+  await app.flush();
+  const openedTree = app.render();
+  assert.match(text(openedTree), /Confidential study plan/);
+  assert.match(text(openedTree), /Sensitive schedule details/);
+  assert.ok(find(openedTree, item => item.type === 'Pressable' &&
+    item.props.accessibilityLabel === 'Collapse private note Confidential study plan'), 'the target note is selected after unlock');
+  assert.equal(app.handledReminderTargets, 1);
 });

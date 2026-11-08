@@ -178,6 +178,37 @@ test('reset cancels an edit, clears the draft, and retains original notes unchan
   assert.deepEqual(base.notes, [originalNote]);
 });
 
+test('one-time and repeating reminder state participates in edit detection and is preserved on save', () => {
+  const reminderAt = '2026-10-30T09:00:00.000Z';
+  const reminderRepeat = { frequency: 'weekly', interval: 2, timeZone: 'Africa/Blantyre', anchorAt: reminderAt };
+  const configured = notesReducer(fillDraft(initialNotesState(), { title: 'Reminder', text: 'Prepare the report.' }), {
+    type: 'reminder', reminderAt, reminderRepeat, reminderNotified: false,
+  });
+  const created = save(configured, 'reminder-note', CREATED_AT);
+  assert.equal(created.notes[0].reminderAt, reminderAt);
+  assert.equal(created.notes[0].reminderNotified, false);
+  assert.deepEqual(created.notes[0].reminderRepeat, reminderRepeat);
+
+  const editing = notesReducer(created, { type: 'edit', id: 'reminder-note' });
+  assert.equal(hasUnsavedChanges(editing), false);
+  const changed = notesReducer(editing, { type: 'reminder', reminderAt: '2026-10-31T09:00:00.000Z', reminderRepeat: null, reminderNotified: false });
+  assert.equal(hasUnsavedChanges(changed), true);
+  const updated = save(changed, 'unused-create-id', UPDATED_AT);
+  assert.equal(updated.notes[0].reminderAt, '2026-10-31T09:00:00.000Z');
+  assert.equal(updated.notes[0].reminderRepeat, null);
+  assert.equal(updated.notes[0].reminderNotified, false);
+});
+
+test('invalid reminder date, missing date for repeat, and malformed recurrence are rejected', () => {
+  assert.equal(validateDraft({ title: 'Reminder', text: '', reminderAt: 'not-a-date' }), 'Choose a valid reminder date and time.');
+  assert.equal(validateDraft({ title: 'Reminder', text: '', reminderAt: null,
+    reminderRepeat: { frequency: 'daily', interval: 1, timeZone: 'UTC', anchorAt: CREATED_AT } }),
+  'Set a reminder date before choosing a repeat.');
+  assert.equal(validateDraft({ title: 'Reminder', text: '', reminderAt: CREATED_AT,
+    reminderRepeat: { frequency: 'daily', interval: 1, timeZone: 'Not/AZone', anchorAt: CREATED_AT } }),
+  'Choose a valid repeat schedule.');
+});
+
 test('dirty detection tracks draft changes relative to the selected note', () => {
   const note = createNote('dirty-id', { title: 'Saved title', text: 'Saved body' });
   const base = { ...initialNotesState(), notes: [note] };

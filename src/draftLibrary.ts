@@ -1,3 +1,5 @@
+import { isValidReminderAt, normalizeReminderRepeat, type ReminderRepeat } from './reminders/recurrence.ts';
+
 // Device-only draft library, independent from the existing single editor recovery key.
 // Mirrors PWA js/drafts.js upsert/remove semantics without silently deleting bad data.
 export const DRAFT_LIBRARY_KEY = '@snapnotes-mobile/drafts-v1';
@@ -9,6 +11,9 @@ export type SavedDraft = {
   category: string;
   editingId: string | null;
   savedAt: string;
+  reminderAt?: string | null;
+  reminderNotified?: boolean;
+  reminderRepeat?: ReminderRepeat | null;
 };
 
 export function parseDraftLibrary(raw: string | null): SavedDraft[] {
@@ -27,11 +32,22 @@ export function parseDraftLibrary(raw: string | null): SavedDraft[] {
       typeof draft.savedAt !== 'string' || !Number.isFinite(Date.parse(draft.savedAt))) {
       throw Error('Invalid draft record.');
     }
+    if (draft.reminderAt !== undefined && !isValidReminderAt(draft.reminderAt)) throw Error('Invalid draft reminder.');
+    if (draft.reminderNotified !== undefined && typeof draft.reminderNotified !== 'boolean') throw Error('Invalid draft reminder.');
+    let reminderRepeat: ReminderRepeat | null | undefined;
+    if (draft.reminderRepeat === null) reminderRepeat = null;
+    else if (draft.reminderRepeat !== undefined) {
+      reminderRepeat = draft.reminderAt == null ? null : normalizeReminderRepeat(draft.reminderRepeat, draft.reminderAt);
+      if (reminderRepeat === null) throw Error('Invalid draft reminder.');
+    }
     ids.add(draft.id);
     return {
       id: draft.id, title: draft.title, text: draft.text,
       ...(draft.html === undefined ? {} : { html: draft.html as string }),
       category: draft.category, editingId: draft.editingId as string | null, savedAt: draft.savedAt,
+      ...(draft.reminderAt === undefined ? {} : { reminderAt: draft.reminderAt as string | null }),
+      ...(draft.reminderNotified === undefined ? {} : { reminderNotified: draft.reminderNotified as boolean }),
+      ...(draft.reminderRepeat === undefined ? {} : { reminderRepeat }),
     };
   });
 }

@@ -16,6 +16,9 @@ import * as noteTransfer from '../src/noteTransfer.ts';
 import * as folders from '../src/folders.ts';
 import * as draftLibrary from '../src/draftLibrary.ts';
 import * as drawerAvatar from '../src/components/drawerAvatar.ts';
+import * as reminderRecurrence from '../src/reminders/recurrence.ts';
+import * as reminderNavigation from '../src/reminders/notificationResponse.ts';
+import { reminderNativeNotifications, reminderControlsModule } from './reminderTestDoubles.mjs';
 
 const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../src/components/NotesWorkspace.tsx', import.meta.url), 'utf8');
@@ -87,6 +90,7 @@ function workspace(initialNotes = savedNotes, controllerOverride = null, workspa
       if (name === 'react-native') return {
         ...Object.fromEntries(['FlatList', 'KeyboardAvoidingView', 'Modal', 'Pressable', 'ScrollView', 'Text', 'TextInput', 'View'].map(name => [name, name])),
         Alert: { alert: (...args) => { events.push(['alert']); alerts.push(args); } },
+        AppState: { addEventListener: () => ({ remove() {} }) },
         Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
@@ -127,6 +131,10 @@ function workspace(initialNotes = savedNotes, controllerOverride = null, workspa
       if (name === './NoteAttachments') return {
         NoteAttachments: 'NoteAttachments', NoteAttachmentSummary: 'NoteAttachmentSummary',
       };
+      if (name === './ReminderControls') return reminderControlsModule;
+      if (name === '../reminders/nativeNotifications') return reminderNativeNotifications;
+      if (name === '../reminders/recurrence') return reminderRecurrence;
+      if (name === '../reminders/notificationResponse') return reminderNavigation;
       throw new Error(`Unexpected import: ${name}`);
     },
   });
@@ -189,6 +197,36 @@ function editWorkNote(app) {
 
 const archivedNote = { ...savedNotes[0], id: 'archived-1', title: 'Archived project', archived: true, pinned: true, deletedAt: null };
 const trashedNote = { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' };
+
+test('regular note cards show the PWA-style reminder date, bell, and repeat summary', () => {
+  const reminderAt = '2026-11-09T03:46:00.000Z';
+  const base = { ...savedNotes[0], reminderAt, reminderNotified: false };
+  const daily = { ...base, id: 'daily-reminder', reminderRepeat: {
+    frequency: 'daily', interval: 1, timeZone: 'Africa/Blantyre', anchorAt: reminderAt,
+  } };
+  const custom = { ...base, id: 'custom-reminder', reminderRepeat: {
+    frequency: 'weekly', interval: 2, timeZone: 'Africa/Blantyre', anchorAt: reminderAt,
+  } };
+  const oneTime = { ...base, id: 'one-time-reminder', reminderRepeat: null };
+  const noReminder = { ...savedNotes[1], reminderAt: undefined, reminderRepeat: null };
+  const app = workspace([daily, custom, oneTime, noReminder]);
+  const renderCard = note => list(app.render()).props.renderItem({ item: note });
+  const dateLabel = `Reminder ${new Date(reminderAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
+
+  const dailyCard = renderCard(daily);
+  const dailyRow = find(dailyCard, element => element.props.testID === 'note-reminder-daily-reminder');
+  assert.equal(dailyRow.props.style.flexDirection, 'row');
+  assert.equal(dailyRow.props.accessibilityLabel, `${dateLabel} Every day`);
+  assert.deepEqual(elements(dailyRow).filter(element => element.type === 'Text').map(text), [dateLabel, 'Every day']);
+  assert.equal(find(dailyRow, element => element.type === 'FontAwesome').props.name, 'bell-o');
+  assert.equal(find(dailyRow, element => element.type === 'FontAwesome').props.size, 13);
+
+  const customRow = find(renderCard(custom), element => element.props.testID === 'note-reminder-custom-reminder');
+  assert.deepEqual(elements(customRow).filter(element => element.type === 'Text').map(text), [dateLabel, 'Every 2 weeks']);
+  const oneTimeRow = find(renderCard(oneTime), element => element.props.testID === 'note-reminder-one-time-reminder');
+  assert.deepEqual(elements(oneTimeRow).filter(element => element.type === 'Text').map(text), [dateLabel]);
+  assert.equal(elements(renderCard(noReminder)).some(element => element.props.testID === 'note-reminder-' + noReminder.id), false);
+});
 
 test('new-note editor explains attachments appear after save, and saved-note editor wires the picker', () => {
   const app = workspace();

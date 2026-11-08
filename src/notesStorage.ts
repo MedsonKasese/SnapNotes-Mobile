@@ -1,5 +1,6 @@
 import { MAX_NOTE_HTML_LENGTH, normalizeCategory, NOTE_CATEGORIES, validateDraft as validateNoteDraft, type Note, type NoteCategory } from './notes.ts';
 import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
+import { isValidReminderAt, normalizeReminderRepeat } from './reminders/recurrence.ts';
 
 export const NOTES_STORAGE_KEY = '@snapnotes-mobile/notes';
 
@@ -111,7 +112,8 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (!isRecord(value)) {
     throw new Error(`Invalid note at index ${index}: expected an object.`);
   }
-  const { id, category: rawCategory, title, text, html: rawHtml, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived, deletedAt: rawDeletedAt, folderId: rawFolderId } = value;
+  const { id, category: rawCategory, title, text, html: rawHtml, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived, deletedAt: rawDeletedAt, folderId: rawFolderId,
+    reminderAt: rawReminderAt, reminderNotified: rawReminderNotified, reminderRepeat: rawReminderRepeat } = value;
   const category = normalizeCategory(rawCategory);
   const pinned = rawPinned === undefined ? false : rawPinned;
   const archived = rawArchived === undefined ? false : rawArchived;
@@ -153,8 +155,27 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   validateTimestamp(updatedAt, 'updatedAt', index);
   validateDraft({ title, text, ...(html === undefined ? {} : { html }) }, index);
 
+  if (rawReminderAt !== undefined && !isValidReminderAt(rawReminderAt)) {
+    throw new Error(`Invalid reminderAt on note at index ${index}: expected an ISO timestamp or null.`);
+  }
+  if (rawReminderNotified !== undefined && typeof rawReminderNotified !== 'boolean') {
+    throw new Error(`Invalid reminderNotified on note at index ${index}: expected a boolean.`);
+  }
+  let reminderRepeat = rawReminderRepeat;
+  if (rawReminderRepeat !== undefined && rawReminderRepeat !== null) {
+    reminderRepeat = rawReminderAt == null ? null : normalizeReminderRepeat(rawReminderRepeat, rawReminderAt);
+    if (reminderRepeat === null) {
+      throw new Error(`Invalid reminderRepeat on note at index ${index}: expected a valid local recurrence schedule.`);
+    }
+  }
+
   ids.add(id);
-  return { id, category, title, text, ...(html === undefined ? {} : { html }), createdAt, updatedAt, pinned, archived, deletedAt, ...(rawFolderId === undefined ? {} : { folderId: rawFolderId as string | null }) };
+  return { id, category, title, text, ...(html === undefined ? {} : { html }), createdAt, updatedAt, pinned, archived, deletedAt,
+    ...(rawFolderId === undefined ? {} : { folderId: rawFolderId as string | null }),
+    ...(rawReminderAt === undefined ? {} : { reminderAt: rawReminderAt as string | null }),
+    ...(rawReminderNotified === undefined ? {} : { reminderNotified: rawReminderNotified as boolean }),
+    ...(rawReminderRepeat === undefined ? {} : { reminderRepeat: reminderRepeat as Note['reminderRepeat'] }),
+  };
 }
 
 function validateNotes(value: unknown): Note[] {
