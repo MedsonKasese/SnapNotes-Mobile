@@ -47,6 +47,7 @@ function mount() {
     '../auth/authService': { AuthOperationError: class AuthOperationError extends Error {}, authService: { getVerificationResendCooldownMs: () => 0 } },
     '../auth/authErrors': { getAuthErrorMessage: () => 'Mock auth error' },
     '../auth/googleAuthService': { googleAuthService: { isConfigured: () => false, signIn: async () => ({ status: 'cancelled' }) } },
+    '../auth/googleAuthDiagnostics': { getGoogleAuthDiagnosticLabel: () => null },
     '../auth/authValidation': {
       normalizeDisplayName: value => value.trim(), normalizeEmail: value => value.trim().toLowerCase(),
       validateRegistration: () => ({}), validateSignIn: () => ({}),

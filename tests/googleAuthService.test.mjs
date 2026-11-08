@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AuthOperationError } from '../src/auth/authServiceCore.ts';
-import { createGoogleAuthService } from '../src/auth/googleAuthServiceCore.ts';
+import { createGoogleAuthService, GoogleAuthOperationError } from '../src/auth/googleAuthServiceCore.ts';
 
 function createHarness({ configuration = {}, response = { type: 'success', data: { idToken: 'google-id-token' } }, failure } = {}) {
   const calls = [];
@@ -14,7 +14,11 @@ function createHarness({ configuration = {}, response = { type: 'success', data:
     getConfiguration: () => config,
     loadNativeSignIn: async (receivedConfig) => {
       calls.push(['configured', receivedConfig.webClientId]);
-      if (failure === 'load') throw new Error('private native response');
+      if (failure === 'load') {
+        throw Object.assign(new Error('private native response with test@example.invalid id-token-secret'), {
+          code: 'unlisted-native-code-secret',
+        });
+      }
       return {
         checkPlayServices: async () => {
           calls.push(['play-services']);
@@ -24,7 +28,11 @@ function createHarness({ configuration = {}, response = { type: 'success', data:
         },
         presentExplicitSignIn: async () => {
           calls.push(['google-ui']);
-          if (failure === 'google-ui') throw new Error('private native response');
+          if (failure === 'google-ui') {
+            throw Object.assign(new Error('private picker response with account@example.invalid token-secret'), {
+              code: 'DEVELOPER_ERROR',
+            });
+          }
           return response;
         },
       };
@@ -103,6 +111,49 @@ test('native and Firebase failures map to safe messages without exposing provide
     assert.ok(error instanceof AuthOperationError);
     assert.match(error.message, /Could not reach the sign-in service/);
     assert.doesNotMatch(error.message, /private Firebase response/);
+    return true;
+  });
+});
+
+test('Google sign-in diagnostics identify stages while keeping provider details out of errors', async () => {
+  const nativeFailure = createHarness({ failure: 'load' });
+  await assert.rejects(nativeFailure.service.signIn(), (error) => {
+    assert.ok(error instanceof GoogleAuthOperationError);
+    assert.equal(error.diagnostic.stage, 'native-module-configure');
+    assert.equal(error.diagnostic.code, 'UNCLASSIFIED');
+    assert.doesNotMatch(error.message, /private native response|example\.invalid|token-secret|unlisted-native-code-secret/);
+    return true;
+  });
+
+  const playServicesFailure = createHarness({ failure: 'play-services' });
+  await assert.rejects(playServicesFailure.service.signIn(), (error) => {
+    assert.equal(error.diagnostic.stage, 'play-services');
+    assert.equal(error.diagnostic.code, 'PLAY_SERVICES_NOT_AVAILABLE');
+    return true;
+  });
+
+  const pickerFailure = createHarness({ failure: 'google-ui' });
+  await assert.rejects(pickerFailure.service.signIn(), (error) => {
+    assert.equal(error.diagnostic.stage, 'account-picker');
+    assert.equal(error.diagnostic.code, 'DEVELOPER_ERROR');
+    assert.doesNotMatch(error.message, /private picker response|account@example|token-secret/);
+    return true;
+  });
+
+  const firebaseFailure = createHarness({ failure: 'firebase' });
+  await assert.rejects(firebaseFailure.service.signIn(), (error) => {
+    assert.equal(error.diagnostic.stage, 'firebase-auth');
+    assert.equal(error.diagnostic.code, 'auth/network-request-failed');
+    return true;
+  });
+});
+
+test('missing Google ID token is identified as an account-picker-stage failure', async () => {
+  const { service } = createHarness({ response: { type: 'noSavedCredentialFound', data: null } });
+  await assert.rejects(service.signIn(), (error) => {
+    assert.equal(error.diagnostic.stage, 'account-picker');
+    assert.equal(error.diagnostic.code, 'NO_ID_TOKEN');
+    assert.doesNotMatch(error.message, /google-id-token|private/);
     return true;
   });
 });
