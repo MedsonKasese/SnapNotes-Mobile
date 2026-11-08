@@ -117,6 +117,30 @@ test('repeat reminders queue future occurrences and restart reconciliation avoid
   assert.equal(fake.requests.size, 16);
 });
 
+test('overlapping repeat reconciliation schedules each occurrence exactly once', async () => {
+  const fake = fakeNotifications();
+  const scheduler = createReminderScheduler(fake.api, fake.getNow);
+  await scheduler.requestPermission();
+  const schedule = fake.api.scheduleNotificationAsync;
+  let scheduleCalls = 0;
+  fake.api.scheduleNotificationAsync = async request => {
+    scheduleCalls += 1;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    return schedule(request);
+  };
+
+  const repeatingNote = normalNote({ reminderRepeat: dailyRepeat() });
+  const results = await Promise.all([
+    scheduler.reconcileNotes([repeatingNote]),
+    scheduler.reconcileNotes([repeatingNote]),
+  ]);
+  const occurrences = [...fake.requests.values()].map(request => request.content.data.occurrenceAt);
+  assert.equal(results[0].scheduled + results[1].scheduled, 16);
+  assert.equal(scheduleCalls, 16);
+  assert.equal(fake.requests.size, 16);
+  assert.equal(new Set(occurrences).size, 16);
+});
+
 test('repeating queue respects a conservative device-wide pending-notification budget', async () => {
   const fake = fakeNotifications({ maxPendingNotifications: 2 });
   const scheduler = createReminderScheduler(fake.api, fake.getNow);

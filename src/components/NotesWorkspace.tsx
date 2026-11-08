@@ -34,7 +34,7 @@ import { NoteAttachmentSummary, NoteAttachments } from './NoteAttachments';
 import { RichNoteEditor, type FormattingAction, type FormattingState, type RichContent, type RichNoteEditorHandle } from './RichNoteEditor';
 import { ReminderControls } from './ReminderControls';
 import { addReminderReceivedListener, localReminderScheduler } from '../reminders/nativeNotifications';
-import { isValidReminderAt, normalizeReminderRepeat } from '../reminders/recurrence';
+import { formatReminderRepeat, isValidReminderAt, normalizeReminderRepeat } from '../reminders/recurrence';
 import { reminderTargetKey, resolveRegularReminderDestination, type PrivateReminderNavigationTarget, type ReminderNotificationTarget } from '../reminders/notificationResponse';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
@@ -46,6 +46,12 @@ function trackReminderOperation<T>(active: { current: Set<Promise<unknown>> }, o
   active.current.add(result);
   void result.then(() => active.current.delete(result), () => active.current.delete(result));
   return result;
+}
+
+function formatReminder(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return 'Reminder set';
+  return `Reminder ${new Date(timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
 }
 
 type FolderAction = 'rename' | 'customize' | 'delete';
@@ -1510,6 +1516,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
             }
             renderItem={({ item }) => {
               const formattedLines = item.html ? getNoteHtmlLines(item.html) : undefined;
+              const reminderLabel = item.reminderAt ? formatReminder(item.reminderAt) : '';
+              const reminderRepeatLabel = item.reminderAt ? formatReminderRepeat(item.reminderRepeat) : '';
               return (
               // Cards are informational; edit actions stay explicit in the note menu.
               // Keep nested checkboxes and menu controls independently reachable.
@@ -1542,6 +1550,13 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
                   </View>
                 )}
                 <NoteAttachmentSummary key={`note-attachment-summary:${item.id}`} noteId={item.id} />
+                {item.reminderAt && <View testID={`note-reminder-${item.id}`} accessible
+                  accessibilityLabel={reminderLabel + (reminderRepeatLabel ? ` ${reminderRepeatLabel}` : '')}
+                  style={styles.noteReminder}>
+                  <FontAwesome name="bell-o" size={15} color="#7a857c" accessible={false} />
+                  <Text style={styles.noteReminderText}>{reminderLabel}</Text>
+                  {reminderRepeatLabel ? <Text style={styles.noteReminderRepeat}>{reminderRepeatLabel}</Text> : null}
+                </View>}
                 <View style={styles.noteFooter}>
                   <View style={styles.noteMeta}>
                     <Text numberOfLines={1} style={styles.noteCategoryBadge}>{categoryLabel(normalizeCategory(item.category))}</Text>
@@ -1931,6 +1946,9 @@ const styles = StyleSheet.create({
   noteAccent: { width: 4, alignSelf: 'stretch', minHeight: 22, borderRadius: 4, backgroundColor: '#48a111' },
   noteTitle: { flex: 1, color: '#20351d', fontSize: 17, fontWeight: '800', lineHeight: 23 },
   noteText: { color: '#485843', fontSize: 14, lineHeight: 21 },
+  noteReminder: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 1, minHeight: 20 },
+  noteReminderText: { color: '#7a857c', fontSize: 12, fontWeight: '700', flexShrink: 1 },
+  noteReminderRepeat: { marginLeft: 8, color: '#687b69', fontSize: 13, fontWeight: '700' },
   folderModalLayer: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(0,0,0,0.45)' },
   folderModalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: '75%', gap: 12 },
   folderControl: { paddingVertical: 10, paddingHorizontal: 12, minHeight: 40 },

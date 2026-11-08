@@ -198,6 +198,35 @@ function editWorkNote(app) {
 const archivedNote = { ...savedNotes[0], id: 'archived-1', title: 'Archived project', archived: true, pinned: true, deletedAt: null };
 const trashedNote = { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' };
 
+test('regular note cards show the PWA-style reminder date, bell, and repeat summary', () => {
+  const reminderAt = '2026-11-09T03:46:00.000Z';
+  const base = { ...savedNotes[0], reminderAt, reminderNotified: false };
+  const daily = { ...base, id: 'daily-reminder', reminderRepeat: {
+    frequency: 'daily', interval: 1, timeZone: 'Africa/Blantyre', anchorAt: reminderAt,
+  } };
+  const custom = { ...base, id: 'custom-reminder', reminderRepeat: {
+    frequency: 'weekly', interval: 2, timeZone: 'Africa/Blantyre', anchorAt: reminderAt,
+  } };
+  const oneTime = { ...base, id: 'one-time-reminder', reminderRepeat: null };
+  const noReminder = { ...savedNotes[1], reminderAt: undefined, reminderRepeat: null };
+  const app = workspace([daily, custom, oneTime, noReminder]);
+  const renderCard = note => list(app.render()).props.renderItem({ item: note });
+  const dateLabel = `Reminder ${new Date(reminderAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
+
+  const dailyCard = renderCard(daily);
+  const dailyRow = find(dailyCard, element => element.props.testID === 'note-reminder-daily-reminder');
+  assert.equal(dailyRow.props.style.flexDirection, 'row');
+  assert.equal(dailyRow.props.accessibilityLabel, `${dateLabel} Every day`);
+  assert.deepEqual(elements(dailyRow).filter(element => element.type === 'Text').map(text), [dateLabel, 'Every day']);
+  assert.equal(find(dailyRow, element => element.type === 'FontAwesome').props.name, 'bell-o');
+
+  const customRow = find(renderCard(custom), element => element.props.testID === 'note-reminder-custom-reminder');
+  assert.deepEqual(elements(customRow).filter(element => element.type === 'Text').map(text), [dateLabel, 'Every 2 weeks']);
+  const oneTimeRow = find(renderCard(oneTime), element => element.props.testID === 'note-reminder-one-time-reminder');
+  assert.deepEqual(elements(oneTimeRow).filter(element => element.type === 'Text').map(text), [dateLabel]);
+  assert.equal(elements(renderCard(noReminder)).some(element => element.props.testID === 'note-reminder-' + noReminder.id), false);
+});
+
 test('new-note editor explains attachments appear after save, and saved-note editor wires the picker', () => {
   const app = workspace();
   action(app.render(), '+ New note').props.onPress();

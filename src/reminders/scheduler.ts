@@ -156,6 +156,16 @@ function desiredPrivate(note: PrivateReminderNote, now: number, matches: Schedul
 }
 
 export function createReminderScheduler(api: ReminderNotificationApi, now: () => number = Date.now) {
+  // Reconciliation is read/compare/schedule as one logical mutation. App-state,
+  // received-notification, and React effects can overlap, so serialize them to
+  // prevent two callers creating the same native alarm from one stale snapshot.
+  let mutationQueue: Promise<void> = Promise.resolve();
+  function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = mutationQueue.then(operation, operation);
+    mutationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
   async function prepare() { await api.prepare?.(); }
 
   async function requestPermission(): Promise<boolean> {
@@ -224,7 +234,7 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     return { scheduled, cancelled, unscheduled };
   }
 
-  async function reconcileNotes(notes: readonly ReminderNote[], excludedNoteIds: readonly string[] = []): Promise<ReminderSyncResult> {
+  async function reconcileNotesNow(notes: readonly ReminderNote[], excludedNoteIds: readonly string[] = []): Promise<ReminderSyncResult> {
     await prepare();
     let permissionGranted = false;
     try { permissionGranted = await api.hasPermission(); } catch { permissionGranted = false; }
@@ -251,7 +261,11 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     return { permissionGranted, ...result, stateUpdates };
   }
 
-  async function reconcilePrivateNotes(notes: readonly PrivateReminderNote[], pruneOrphans = true): Promise<ReminderSyncResult> {
+  function reconcileNotes(notes: readonly ReminderNote[], excludedNoteIds: readonly string[] = []): Promise<ReminderSyncResult> {
+    return enqueueMutation(() => reconcileNotesNow(notes, excludedNoteIds));
+  }
+
+  async function reconcilePrivateNotesNow(notes: readonly PrivateReminderNote[], pruneOrphans = true): Promise<ReminderSyncResult> {
     await prepare();
     let permissionGranted = false;
     try { permissionGranted = await api.hasPermission(); } catch { permissionGranted = false; }
@@ -280,6 +294,10 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     return { permissionGranted, ...result, stateUpdates };
   }
 
+  function reconcilePrivateNotes(notes: readonly PrivateReminderNote[], pruneOrphans = true): Promise<ReminderSyncResult> {
+    return enqueueMutation(() => reconcilePrivateNotesNow(notes, pruneOrphans));
+  }
+
   async function schedulePrivateSummary(summary: PrivateReminderSummary): Promise<ReminderSyncResult> {
     return reconcilePrivateNotes([{
       id: '', reminderAt: summary.reminderAt, reminderRepeat: summary.reminderRepeat ?? null,
@@ -287,7 +305,7 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     }], false);
   }
 
-  async function cancelPrivateReminder(scheduleKey: string | null | undefined): Promise<number> {
+  async function cancelPrivateReminderNow(scheduleKey: string | null | undefined): Promise<number> {
     if (!scheduleKey) return 0;
     const scheduled = await api.getAllScheduledNotificationsAsync();
     const matches = scheduled.filter(request => matchingPrivate(request, scheduleKey));
@@ -297,7 +315,11 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     return cancelled;
   }
 
-  async function cancelNoteReminder(noteId: string | null | undefined): Promise<number> {
+  function cancelPrivateReminder(scheduleKey: string | null | undefined): Promise<number> {
+    return scheduleKey ? enqueueMutation(() => cancelPrivateReminderNow(scheduleKey)) : Promise.resolve(0);
+  }
+
+  async function cancelNoteReminderNow(noteId: string | null | undefined): Promise<number> {
     if (!noteId) return 0;
     const scheduled = await api.getAllScheduledNotificationsAsync();
     const matches = scheduled.filter(request => matchingNormal(request, noteId));
@@ -307,6 +329,10 @@ export function createReminderScheduler(api: ReminderNotificationApi, now: () =>
     await dismissPresentedMatches(NOTE_REMINDER_KIND, 'noteId', noteId);
     await dismissPresentedMatches(NOTE_REMINDER_KIND, 'noteId', noteId);
     return cancelled;
+  }
+
+  function cancelNoteReminder(noteId: string | null | undefined): Promise<number> {
+    return noteId ? enqueueMutation(() => cancelNoteReminderNow(noteId)) : Promise.resolve(0);
   }
 
   return { requestPermission, reconcileNotes, reconcilePrivateNotes, schedulePrivateSummary, cancelPrivateReminder, cancelNoteReminder };
