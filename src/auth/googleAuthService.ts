@@ -19,22 +19,23 @@ function readGoogleConfiguration(): GoogleAuthConfiguration {
 
 const firebaseGoogleAuthDependencies = {
   getConfiguration: readGoogleConfiguration,
-  async loadNativeSignIn(configuration: GoogleAuthConfiguration) {
+  async loadNativeSignIn() {
     // Keep the native-only module lazy so opening the notes workspace does not
     // depend on an installed development build or an available Google provider.
     const { GoogleOneTapSignIn } = await import('react-native-nitro-google-signin');
-    const clientKey = `${configuration.webClientId}\u0000${configuration.iosClientId ?? ''}`;
-
-    if (configuredClientKey !== clientKey) {
-      GoogleOneTapSignIn.configure({
-        webClientId: configuration.webClientId,
-        ...(configuration.iosClientId ? { iosClientId: configuration.iosClientId } : {}),
-        offlineAccess: false,
-      });
-      configuredClientKey = clientKey;
-    }
 
     return {
+      configure(configuration: GoogleAuthConfiguration) {
+        const clientKey = `${configuration.webClientId}\u0000${configuration.iosClientId ?? ''}`;
+        if (configuredClientKey !== clientKey) {
+          GoogleOneTapSignIn.configure({
+            webClientId: configuration.webClientId,
+            ...(configuration.iosClientId ? { iosClientId: configuration.iosClientId } : {}),
+            offlineAccess: false,
+          });
+          configuredClientKey = clientKey;
+        }
+      },
       checkPlayServices: () => GoogleOneTapSignIn.checkPlayServices(),
       async presentExplicitSignIn() {
         const response = await GoogleOneTapSignIn.presentExplicitSignIn();

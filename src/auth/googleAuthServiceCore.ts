@@ -1,6 +1,10 @@
 import { AuthOperationError } from './authServiceCore.ts';
 import { getAuthErrorMessage } from './authErrors.ts';
-import { createGoogleAuthDiagnostic, type GoogleAuthDiagnostic, type GoogleAuthDiagnosticStage } from './googleAuthDiagnostics.ts';
+import {
+  createGoogleAuthDiagnostic,
+  type GoogleAuthDiagnostic,
+  type GoogleAuthDiagnosticStage,
+} from './googleAuthDiagnostics.ts';
 
 export type GoogleAuthConfiguration = {
   webClientId: string;
@@ -15,13 +19,14 @@ export type NativeGoogleSignInResponse =
   | { type: 'noSavedCredentialFound'; data?: null };
 
 export type NativeGoogleSignIn = {
+  configure: (configuration: GoogleAuthConfiguration) => void | Promise<void>;
   checkPlayServices: () => Promise<void>;
   presentExplicitSignIn: () => Promise<NativeGoogleSignInResponse>;
 };
 
 export type GoogleAuthServiceDependencies<TAuth, TCredential> = {
   getConfiguration: () => GoogleAuthConfiguration;
-  loadNativeSignIn: (configuration: GoogleAuthConfiguration) => Promise<NativeGoogleSignIn>;
+  loadNativeSignIn: () => Promise<NativeGoogleSignIn>;
   getAuth: () => TAuth;
   credentialFromIdToken: (idToken: string) => TCredential;
   signInWithCredential: (auth: TAuth, credential: TCredential) => Promise<unknown>;
@@ -73,7 +78,11 @@ function safeGoogleAuthError(
   if (error instanceof GoogleAuthOperationError) return error;
   return new GoogleAuthOperationError(
     getAuthErrorMessage(error),
-    createGoogleAuthDiagnostic(stage, error),
+    createGoogleAuthDiagnostic(
+      stage,
+      error,
+      stage === 'native-module-load' ? 'NATIVE_MODULE_LOAD_FAILED' : undefined,
+    ),
   );
 }
 
@@ -94,9 +103,11 @@ export function createGoogleAuthService<TAuth, TCredential>(
       const configError = getGoogleAuthConfigurationError(configuration);
       if (configError) throw configError;
 
-      let stage: GoogleAuthDiagnosticStage = 'native-module-configure';
+      let stage: GoogleAuthDiagnosticStage = 'native-module-load';
       try {
-        const nativeSignIn = await dependencies.loadNativeSignIn(configuration);
+        const nativeSignIn = await dependencies.loadNativeSignIn();
+        stage = 'native-module-configure';
+        await nativeSignIn.configure(configuration);
         stage = 'play-services';
         await nativeSignIn.checkPlayServices();
         stage = 'account-picker';

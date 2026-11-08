@@ -12,14 +12,22 @@ function createHarness({ configuration = {}, response = { type: 'success', data:
   };
   const service = createGoogleAuthService({
     getConfiguration: () => config,
-    loadNativeSignIn: async (receivedConfig) => {
-      calls.push(['configured', receivedConfig.webClientId]);
+    loadNativeSignIn: async () => {
+      calls.push(['loaded']);
       if (failure === 'load') {
         throw Object.assign(new Error('private native response with test@example.invalid id-token-secret'), {
           code: 'unlisted-native-code-secret',
         });
       }
       return {
+        configure: async (receivedConfig) => {
+          calls.push(['configured', receivedConfig.webClientId]);
+          if (failure === 'configure') {
+            throw Object.assign(new Error('private configure response with oauth-client-id-secret'), {
+              code: 'unlisted-configure-code-secret',
+            });
+          }
+        },
         checkPlayServices: async () => {
           calls.push(['play-services']);
           if (failure === 'play-services') {
@@ -57,6 +65,7 @@ test('Google ID token is exchanged only for a Firebase Auth session', async () =
   assert.equal(service.isConfigured(), true);
   assert.deepEqual(await service.signIn(), { status: 'signed-in' });
   assert.deepEqual(calls, [
+    ['loaded'],
     ['configured', 'test-web-client.apps.googleusercontent.com'],
     ['play-services'],
     ['google-ui'],
@@ -119,11 +128,24 @@ test('Google sign-in diagnostics identify stages while keeping provider details 
   const nativeFailure = createHarness({ failure: 'load' });
   await assert.rejects(nativeFailure.service.signIn(), (error) => {
     assert.ok(error instanceof GoogleAuthOperationError);
-    assert.equal(error.diagnostic.stage, 'native-module-configure');
-    assert.equal(error.diagnostic.code, 'UNCLASSIFIED');
+    assert.equal(error.diagnostic.stage, 'native-module-load');
+    assert.equal(error.diagnostic.code, 'NATIVE_MODULE_LOAD_FAILED');
     assert.doesNotMatch(error.message, /private native response|example\.invalid|token-secret|unlisted-native-code-secret/);
     return true;
   });
+  assert.deepEqual(nativeFailure.calls, [['loaded']]);
+
+  const configureFailure = createHarness({ failure: 'configure' });
+  await assert.rejects(configureFailure.service.signIn(), (error) => {
+    assert.equal(error.diagnostic.stage, 'native-module-configure');
+    assert.equal(error.diagnostic.code, 'UNCLASSIFIED');
+    assert.doesNotMatch(error.message, /private configure response|oauth-client-id-secret|unlisted-configure-code-secret/);
+    return true;
+  });
+  assert.deepEqual(configureFailure.calls, [
+    ['loaded'],
+    ['configured', 'test-web-client.apps.googleusercontent.com'],
+  ]);
 
   const playServicesFailure = createHarness({ failure: 'play-services' });
   await assert.rejects(playServicesFailure.service.signIn(), (error) => {

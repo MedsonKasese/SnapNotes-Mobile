@@ -26,6 +26,21 @@ test('development diagnostic keeps only an allowlisted stage and error code', ()
 });
 
 test('allowlisted provider codes are retained but arbitrary codes and stages are rejected', () => {
+  const loadError = Object.assign(new Error('raw module init includes token-secret'), {
+    code: 'unlisted-import-error-secret',
+  });
+  const loadDiagnostic = createGoogleAuthDiagnostic(
+    'native-module-load',
+    loadError,
+    'NATIVE_MODULE_LOAD_FAILED',
+  );
+  assert.equal(loadDiagnostic.code, 'NATIVE_MODULE_LOAD_FAILED');
+  assert.equal(
+    getGoogleAuthDiagnosticLabel({ diagnostic: loadDiagnostic }, true),
+    'Google sign-in diagnostic (development only): native-module-load / NATIVE_MODULE_LOAD_FAILED',
+  );
+  assert.doesNotMatch(JSON.stringify(loadDiagnostic), /token-secret|unlisted-import-error-secret/);
+
   const knownError = Object.assign(new Error('ignored raw message'), { code: 'DEVELOPER_ERROR' });
   const knownDiagnostic = createGoogleAuthDiagnostic('native-module-configure', knownError);
   assert.equal(knownDiagnostic.code, 'DEVELOPER_ERROR');
