@@ -168,7 +168,10 @@ test('service surface is read-only; adapter is limited to getDoc/getDocs on the 
   const effect = modal.slice(modal.indexOf('useEffect(() => {\n    cloudPreviewGate.current.setVerifiedUid'), modal.indexOf('}, [verifiedPreviewUid])') + 40);
   assert.doesNotMatch(effect, /setCloudPreview|cloudLibraryPreviewService\.load/);
   assert.match(modal, /cloudPreview\.uid === verifiedPreviewUid/);
-  assert.match(modal, /cloudPreviewGate\.current\.isCurrent\(cloudPreview\.uid, cloudPreview\.requestId\)/);
+  assert.match(modal, /cloudPreview\.sessionKey === state/);
+  const projection = modal.slice(modal.indexOf('const activeCloudPreview'), modal.indexOf('const verificationUserId'));
+  assert.doesNotMatch(projection, /\.current/);
+  assert.match(modal, /const preview = await cloudLibraryPreviewService\.load\(uid\);\s*if \(!cloudPreviewGate\.current\.isCurrent\(uid, requestId\)\) return;/);
   assert.doesNotMatch(modal, /deviceNotesStorage|notesStorage|AsyncStorage|PrivateVaultStorage/);
 });
 
