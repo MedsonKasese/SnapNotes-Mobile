@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TurboModuleRegistry,
   View,
   type TextInputProps,
 } from 'react-native';
@@ -287,7 +288,9 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     setGoogleNativeProbeLoading(true);
     setGoogleNativeProbeStatus(null);
     try {
-      setGoogleNativeProbeStatus(await runGoogleNativeProbe());
+      setGoogleNativeProbeStatus(await runGoogleNativeProbe({
+        getNitroTurboModule: () => TurboModuleRegistry.get('NitroModules'),
+      }));
     } catch {
       setGoogleNativeProbeStatus('NITRO_RUNTIME_INIT_FAILED');
     } finally {

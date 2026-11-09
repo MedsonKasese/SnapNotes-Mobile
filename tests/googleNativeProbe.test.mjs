@@ -47,49 +47,6 @@ test('registry lookup exceptions are reduced to a fixed status', async () => {
   assert.doesNotMatch(JSON.stringify({ status, label: getGoogleNativeProbeLabel(status, true) }), /private-email-token-client-id|registry lookup failed/);
 });
 
-test('React Native import failures have a separate fixed status and stop before Nitro import', async () => {
-  let nitroImportCalls = 0;
-  const status = await runGoogleNativeProbe({
-    loadReactNative: async () => {
-      throw new Error(`private React Native import details: ${PRIVATE_SENTINEL}`);
-    },
-    loadNitroModules: async () => {
-      nitroImportCalls += 1;
-      return {};
-    },
-  });
-
-  assert.equal(status, 'REACT_NATIVE_IMPORT_FAILED');
-  assert.equal(getGoogleNativeProbeLabel(status, true), safeLabel(status));
-  assert.equal(nitroImportCalls, 0);
-  assert.doesNotMatch(JSON.stringify({ status, label: getGoogleNativeProbeLabel(status, true) }), /private React Native import details|private-email-token-client-id/);
-});
-
-test('an unavailable React Native TurboModuleRegistry has its own fixed status', async () => {
-  for (const reactNative of [{}, { TurboModuleRegistry: { get: null } }]) {
-    const status = await runGoogleNativeProbe({ loadReactNative: async () => reactNative });
-    assert.equal(status, 'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE');
-    assert.equal(getGoogleNativeProbeLabel(status, true), safeLabel(status));
-  }
-});
-
-test('the loaded React Native registry is called with only the fixed Nitro module name', async () => {
-  const calls = [];
-  const status = await runGoogleNativeProbe({
-    loadReactNative: async () => ({
-      TurboModuleRegistry: {
-        get(name) {
-          calls.push(name);
-          return null;
-        },
-      },
-    }),
-  });
-
-  assert.equal(status, 'NITRO_TURBOMODULE_MISSING');
-  assert.deepEqual(calls, ['NitroModules']);
-});
-
 test('fixed native install code maps to NITRO_INSTALL_FAILED without exposing its message', async () => {
   const status = await runGoogleNativeProbe({
     getNitroTurboModule: () => ({}),
@@ -170,8 +127,6 @@ test('registered Google hybrid object is created once with its fixed native name
 
 test('only fixed allowlisted statuses are labeled, and release mode suppresses every status', () => {
   assert.deepEqual(GOOGLE_NATIVE_PROBE_STATUSES, [
-    'REACT_NATIVE_IMPORT_FAILED',
-    'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE',
     'NITRO_TURBOMODULE_MISSING',
     'NITRO_TURBOMODULE_LOOKUP_FAILED',
     'NITRO_INSTALL_FAILED',
@@ -192,10 +147,9 @@ test('probe source never logs or reads raw errors and avoids auth, network, and 
     .map((match) => match[1])
     .sort();
   assert.doesNotMatch(source, /console\.|error\.(?:message|stack)|JSON\.stringify/);
-  assert.deepEqual(importedModules, ['react-native', 'react-native-nitro-modules']);
+  assert.deepEqual(importedModules, ['react-native-nitro-modules']);
   assert.doesNotMatch(source, /\bfetch\s*\(|\bXMLHttpRequest\b/);
-  assert.match(source, /import\('react-native'\)/);
-  assert.match(source, /get\.call\(registry, 'NitroModules'\)/);
+  assert.doesNotMatch(source, /import\(\s*['"]react-native['"]\s*\)/);
 });
 
 test('the tracked Nitro patch removes raw native logging and exposes only a fixed install code', async () => {
@@ -233,8 +187,11 @@ test('AccountAccessModal exposes the probe only as an explicit Android developme
   const source = await readFile(new URL('../src/components/AccountAccessModal.tsx', import.meta.url), 'utf8');
   assert.match(source, /isDevelopmentBuild\(\) && Platform\.OS === 'android' \?/);
   assert.match(source, /<Text accessibilityLiveRegion="polite" style=\{styles\.googleDiagnostic\}>/);
+  assert.match(source, /import \{[^}]*\bTurboModuleRegistry\b[^}]*\} from 'react-native';/);
+  assert.match(source, /getNitroTurboModule: \(\) => TurboModuleRegistry\.get\('NitroModules'\)/);
   assert.doesNotMatch(source, /accessibilityRole=["']status["']/);
   assert.match(source, /if \(!isDevelopmentBuild\(\) \|\| Platform\.OS !== 'android'/);
+  assert.doesNotMatch(source, /import\(\s*['"]react-native['"]\s*\)/);
   assert.match(source, /onPress=\{\(\) => \{ void checkGoogleNativeModules\(\); \}\}/);
   assert.match(source, /catch \{\s*setGoogleNativeProbeStatus\('NITRO_RUNTIME_INIT_FAILED'\);\s*\}/);
   assert.doesNotMatch(source, /console\.(?:log|warn|error)\s*\(/);
