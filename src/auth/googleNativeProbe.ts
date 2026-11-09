@@ -1,4 +1,6 @@
 export const GOOGLE_NATIVE_PROBE_STATUSES = [
+  'REACT_NATIVE_IMPORT_FAILED',
+  'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE',
   'NITRO_TURBOMODULE_MISSING',
   'NITRO_TURBOMODULE_LOOKUP_FAILED',
   'NITRO_INSTALL_FAILED',
@@ -13,6 +15,7 @@ type ModuleLoader = () => Promise<unknown>;
 type TurboModuleGetter = () => unknown | Promise<unknown>;
 type ProbeDependencies = {
   getNitroTurboModule?: TurboModuleGetter;
+  loadReactNative?: ModuleLoader;
   loadNitroModules?: ModuleLoader;
 };
 type RecordValue = Record<string, unknown>;
@@ -32,9 +35,8 @@ function hasSafeInstallFailureCode(error: unknown): boolean {
   }
 }
 
-async function getNitroTurboModuleFromRegistry(): Promise<unknown> {
-  const { TurboModuleRegistry } = await import('react-native');
-  return TurboModuleRegistry.get('NitroModules');
+async function importReactNative(): Promise<unknown> {
+  return import('react-native');
 }
 
 /**
@@ -46,9 +48,38 @@ async function getNitroTurboModuleFromRegistry(): Promise<unknown> {
 export async function runGoogleNativeProbe(
   dependencies: ProbeDependencies = {},
 ): Promise<GoogleNativeProbeStatus> {
+  let getNitroTurboModule = dependencies.getNitroTurboModule;
+  if (getNitroTurboModule == null) {
+    let reactNative: unknown;
+    try {
+      reactNative = await (dependencies.loadReactNative ?? importReactNative)();
+    } catch {
+      return 'REACT_NATIVE_IMPORT_FAILED';
+    }
+
+    let registry: RecordValue | null = null;
+    try {
+      const candidate = isRecord(reactNative) ? reactNative.TurboModuleRegistry : null;
+      registry = isRecord(candidate) ? candidate : null;
+    } catch {
+      return 'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE';
+    }
+    if (registry == null) return 'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE';
+
+    let registryGetter: unknown;
+    try {
+      registryGetter = registry.get;
+    } catch {
+      return 'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE';
+    }
+    if (typeof registryGetter !== 'function') return 'NITRO_TURBOMODULE_REGISTRY_UNAVAILABLE';
+    const get = registryGetter as (name: string) => unknown | Promise<unknown>;
+    getNitroTurboModule = () => get.call(registry, 'NitroModules');
+  }
+
   let nativeModule: unknown;
   try {
-    nativeModule = await (dependencies.getNitroTurboModule ?? getNitroTurboModuleFromRegistry)();
+    nativeModule = await getNitroTurboModule();
   } catch {
     return 'NITRO_TURBOMODULE_LOOKUP_FAILED';
   }
