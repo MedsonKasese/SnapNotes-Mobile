@@ -89,6 +89,8 @@ test('probe source does not log, retain, or expose native error details or appli
 test('AccountAccessModal exposes the probe only as an explicit Android development action', async () => {
   const source = await readFile(new URL('../src/components/AccountAccessModal.tsx', import.meta.url), 'utf8');
   assert.match(source, /isDevelopmentBuild\(\) && Platform\.OS === 'android' \?/);
+  assert.match(source, /<Text accessibilityLiveRegion="polite" style=\{styles\.googleDiagnostic\}>/);
+  assert.doesNotMatch(source, /accessibilityRole=["']status["']/);
   assert.match(source, /if \(!isDevelopmentBuild\(\) \|\| Platform\.OS !== 'android'/);
   assert.match(source, /onPress=\{\(\) => \{ void checkGoogleNativeModules\(\); \}\}/);
   assert.doesNotMatch(source, /console\.(?:log|warn|error)\s*\(/);

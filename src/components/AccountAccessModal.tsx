@@ -581,7 +581,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                         onPress={() => { void checkGoogleNativeModules(); }}
                       />
                       {googleNativeProbeStatus ? (
-                        <Text accessibilityRole="status" style={styles.googleDiagnostic}>
+                        <Text accessibilityLiveRegion="polite" style={styles.googleDiagnostic}>
                           {getGoogleNativeProbeLabel(googleNativeProbeStatus, isDevelopmentBuild())}
                         </Text>
                       ) : null}
