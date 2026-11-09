@@ -289,7 +289,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     try {
       setGoogleNativeProbeStatus(await runGoogleNativeProbe());
     } catch {
-      setGoogleNativeProbeStatus('NITRO_RUNTIME_UNAVAILABLE');
+      setGoogleNativeProbeStatus('NITRO_RUNTIME_INIT_FAILED');
     } finally {
       setGoogleNativeProbeLoading(false);
     }

@@ -1,0 +1,61 @@
+diff --git a/node_modules/react-native-nitro-modules/android/src/main/java/com/margelo/nitro/NitroModules.kt b/node_modules/react-native-nitro-modules/android/src/main/java/com/margelo/nitro/NitroModules.kt
+index 592fd8d..be574f2 100644
+--- a/node_modules/react-native-nitro-modules/android/src/main/java/com/margelo/nitro/NitroModules.kt
++++ b/node_modules/react-native-nitro-modules/android/src/main/java/com/margelo/nitro/NitroModules.kt
+@@ -1,6 +1,5 @@
+ package com.margelo.nitro
+ 
+-import android.util.Log
+ import androidx.annotation.Keep
+ import com.facebook.jni.HybridData
+ import com.facebook.proguard.annotations.DoNotStrip
+@@ -11,6 +10,8 @@ import com.facebook.react.turbomodule.core.CallInvokerHolderImpl
+ import com.facebook.react.turbomodule.core.interfaces.CallInvokerHolder
+ import dalvik.annotation.optimization.FastNative
+ 
++private const val NITRO_INSTALL_FAILED = "NITRO_INSTALL_FAILED"
++
+ @DoNotStrip
+ @Keep
+ @OptIn(FrameworkAPI::class)
+@@ -35,21 +36,19 @@ class NitroModules internal constructor(
+       // 1. Get jsi::Runtime pointer
+       val jsContext =
+         context.javaScriptContextHolder
+-          ?: return "ReactApplicationContext.javaScriptContextHolder is null!"
++          ?: return NITRO_INSTALL_FAILED
+ 
+       // 2. Get CallInvokerHolder
+       val callInvokerHolder =
+         context.jsCallInvokerHolder as? CallInvokerHolderImpl
+-          ?: return "ReactApplicationContext.jsCallInvokerHolder is null!"
++          ?: return NITRO_INSTALL_FAILED
+ 
+       // 3. Install Nitro
+       install(jsContext.get(), callInvokerHolder)
+ 
+       return null
+-    } catch (e: Throwable) {
+-      // ?. Something went wrong! Maybe a JNI error?
+-      Log.e(NAME, "Failed to install Nitro!", e)
+-      return e.message
++    } catch (_: Throwable) {
++      return NITRO_INSTALL_FAILED
+     }
+   }
+ 
+diff --git a/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitroModules.ts b/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitroModules.ts
+index 0cba768..f1575d4 100644
+--- a/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitroModules.ts
++++ b/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitroModules.ts
+@@ -42,7 +42,9 @@ if (nitroModules != null) {
+   // 2. Install Dispatcher and install `NitroModulesProxy` into the Runtime's `global`
+   const errorMessage = turboModule.install()
+   if (errorMessage != null) {
+-    throw new Error(`Failed to install Nitro: ${errorMessage}`)
++    const error = new Error('NITRO_INSTALL_FAILED') as Error & { code: string }
++    error.code = 'NITRO_INSTALL_FAILED'
++    throw error
+   }
+ 
+   // 3. Find `NitroModulesProxy` in `global`
