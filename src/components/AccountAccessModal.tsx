@@ -10,7 +10,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TurboModuleRegistry,
   View,
   type TextInputProps,
 } from 'react-native';
@@ -19,12 +18,6 @@ import { useAuthState } from '../auth/AuthStateProvider';
 import { AuthOperationError, authService } from '../auth/authService';
 import { getAuthErrorMessage } from '../auth/authErrors';
 import { googleAuthService } from '../auth/googleAuthService';
-import { getGoogleAuthDiagnosticLabel } from '../auth/googleAuthDiagnostics';
-import {
-  getGoogleNativeProbeLabel,
-  runGoogleNativeProbe,
-  type GoogleNativeProbeStatus,
-} from '../auth/googleNativeProbe';
 import {
   normalizeDisplayName,
   normalizeEmail,
@@ -172,10 +165,6 @@ function safeMessage(error: unknown): string {
   return error instanceof AuthOperationError ? error.message : getAuthErrorMessage(error);
 }
 
-function isDevelopmentBuild(): boolean {
-  return typeof __DEV__ !== 'undefined' && __DEV__;
-}
-
 export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps) {
   const {
     state,
@@ -189,9 +178,6 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [googleDiagnostic, setGoogleDiagnostic] = useState<string | null>(null);
-  const [googleNativeProbeStatus, setGoogleNativeProbeStatus] = useState<GoogleNativeProbeStatus | null>(null);
-  const [googleNativeProbeLoading, setGoogleNativeProbeLoading] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState(false);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
@@ -235,8 +221,6 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     setConfirmPassword('');
     setFieldErrors({});
     setFormError(null);
-    setGoogleDiagnostic(null);
-    setGoogleNativeProbeStatus(null);
     setFeedback(null);
     setCreatedEmail(null);
     setPendingDisplayName(null);
@@ -254,12 +238,10 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     requestInFlight.current = true;
     setBusy(true);
     setFormError(null);
-    setGoogleDiagnostic(null);
     try {
       await action();
     } catch (error) {
       const message = safeMessage(error);
-      setGoogleDiagnostic(getGoogleAuthDiagnosticLabel(error, isDevelopmentBuild()));
       if (destination === 'account') setFeedback({ kind: 'warning', message });
       else setFormError(message);
     } finally {
@@ -281,21 +263,6 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
       });
       setScreen('account');
     });
-  };
-
-  const checkGoogleNativeModules = async () => {
-    if (!isDevelopmentBuild() || Platform.OS !== 'android' || googleNativeProbeLoading) return;
-    setGoogleNativeProbeLoading(true);
-    setGoogleNativeProbeStatus(null);
-    try {
-      setGoogleNativeProbeStatus(await runGoogleNativeProbe({
-        getNitroTurboModule: () => TurboModuleRegistry.get('NitroModules'),
-      }));
-    } catch {
-      setGoogleNativeProbeStatus('NITRO_RUNTIME_INIT_FAILED');
-    } finally {
-      setGoogleNativeProbeLoading(false);
-    }
   };
 
   const submitSignIn = async () => {
@@ -567,29 +534,12 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                   </View>
                 )}
                 {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
-                {isDevelopmentBuild() && googleDiagnostic ? <Text style={styles.googleDiagnostic}>{googleDiagnostic}</Text> : null}
                 <View style={styles.buttonStack}>
                   {googleSignInAvailable ? (
-                    <GoogleSignInButton disabled={busy || googleNativeProbeLoading} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
+                    <GoogleSignInButton disabled={busy} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
                   ) : (
                     <Text style={styles.hint}>Google sign-in is not configured for this build yet. Email sign-in and local notes remain available.</Text>
                   )}
-                  {isDevelopmentBuild() && Platform.OS === 'android' ? (
-                    <>
-                      <AccountButton
-                        label={googleNativeProbeLoading ? 'Checking native Google modules…' : 'Check native Google modules'}
-                        loading={googleNativeProbeLoading}
-                        disabled={busy || googleNativeProbeLoading}
-                        secondary
-                        onPress={() => { void checkGoogleNativeModules(); }}
-                      />
-                      {googleNativeProbeStatus ? (
-                        <Text accessibilityLiveRegion="polite" style={styles.googleDiagnostic}>
-                          {getGoogleNativeProbeLabel(googleNativeProbeStatus, isDevelopmentBuild())}
-                        </Text>
-                      ) : null}
-                    </>
-                  ) : null}
                   <AccountButton label="Sign in" onPress={() => { setFormError(null); setFieldErrors({}); setScreen('sign-in'); }} />
                   <AccountButton label="Create account" secondary onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
                   <AccountButton label="Back to notes" secondary onPress={close} />
@@ -629,14 +579,13 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                   disabled={busy}
                   onPress={() => { setFormError(null); setFieldErrors({}); setFeedback(null); setScreen('password-reset'); }}
                   style={({ pressed }) => [styles.forgotPasswordLink, (pressed || busy) && styles.buttonDimmed]}
-                >
-                  <Text style={styles.forgotPasswordText}>Forgot password?</Text>
-                </Pressable>
+                  >
+                    <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                  </Pressable>
                 {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
-                {isDevelopmentBuild() && googleDiagnostic ? <Text style={styles.googleDiagnostic}>{googleDiagnostic}</Text> : null}
                 <View style={styles.buttonStack}>
                   {googleSignInAvailable ? (
-                    <GoogleSignInButton disabled={busy || googleNativeProbeLoading} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
+                    <GoogleSignInButton disabled={busy} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
                   ) : (
                     <Text style={styles.hint}>Google sign-in is not configured for this build yet. Email sign-in and local notes remain available.</Text>
                   )}
@@ -768,7 +717,6 @@ const styles = StyleSheet.create({
   inputError: { borderColor: '#b3261e' },
   fieldError: { color: '#b3261e', fontSize: 12, lineHeight: 17 },
   formError: { color: '#ff827a', fontSize: 13, lineHeight: 19 },
-  googleDiagnostic: { color: '#f2d078', fontSize: 11, lineHeight: 16 },
   success: { color: '#a4e180', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#1c2d1b' },
   warning: { color: '#f2d078', fontSize: 13, lineHeight: 20, padding: 12, borderRadius: 10, backgroundColor: '#302916', borderWidth: 1, borderColor: '#594a25' },
   hint: { color: '#a5afa6', fontSize: 13, lineHeight: 19 },

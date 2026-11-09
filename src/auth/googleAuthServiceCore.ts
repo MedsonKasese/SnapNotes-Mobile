@@ -1,10 +1,5 @@
 import { AuthOperationError } from './authServiceCore.ts';
 import { getAuthErrorMessage } from './authErrors.ts';
-import {
-  createGoogleAuthDiagnostic,
-  type GoogleAuthDiagnostic,
-  type GoogleAuthDiagnosticStage,
-} from './googleAuthDiagnostics.ts';
 
 export type GoogleAuthConfiguration = {
   webClientId: string;
@@ -31,16 +26,6 @@ export type GoogleAuthServiceDependencies<TAuth, TCredential> = {
   credentialFromIdToken: (idToken: string) => TCredential;
   signInWithCredential: (auth: TAuth, credential: TCredential) => Promise<unknown>;
 };
-
-export class GoogleAuthOperationError extends AuthOperationError {
-  readonly diagnostic: GoogleAuthDiagnostic;
-
-  constructor(message: string, diagnostic: GoogleAuthDiagnostic) {
-    super(message);
-    this.name = 'GoogleAuthOperationError';
-    this.diagnostic = diagnostic;
-  }
-}
 
 export function getGoogleAuthConfigurationError(
   configuration: GoogleAuthConfiguration,
@@ -71,19 +56,9 @@ export function getGoogleAuthConfigurationError(
   return null;
 }
 
-function safeGoogleAuthError(
-  error: unknown,
-  stage: GoogleAuthDiagnosticStage,
-): GoogleAuthOperationError {
-  if (error instanceof GoogleAuthOperationError) return error;
-  return new GoogleAuthOperationError(
-    getAuthErrorMessage(error),
-    createGoogleAuthDiagnostic(
-      stage,
-      error,
-      stage === 'native-module-load' ? 'NATIVE_MODULE_LOAD_FAILED' : undefined,
-    ),
-  );
+function safeGoogleAuthError(error: unknown): AuthOperationError {
+  if (error instanceof AuthOperationError) return error;
+  return new AuthOperationError(getAuthErrorMessage(error));
 }
 
 export function createGoogleAuthService<TAuth, TCredential>(
@@ -103,32 +78,26 @@ export function createGoogleAuthService<TAuth, TCredential>(
       const configError = getGoogleAuthConfigurationError(configuration);
       if (configError) throw configError;
 
-      let stage: GoogleAuthDiagnosticStage = 'native-module-load';
       try {
         const nativeSignIn = await dependencies.loadNativeSignIn();
-        stage = 'native-module-configure';
         await nativeSignIn.configure(configuration);
-        stage = 'play-services';
         await nativeSignIn.checkPlayServices();
-        stage = 'account-picker';
         const response = await nativeSignIn.presentExplicitSignIn();
 
         if (response.type === 'cancelled') return { status: 'cancelled' };
         if (response.type !== 'success' || !response.data?.idToken) {
-          throw new GoogleAuthOperationError(
+          throw new AuthOperationError(
             'Google sign-in could not provide an account token. Try again, or use email sign-in.',
-            createGoogleAuthDiagnostic(stage, null, 'NO_ID_TOKEN'),
           );
         }
 
         // Only the Google ID token is exchanged with Firebase Auth. This service
         // intentionally has no note, storage, sync, or Private Notes dependency.
-        stage = 'firebase-auth';
         const credential = dependencies.credentialFromIdToken(response.data.idToken);
         await dependencies.signInWithCredential(dependencies.getAuth(), credential);
         return { status: 'signed-in' };
       } catch (error) {
-        throw safeGoogleAuthError(error, stage);
+        throw safeGoogleAuthError(error);
       }
     },
   };

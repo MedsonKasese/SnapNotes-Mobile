@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AuthOperationError } from '../src/auth/authServiceCore.ts';
-import { createGoogleAuthService, GoogleAuthOperationError } from '../src/auth/googleAuthServiceCore.ts';
+import { createGoogleAuthService } from '../src/auth/googleAuthServiceCore.ts';
 
 function createHarness({ configuration = {}, response = { type: 'success', data: { idToken: 'google-id-token' } }, failure } = {}) {
   const calls = [];
@@ -124,57 +124,36 @@ test('native and Firebase failures map to safe messages without exposing provide
   });
 });
 
-test('Google sign-in diagnostics identify stages while keeping provider details out of errors', async () => {
-  const nativeFailure = createHarness({ failure: 'load' });
-  await assert.rejects(nativeFailure.service.signIn(), (error) => {
-    assert.ok(error instanceof GoogleAuthOperationError);
-    assert.equal(error.diagnostic.stage, 'native-module-load');
-    assert.equal(error.diagnostic.code, 'NATIVE_MODULE_LOAD_FAILED');
-    assert.doesNotMatch(error.message, /private native response|example\.invalid|token-secret|unlisted-native-code-secret/);
-    return true;
-  });
-  assert.deepEqual(nativeFailure.calls, [['loaded']]);
+test('Google sign-in failures stay sanitized without internal diagnostic metadata', async () => {
+  const cases = [
+    ['load', 'Something went wrong. Please try again. Your notes remain on this device.'],
+    ['configure', 'Something went wrong. Please try again. Your notes remain on this device.'],
+    ['play-services', 'Google Play services is missing or out of date. Update it, then try again.'],
+    ['google-ui', 'Google sign-in setup is incomplete for this app. Contact the app owner to check its OAuth configuration.'],
+    ['firebase', 'Could not reach the sign-in service. Check your connection and try again.'],
+  ];
 
-  const configureFailure = createHarness({ failure: 'configure' });
-  await assert.rejects(configureFailure.service.signIn(), (error) => {
-    assert.equal(error.diagnostic.stage, 'native-module-configure');
-    assert.equal(error.diagnostic.code, 'UNCLASSIFIED');
-    assert.doesNotMatch(error.message, /private configure response|oauth-client-id-secret|unlisted-configure-code-secret/);
-    return true;
-  });
-  assert.deepEqual(configureFailure.calls, [
-    ['loaded'],
-    ['configured', 'test-web-client.apps.googleusercontent.com'],
-  ]);
-
-  const playServicesFailure = createHarness({ failure: 'play-services' });
-  await assert.rejects(playServicesFailure.service.signIn(), (error) => {
-    assert.equal(error.diagnostic.stage, 'play-services');
-    assert.equal(error.diagnostic.code, 'PLAY_SERVICES_NOT_AVAILABLE');
-    return true;
-  });
-
-  const pickerFailure = createHarness({ failure: 'google-ui' });
-  await assert.rejects(pickerFailure.service.signIn(), (error) => {
-    assert.equal(error.diagnostic.stage, 'account-picker');
-    assert.equal(error.diagnostic.code, 'DEVELOPER_ERROR');
-    assert.doesNotMatch(error.message, /private picker response|account@example|token-secret/);
-    return true;
-  });
-
-  const firebaseFailure = createHarness({ failure: 'firebase' });
-  await assert.rejects(firebaseFailure.service.signIn(), (error) => {
-    assert.equal(error.diagnostic.stage, 'firebase-auth');
-    assert.equal(error.diagnostic.code, 'auth/network-request-failed');
-    return true;
-  });
+  for (const [failure, expectedMessage] of cases) {
+    const { service } = createHarness({ failure });
+    await assert.rejects(service.signIn(), (error) => {
+      assert.ok(error instanceof AuthOperationError);
+      assert.equal(error.message, expectedMessage);
+      assert.equal(Object.hasOwn(error, 'diagnostic'), false);
+      assert.doesNotMatch(
+        error.message,
+        /private native response|private configure response|oauth-client-id-secret|private picker response|account@example\.invalid|token-secret|private Firebase response|unlisted-.*-code-secret/,
+      );
+      return true;
+    });
+  }
 });
 
-test('missing Google ID token is identified as an account-picker-stage failure', async () => {
+test('missing Google ID token reports a fixed safe message', async () => {
   const { service } = createHarness({ response: { type: 'noSavedCredentialFound', data: null } });
   await assert.rejects(service.signIn(), (error) => {
-    assert.equal(error.diagnostic.stage, 'account-picker');
-    assert.equal(error.diagnostic.code, 'NO_ID_TOKEN');
+    assert.ok(error instanceof AuthOperationError);
+    assert.equal(error.message, 'Google sign-in could not provide an account token. Try again, or use email sign-in.');
+    assert.equal(Object.hasOwn(error, 'diagnostic'), false);
     assert.doesNotMatch(error.message, /google-id-token|private/);
     return true;
   });
@@ -185,6 +164,15 @@ test('Google sign-in implementation has no note or Private Notes storage depende
   const core = await readFile(new URL('../src/auth/googleAuthServiceCore.ts', import.meta.url), 'utf8');
   const adapter = await readFile(new URL('../src/auth/googleAuthService.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(`${core}\n${adapter}`, /notesStorage|AsyncStorage|Firestore|privateVault|noteTransfer/i);
+});
+
+test('account modal no longer exposes temporary Google native diagnostics', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../src/components/AccountAccessModal.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(
+    source,
+    /googleNativeProbe|googleDiagnostic|Google sign-in diagnostic|Native Google module check|Check native Google modules|__DEV__/,
+  );
 });
 
 test('native Google package stays lazy and uses Metro require', async () => {

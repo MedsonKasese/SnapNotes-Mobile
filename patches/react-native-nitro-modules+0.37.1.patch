@@ -48,14 +48,12 @@ diff --git a/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitro
 index 0cba768..f1575d4 100644
 --- a/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitroModules.ts
 +++ b/node_modules/react-native-nitro-modules/src/turbomodule/NativeNitroModules.ts
-@@ -42,7 +42,9 @@ if (nitroModules != null) {
+@@ -42,7 +42,7 @@ if (nitroModules != null) {
    // 2. Install Dispatcher and install `NitroModulesProxy` into the Runtime's `global`
    const errorMessage = turboModule.install()
    if (errorMessage != null) {
 -    throw new Error(`Failed to install Nitro: ${errorMessage}`)
-+    const error = new Error('NITRO_INSTALL_FAILED') as Error & { code: string }
-+    error.code = 'NITRO_INSTALL_FAILED'
-+    throw error
++    throw new Error('NITRO_INSTALL_FAILED')
    }
  
    // 3. Find `NitroModulesProxy` in `global`
