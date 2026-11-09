@@ -10,8 +10,9 @@ const { outputText } = ts.transpileModule(source, {
 });
 const FIELD_VALUE = String.fromCharCode(97, 98, 99, 49, 50, 51);
 
-function mount() {
+function mount({ development = false } = {}) {
   const stateSlots = new Map();
+  const probeCalls = [];
   let activeComponent = '';
   let hookIndex = 0;
   const useEffect = () => {};
@@ -48,6 +49,15 @@ function mount() {
     '../auth/authErrors': { getAuthErrorMessage: () => 'Mock auth error' },
     '../auth/googleAuthService': { googleAuthService: { isConfigured: () => false, signIn: async () => ({ status: 'cancelled' }) } },
     '../auth/googleAuthDiagnostics': { getGoogleAuthDiagnosticLabel: () => null },
+    '../auth/googleNativeProbe': {
+      runGoogleNativeProbe: async () => {
+        probeCalls.push('called');
+        return 'GOOGLE_HYBRID_READY';
+      },
+      getGoogleNativeProbeLabel: (status, isDevelopment) => isDevelopment
+        ? `Native Google module check (development only): ${status}`
+        : null,
+    },
     '../auth/authValidation': {
       normalizeDisplayName: value => value.trim(), normalizeEmail: value => value.trim().toLowerCase(),
       validateRegistration: () => ({}), validateSignIn: () => ({}),
@@ -64,6 +74,7 @@ function mount() {
     module,
     exports: moduleExports,
     console,
+    __DEV__: development,
   });
 
   const resolve = (node, path = 'root') => {
@@ -83,7 +94,7 @@ function mount() {
     return { type, props: { ...props, children: resolve(props.children, `${path}.children`) } };
   };
   const render = () => resolve({ type: module.exports.AccountAccessModal, props: { visible: true, onClose() {} } });
-  return { render };
+  return { render, probeCalls };
 }
 
 function elements(tree) {
@@ -152,4 +163,22 @@ test('login password starts masked and has a labeled show/hide toggle', () => {
   assert.equal(visibilityButton(tree, 'Hide password').props.accessibilityRole, 'togglebutton');
   assert.equal(visibilityButton(tree, 'Hide password').props.accessibilityState.checked, true);
   assert.equal(visibilityButton(tree, 'Hide password').props.accessibilityHint, 'Hides the password on screen');
+});
+
+test('native Google probe is a user-triggered development-only Android action', async () => {
+  const releaseApp = mount({ development: false });
+  const releaseTree = releaseApp.render();
+  assert.equal(
+    elements(releaseTree).some(item => item.type === 'Pressable' && text(item) === 'Check native Google modules'),
+    false,
+  );
+
+  const developmentApp = mount({ development: true });
+  let developmentTree = developmentApp.render();
+  assert.equal(developmentApp.probeCalls.length, 0);
+  textButton(developmentTree, 'Check native Google modules').props.onPress();
+  assert.equal(developmentApp.probeCalls.length, 1);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  developmentTree = developmentApp.render();
+  assert.match(text(developmentTree), /Native Google module check \(development only\): GOOGLE_HYBRID_READY/);
 });

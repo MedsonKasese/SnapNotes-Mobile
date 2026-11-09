@@ -20,6 +20,11 @@ import { getAuthErrorMessage } from '../auth/authErrors';
 import { googleAuthService } from '../auth/googleAuthService';
 import { getGoogleAuthDiagnosticLabel } from '../auth/googleAuthDiagnostics';
 import {
+  getGoogleNativeProbeLabel,
+  runGoogleNativeProbe,
+  type GoogleNativeProbeStatus,
+} from '../auth/googleNativeProbe';
+import {
   normalizeDisplayName,
   normalizeEmail,
   validateEmailAddress,
@@ -184,6 +189,8 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [googleDiagnostic, setGoogleDiagnostic] = useState<string | null>(null);
+  const [googleNativeProbeStatus, setGoogleNativeProbeStatus] = useState<GoogleNativeProbeStatus | null>(null);
+  const [googleNativeProbeLoading, setGoogleNativeProbeLoading] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState(false);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
@@ -228,6 +235,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     setFieldErrors({});
     setFormError(null);
     setGoogleDiagnostic(null);
+    setGoogleNativeProbeStatus(null);
     setFeedback(null);
     setCreatedEmail(null);
     setPendingDisplayName(null);
@@ -272,6 +280,19 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
       });
       setScreen('account');
     });
+  };
+
+  const checkGoogleNativeModules = async () => {
+    if (!isDevelopmentBuild() || Platform.OS !== 'android' || googleNativeProbeLoading) return;
+    setGoogleNativeProbeLoading(true);
+    setGoogleNativeProbeStatus(null);
+    try {
+      setGoogleNativeProbeStatus(await runGoogleNativeProbe());
+    } catch {
+      setGoogleNativeProbeStatus('NITRO_RUNTIME_UNAVAILABLE');
+    } finally {
+      setGoogleNativeProbeLoading(false);
+    }
   };
 
   const submitSignIn = async () => {
@@ -546,10 +567,26 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                 {isDevelopmentBuild() && googleDiagnostic ? <Text style={styles.googleDiagnostic}>{googleDiagnostic}</Text> : null}
                 <View style={styles.buttonStack}>
                   {googleSignInAvailable ? (
-                    <GoogleSignInButton disabled={busy} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
+                    <GoogleSignInButton disabled={busy || googleNativeProbeLoading} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
                   ) : (
                     <Text style={styles.hint}>Google sign-in is not configured for this build yet. Email sign-in and local notes remain available.</Text>
                   )}
+                  {isDevelopmentBuild() && Platform.OS === 'android' ? (
+                    <>
+                      <AccountButton
+                        label={googleNativeProbeLoading ? 'Checking native Google modules…' : 'Check native Google modules'}
+                        loading={googleNativeProbeLoading}
+                        disabled={busy || googleNativeProbeLoading}
+                        secondary
+                        onPress={() => { void checkGoogleNativeModules(); }}
+                      />
+                      {googleNativeProbeStatus ? (
+                        <Text accessibilityRole="status" style={styles.googleDiagnostic}>
+                          {getGoogleNativeProbeLabel(googleNativeProbeStatus, isDevelopmentBuild())}
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : null}
                   <AccountButton label="Sign in" onPress={() => { setFormError(null); setFieldErrors({}); setScreen('sign-in'); }} />
                   <AccountButton label="Create account" secondary onPress={() => { setFormError(null); setFieldErrors({}); setScreen('register'); }} />
                   <AccountButton label="Back to notes" secondary onPress={close} />
@@ -596,7 +633,7 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                 {isDevelopmentBuild() && googleDiagnostic ? <Text style={styles.googleDiagnostic}>{googleDiagnostic}</Text> : null}
                 <View style={styles.buttonStack}>
                   {googleSignInAvailable ? (
-                    <GoogleSignInButton disabled={busy} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
+                    <GoogleSignInButton disabled={busy || googleNativeProbeLoading} loading={busy} onPress={() => { void submitGoogleSignIn(); }} />
                   ) : (
                     <Text style={styles.hint}>Google sign-in is not configured for this build yet. Email sign-in and local notes remain available.</Text>
                   )}
