@@ -186,3 +186,14 @@ test('Google sign-in implementation has no note or Private Notes storage depende
   const adapter = await readFile(new URL('../src/auth/googleAuthService.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(`${core}\n${adapter}`, /notesStorage|AsyncStorage|Firestore|privateVault|noteTransfer/i);
 });
+
+test('native Google package stays lazy and uses Metro require', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const adapter = await readFile(new URL('../src/auth/googleAuthService.ts', import.meta.url), 'utf8');
+  const loader = adapter.match(/async loadNativeSignIn\(\)\s*\{([\s\S]*?)\n  \},/);
+
+  assert.ok(loader, 'native sign-in loader should remain inside its lazy method');
+  assert.match(loader[1], /require\('react-native-nitro-google-signin'\)/);
+  assert.doesNotMatch(loader[1], /import\('react-native-nitro-google-signin'\)/);
+  assert.doesNotMatch(adapter, /^import .*from ['"]react-native-nitro-google-signin['"]/m);
+});

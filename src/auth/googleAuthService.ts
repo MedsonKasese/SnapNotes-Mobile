@@ -6,6 +6,8 @@ import {
   type GoogleAuthConfiguration,
 } from './googleAuthServiceCore';
 
+type NitroGoogleSignInModule = typeof import('react-native-nitro-google-signin');
+
 let configuredClientKey: string | null = null;
 
 function readGoogleConfiguration(): GoogleAuthConfiguration {
@@ -22,7 +24,11 @@ const firebaseGoogleAuthDependencies = {
   async loadNativeSignIn() {
     // Keep the native-only module lazy so opening the notes workspace does not
     // depend on an installed development build or an available Google provider.
-    const { GoogleOneTapSignIn } = await import('react-native-nitro-google-signin');
+    // Match the lazy Metro require used by the Private Notes native crypto loader.
+    // Expo Metro resolves import() and require() through different entry points.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nativeSignIn = require('react-native-nitro-google-signin') as NitroGoogleSignInModule;
+    const { GoogleOneTapSignIn } = nativeSignIn;
 
     return {
       configure(configuration: GoogleAuthConfiguration) {
