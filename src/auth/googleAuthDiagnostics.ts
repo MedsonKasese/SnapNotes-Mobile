@@ -17,6 +17,7 @@ const GOOGLE_AUTH_DIAGNOSTIC_CODES = [
   'SIGN_IN_CANCELLED',
   'NO_ID_TOKEN',
   'MISSING_WEB_CLIENT_ID',
+  'NITRO_INSTALL_FAILED',
   'NATIVE_MODULE_LOAD_FAILED',
   'auth/network-request-failed',
   'auth/operation-not-allowed',

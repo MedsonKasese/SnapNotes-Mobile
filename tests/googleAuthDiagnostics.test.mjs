@@ -41,6 +41,20 @@ test('allowlisted provider codes are retained but arbitrary codes and stages are
   );
   assert.doesNotMatch(JSON.stringify(loadDiagnostic), /token-secret|unlisted-import-error-secret/);
 
+  const nitroInstallDiagnostic = createGoogleAuthDiagnostic(
+    'native-module-load',
+    Object.assign(new Error('raw Nitro install stack contains account@example.invalid'), {
+      code: 'NITRO_INSTALL_FAILED',
+    }),
+    'NATIVE_MODULE_LOAD_FAILED',
+  );
+  assert.equal(nitroInstallDiagnostic.code, 'NITRO_INSTALL_FAILED');
+  assert.equal(
+    getGoogleAuthDiagnosticLabel({ diagnostic: nitroInstallDiagnostic }, true),
+    'Google sign-in diagnostic (development only): native-module-load / NITRO_INSTALL_FAILED',
+  );
+  assert.doesNotMatch(JSON.stringify(nitroInstallDiagnostic), /raw Nitro install stack|account@example\.invalid/);
+
   const knownError = Object.assign(new Error('ignored raw message'), { code: 'DEVELOPER_ERROR' });
   const knownDiagnostic = createGoogleAuthDiagnostic('native-module-configure', knownError);
   assert.equal(knownDiagnostic.code, 'DEVELOPER_ERROR');
