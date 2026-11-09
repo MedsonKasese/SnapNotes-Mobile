@@ -12,10 +12,22 @@ function createHarness({ configuration = {}, response = { type: 'success', data:
   };
   const service = createGoogleAuthService({
     getConfiguration: () => config,
-    loadNativeSignIn: async (receivedConfig) => {
-      calls.push(['configured', receivedConfig.webClientId]);
-      if (failure === 'load') throw new Error('private native response');
+    loadNativeSignIn: async () => {
+      calls.push(['loaded']);
+      if (failure === 'load') {
+        throw Object.assign(new Error('private native response with test@example.invalid id-token-secret'), {
+          code: 'unlisted-native-code-secret',
+        });
+      }
       return {
+        configure: async (receivedConfig) => {
+          calls.push(['configured', receivedConfig.webClientId]);
+          if (failure === 'configure') {
+            throw Object.assign(new Error('private configure response with oauth-client-id-secret'), {
+              code: 'unlisted-configure-code-secret',
+            });
+          }
+        },
         checkPlayServices: async () => {
           calls.push(['play-services']);
           if (failure === 'play-services') {
@@ -24,7 +36,11 @@ function createHarness({ configuration = {}, response = { type: 'success', data:
         },
         presentExplicitSignIn: async () => {
           calls.push(['google-ui']);
-          if (failure === 'google-ui') throw new Error('private native response');
+          if (failure === 'google-ui') {
+            throw Object.assign(new Error('private picker response with account@example.invalid token-secret'), {
+              code: 'DEVELOPER_ERROR',
+            });
+          }
           return response;
         },
       };
@@ -49,6 +65,7 @@ test('Google ID token is exchanged only for a Firebase Auth session', async () =
   assert.equal(service.isConfigured(), true);
   assert.deepEqual(await service.signIn(), { status: 'signed-in' });
   assert.deepEqual(calls, [
+    ['loaded'],
     ['configured', 'test-web-client.apps.googleusercontent.com'],
     ['play-services'],
     ['google-ui'],
@@ -107,9 +124,64 @@ test('native and Firebase failures map to safe messages without exposing provide
   });
 });
 
+test('Google sign-in failures stay sanitized without internal diagnostic metadata', async () => {
+  const cases = [
+    ['load', 'Something went wrong. Please try again. Your notes remain on this device.'],
+    ['configure', 'Something went wrong. Please try again. Your notes remain on this device.'],
+    ['play-services', 'Google Play services is missing or out of date. Update it, then try again.'],
+    ['google-ui', 'Google sign-in setup is incomplete for this app. Contact the app owner to check its OAuth configuration.'],
+    ['firebase', 'Could not reach the sign-in service. Check your connection and try again.'],
+  ];
+
+  for (const [failure, expectedMessage] of cases) {
+    const { service } = createHarness({ failure });
+    await assert.rejects(service.signIn(), (error) => {
+      assert.ok(error instanceof AuthOperationError);
+      assert.equal(error.message, expectedMessage);
+      assert.equal(Object.hasOwn(error, 'diagnostic'), false);
+      assert.doesNotMatch(
+        error.message,
+        /private native response|private configure response|oauth-client-id-secret|private picker response|account@example\.invalid|token-secret|private Firebase response|unlisted-.*-code-secret/,
+      );
+      return true;
+    });
+  }
+});
+
+test('missing Google ID token reports a fixed safe message', async () => {
+  const { service } = createHarness({ response: { type: 'noSavedCredentialFound', data: null } });
+  await assert.rejects(service.signIn(), (error) => {
+    assert.ok(error instanceof AuthOperationError);
+    assert.equal(error.message, 'Google sign-in could not provide an account token. Try again, or use email sign-in.');
+    assert.equal(Object.hasOwn(error, 'diagnostic'), false);
+    assert.doesNotMatch(error.message, /google-id-token|private/);
+    return true;
+  });
+});
+
 test('Google sign-in implementation has no note or Private Notes storage dependency', async () => {
   const { readFile } = await import('node:fs/promises');
   const core = await readFile(new URL('../src/auth/googleAuthServiceCore.ts', import.meta.url), 'utf8');
   const adapter = await readFile(new URL('../src/auth/googleAuthService.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(`${core}\n${adapter}`, /notesStorage|AsyncStorage|Firestore|privateVault|noteTransfer/i);
+});
+
+test('account modal no longer exposes temporary Google native diagnostics', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../src/components/AccountAccessModal.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(
+    source,
+    /googleNativeProbe|googleDiagnostic|Google sign-in diagnostic|Native Google module check|Check native Google modules|__DEV__/,
+  );
+});
+
+test('native Google package stays lazy and uses Metro require', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const adapter = await readFile(new URL('../src/auth/googleAuthService.ts', import.meta.url), 'utf8');
+  const loader = adapter.match(/async loadNativeSignIn\(\)\s*\{([\s\S]*?)\n  \},/);
+
+  assert.ok(loader, 'native sign-in loader should remain inside its lazy method');
+  assert.match(loader[1], /require\('react-native-nitro-google-signin'\)/);
+  assert.doesNotMatch(loader[1], /import\('react-native-nitro-google-signin'\)/);
+  assert.doesNotMatch(adapter, /^import .*from ['"]react-native-nitro-google-signin['"]/m);
 });

@@ -26,9 +26,12 @@ import {
   validateSignIn,
   type AuthFieldErrors,
 } from '../auth/authValidation';
+import { cloudLibraryPreviewService } from '../cloudLibraryPreviewFirebase';
+import { createCloudPreviewRequestGate, type CloudLibraryPreview } from '../cloudLibraryPreview';
 
 type AccountScreen = 'welcome' | 'sign-in' | 'register' | 'password-reset' | 'account';
 type Feedback = { kind: 'success' | 'warning'; message: string };
+type CloudPreviewState = { status: 'idle' } | { status: 'loading'; uid: string; sessionKey: object } | { status: 'error'; uid: string; sessionKey: object; message: string } | { status: 'ready'; uid: string; sessionKey: object; preview: CloudLibraryPreview };
 type AccountAccessModalProps = { visible: boolean; onClose: () => void };
 
 type AccountFieldProps = {
@@ -183,8 +186,19 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
   const [verificationCooldownMs, setVerificationCooldownMs] = useState(0);
   const googleSignInAvailable = googleAuthService.isConfigured();
   const requestInFlight = useRef(false);
+  const cloudPreviewGate = useRef(createCloudPreviewRequestGate());
+  const [cloudPreview, setCloudPreview] = useState<CloudPreviewState>({ status: 'idle' });
+  const verifiedPreviewUid = state.status === 'signed-in' && state.user.emailVerified ? state.user.uid : null;
+  const activeCloudPreview: CloudPreviewState = cloudPreview.status !== 'idle' &&
+    cloudPreview.uid === verifiedPreviewUid && cloudPreview.sessionKey === state
+    ? cloudPreview
+    : { status: 'idle' };
   const verificationUserId =
     state.status === 'signed-in' && !state.user.emailVerified ? state.user.uid : null;
+
+  useEffect(() => {
+    cloudPreviewGate.current.setVerifiedUid(verifiedPreviewUid);
+  }, [verifiedPreviewUid]);
 
   useEffect(() => {
     if (!visible || !verificationUserId) return;
@@ -357,6 +371,23 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
     }, 'account');
   };
 
+  const loadCloudPreview = async () => {
+    if (state.status !== 'signed-in' || !state.user.emailVerified) return;
+    const uid = state.user.uid;
+    cloudPreviewGate.current.setVerifiedUid(uid);
+    const requestId = cloudPreviewGate.current.begin(uid);
+    if (requestId === null) return;
+    setCloudPreview({ status: 'loading', uid, sessionKey: state });
+    try {
+      const preview = await cloudLibraryPreviewService.load(uid);
+      if (!cloudPreviewGate.current.isCurrent(uid, requestId)) return;
+      setCloudPreview({ status: 'ready', uid, sessionKey: state, preview });
+    } catch {
+      if (!cloudPreviewGate.current.isCurrent(uid, requestId)) return;
+      setCloudPreview({ status: 'error', uid, sessionKey: state, message: 'Could not load the cloud preview. It is not being treated as an empty library; try again when the connection is available.' });
+    }
+  };
+
   const accountView = state.status === 'signed-in' || screen === 'account';
   const accountDisplayName = state.status === 'signed-in'
     ? state.user.displayName?.trim() || state.user.email?.split('@')[0] || 'SnapNotes user'
@@ -421,6 +452,40 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                           disabled={busy || verificationCooldownMs > 0}
                           onPress={() => { void retryVerificationEmail(); }}
                         />
+                      </View>
+                    )}
+                    {state.user.emailVerified && (
+                      <View style={styles.cloudPreviewPanel}>
+                        <Text style={styles.cloudPreviewTitle}>Read-only PWA cloud preview</Text>
+                        <Text style={styles.bodyText}>Load your signed-in account library only when you choose. This preview never syncs, imports, decrypts, or changes device notes. Private Notes are excluded.</Text>
+                        <AccountButton
+                          label={activeCloudPreview.status === 'loading' ? 'Loading cloud preview…' : activeCloudPreview.status === 'ready' ? 'Refresh read-only preview' : 'Preview cloud library (read-only)'}
+                          loading={activeCloudPreview.status === 'loading'}
+                          disabled={activeCloudPreview.status === 'loading' || busy}
+                          secondary
+                          onPress={() => { void loadCloudPreview(); }}
+                        />
+                        {activeCloudPreview.status === 'error' && <Text accessibilityRole="alert" style={styles.warning}>{activeCloudPreview.message}</Text>}
+                        {activeCloudPreview.status === 'ready' && (
+                          <View style={styles.cloudPreviewResults}>
+                            <Text style={styles.hint}>Loaded read-only · {activeCloudPreview.preview.notes.length} notes · {activeCloudPreview.preview.folders.length} folders · {activeCloudPreview.preview.pageCount} cloud pages</Text>
+                            {activeCloudPreview.preview.notes.map((note, index) => {
+                              const title = typeof note.fields.title === 'string' ? note.fields.title : 'Untitled note';
+                              const text = typeof note.fields.text === 'string' ? note.fields.text : '';
+                              return (
+                                <View key={`${String(note.fields.id)}-${index}`} style={styles.cloudPreviewNote}>
+                                  <Text style={styles.cloudPreviewNoteTitle}>{title || 'Untitled note'}</Text>
+                                  {text ? <Text numberOfLines={3} style={styles.cloudPreviewNoteText}>{text}</Text> : null}
+                                  {note.unsupportedFields.length > 0 && <Text style={styles.cloudPreviewUnsupported}>Unsupported PWA fields: {note.unsupportedFields.join(', ')}</Text>}
+                                </View>
+                              );
+                            })}
+                            {activeCloudPreview.preview.folders.length > 0 && (
+                              <Text style={styles.cloudPreviewNoteText}>Folders: {activeCloudPreview.preview.folders.map((folder) => folder.name).join(', ')}</Text>
+                            )}
+                            <Text style={styles.cloudPreviewFootnote}>Preview only; nothing was imported or written back. Unsupported PWA fields (including attachment fields) are listed by name only.</Text>
+                          </View>
+                        )}
                       </View>
                     )}
                   </>
@@ -514,9 +579,9 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                   disabled={busy}
                   onPress={() => { setFormError(null); setFieldErrors({}); setFeedback(null); setScreen('password-reset'); }}
                   style={({ pressed }) => [styles.forgotPasswordLink, (pressed || busy) && styles.buttonDimmed]}
-                >
-                  <Text style={styles.forgotPasswordText}>Forgot password?</Text>
-                </Pressable>
+                  >
+                    <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                  </Pressable>
                 {formError && <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.formError}>{formError}</Text>}
                 <View style={styles.buttonStack}>
                   {googleSignInAvailable ? (
@@ -675,6 +740,14 @@ const styles = StyleSheet.create({
   accountDisplayName: { color: '#f0f4ef', fontSize: 14, fontWeight: '800' },
   accountEmail: { color: '#a5afa6', fontSize: 12, fontWeight: '400' },
   accountProvider: { color: '#84d64b', fontSize: 11, fontWeight: '800' },
+  cloudPreviewPanel: { gap: 10, padding: 14, borderRadius: 14, backgroundColor: '#111711', borderWidth: 1, borderColor: '#374239' },
+  cloudPreviewTitle: { color: '#f0f4ef', fontSize: 15, fontWeight: '800' },
+  cloudPreviewResults: { gap: 10 },
+  cloudPreviewNote: { gap: 5, padding: 11, borderRadius: 10, backgroundColor: '#202820' },
+  cloudPreviewNoteTitle: { color: '#f0f4ef', fontSize: 14, fontWeight: '700' },
+  cloudPreviewNoteText: { color: '#bbc5bc', fontSize: 13, lineHeight: 18 },
+  cloudPreviewUnsupported: { color: '#f2d078', fontSize: 12, lineHeight: 17 },
+  cloudPreviewFootnote: { color: '#a5afa6', fontSize: 11, lineHeight: 16 },
   statusPill: { alignSelf: 'flex-start', paddingHorizontal: 11, paddingVertical: 7, borderRadius: 16 },
   statusVerified: { backgroundColor: '#1c2d1b' },
   statusUnverified: { backgroundColor: '#302916' },

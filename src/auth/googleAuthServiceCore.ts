@@ -14,13 +14,14 @@ export type NativeGoogleSignInResponse =
   | { type: 'noSavedCredentialFound'; data?: null };
 
 export type NativeGoogleSignIn = {
+  configure: (configuration: GoogleAuthConfiguration) => void | Promise<void>;
   checkPlayServices: () => Promise<void>;
   presentExplicitSignIn: () => Promise<NativeGoogleSignInResponse>;
 };
 
 export type GoogleAuthServiceDependencies<TAuth, TCredential> = {
   getConfiguration: () => GoogleAuthConfiguration;
-  loadNativeSignIn: (configuration: GoogleAuthConfiguration) => Promise<NativeGoogleSignIn>;
+  loadNativeSignIn: () => Promise<NativeGoogleSignIn>;
   getAuth: () => TAuth;
   credentialFromIdToken: (idToken: string) => TCredential;
   signInWithCredential: (auth: TAuth, credential: TCredential) => Promise<unknown>;
@@ -56,9 +57,8 @@ export function getGoogleAuthConfigurationError(
 }
 
 function safeGoogleAuthError(error: unknown): AuthOperationError {
-  return error instanceof AuthOperationError
-    ? error
-    : new AuthOperationError(getAuthErrorMessage(error));
+  if (error instanceof AuthOperationError) return error;
+  return new AuthOperationError(getAuthErrorMessage(error));
 }
 
 export function createGoogleAuthService<TAuth, TCredential>(
@@ -79,7 +79,8 @@ export function createGoogleAuthService<TAuth, TCredential>(
       if (configError) throw configError;
 
       try {
-        const nativeSignIn = await dependencies.loadNativeSignIn(configuration);
+        const nativeSignIn = await dependencies.loadNativeSignIn();
+        await nativeSignIn.configure(configuration);
         await nativeSignIn.checkPlayServices();
         const response = await nativeSignIn.presentExplicitSignIn();
 

@@ -51,6 +51,8 @@ function mount() {
       normalizeDisplayName: value => value.trim(), normalizeEmail: value => value.trim().toLowerCase(),
       validateRegistration: () => ({}), validateSignIn: () => ({}),
     },
+    '../cloudLibraryPreviewFirebase': { cloudLibraryPreviewService: { load: async () => ({ source: 'legacy', pageCount: 0, notes: [], folders: [] }) } },
+    '../cloudLibraryPreview': { createCloudPreviewRequestGate: () => ({ setVerifiedUid() {}, begin: () => 1, isCurrent: () => true }) },
     '@expo/vector-icons': { MaterialCommunityIcons: 'MaterialCommunityIcons' },
   };
   vm.runInNewContext(outputText, {
