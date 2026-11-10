@@ -5,8 +5,11 @@ export type PreviewNote = {
 
 export type PreviewFolder = { id: string; name: string };
 
+export type CloudLibrarySchema = 'legacy' | 'paged-v2' | 'separated-v3';
+
 export type CloudLibraryPreview = {
   source: 'legacy' | 'revision';
+  schema: CloudLibrarySchema;
   pageCount: number;
   notes: PreviewNote[];
   folders: PreviewFolder[];
@@ -65,15 +68,35 @@ function requireArray(value: unknown, label: string): unknown[] {
   return value;
 }
 
-function projectNotes(records: unknown[]): PreviewNote[] {
+function isSafeSeparatedOrdinaryNote(record: Record<string, unknown>): boolean {
+  const hasPrivateFlag = hasOwn(record, 'isPrivate');
+  const hasPrivatePayload = hasOwn(record, 'privateData');
+  if (!hasPrivateFlag && !hasPrivatePayload) return true;
+  if (!hasPrivateFlag || !hasPrivatePayload) return false;
+  try {
+    // The PWA importer may retain this exact, non-private compatibility shape.
+    // Any other privacy marker in an ordinary v3 page is ambiguous and blocks preview.
+    return record.isPrivate === false && record.privateData === null;
+  } catch {
+    return false;
+  }
+}
+
+function projectNotes(records: unknown[], schema: CloudLibrarySchema): PreviewNote[] {
   const projected: PreviewNote[] = [];
   for (const raw of records) {
-    // Exclude private records before enumerating, projecting, or inspecting unknown fields.
-    if (isRecord(raw) && (hasOwn(raw, 'privateData') || Boolean(raw.isPrivate))) continue;
+    if (schema === 'separated-v3') {
+      if (!isRecord(raw) || !isSafeSeparatedOrdinaryNote(raw)) {
+        throw new Error('Invalid cloud library: an ordinary v3 page contains a private or ambiguous note.');
+      }
+    } else if (isRecord(raw) && (hasOwn(raw, 'privateData') || Boolean(raw.isPrivate))) {
+      // Legacy pages can be mixed; exclude private records before enumerating or projecting fields.
+      continue;
+    }
     if (!isRecord(raw)) throw new Error('Invalid cloud library: a note record is malformed.');
 
     const keys = Object.keys(raw);
-    const unsupportedFields = keys.filter((key) => !NOTE_FIELDS.has(key));
+    const unsupportedFields = keys.filter((key) => !NOTE_FIELDS.has(key) && key !== 'isPrivate' && key !== 'privateData');
     const fields: Record<string, unknown> = {};
     for (const key of NOTE_FIELDS) {
       if (hasOwn(raw, key)) fields[key] = raw[key];
@@ -96,6 +119,24 @@ function projectFolders(records: unknown[]): PreviewFolder[] {
   });
 }
 
+function classifyCloudLibrarySchema(userData: Record<string, unknown>): CloudLibrarySchema {
+  const hasSyncVersion = hasOwn(userData, 'syncVersion');
+  const syncVersion = userData.syncVersion;
+  if (hasSyncVersion && syncVersion !== 2 && syncVersion !== 3) {
+    throw new Error('Invalid cloud library: sync schema version is unsupported.');
+  }
+
+  const hasSchemaFence = hasOwn(userData, 'privateNotesSchemaRequired') || hasOwn(userData, 'privateNotesSeparated');
+  if (syncVersion === 3 || hasSchemaFence) {
+    if (syncVersion !== 3 || userData.privateNotesSchemaRequired !== true || userData.privateNotesSeparated !== true) {
+      throw new Error('Cloud library is fenced for schema v3 but private-note separation is incomplete.');
+    }
+    return 'separated-v3';
+  }
+
+  return syncVersion === 2 ? 'paged-v2' : 'legacy';
+}
+
 function collectArrays(value: unknown, label: string): { notes: unknown[]; folders: unknown[] } {
   if (!isRecord(value)) throw new Error('Invalid cloud library: user or page data is malformed.');
   return {
@@ -110,10 +151,14 @@ export function createCloudLibraryPreviewService(reads: CloudLibraryPreviewReads
       if (!uid) throw new Error('A signed-in account is required.');
       const userSnapshot = await reads.getUserDocument(uid);
       if (!userSnapshot.exists()) {
-        return { source: 'legacy', pageCount: 0, notes: [], folders: [] };
+        return { source: 'legacy', schema: 'legacy', pageCount: 0, notes: [], folders: [] };
       }
       const userData = userSnapshot.data();
       if (!isRecord(userData)) throw new Error('Invalid cloud library: user data is malformed.');
+      const schema = classifyCloudLibrarySchema(userData);
+      if (schema === 'separated-v3' && !hasOwn(userData, 'activeLibraryRevision')) {
+        throw new Error('Invalid cloud library: separated schema has no active revision.');
+      }
 
       if (hasOwn(userData, 'activeLibraryRevision')) {
         const revision = userData.activeLibraryRevision;
@@ -147,11 +192,11 @@ export function createCloudLibraryPreviewService(reads: CloudLibraryPreviewReads
           notes.push(...arrays.notes);
           folders.push(...arrays.folders);
         }
-        return { source: 'revision', pageCount, notes: projectNotes(notes), folders: projectFolders(folders) };
+        return { source: 'revision', schema, pageCount, notes: projectNotes(notes, schema), folders: projectFolders(folders) };
       }
 
       const arrays = collectArrays(userData, 'legacy user');
-      return { source: 'legacy', pageCount: 0, notes: projectNotes(arrays.notes), folders: projectFolders(arrays.folders) };
+      return { source: 'legacy', schema, pageCount: 0, notes: projectNotes(arrays.notes, schema), folders: projectFolders(arrays.folders) };
     },
   };
 }
