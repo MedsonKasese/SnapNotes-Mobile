@@ -34,6 +34,7 @@ test('legacy root arrays are previewed without changing device-local notes', asy
   const { calls, service } = makeService({ user: userSnapshot({ notes: [ordinaryNote()], folders: [folder] }) });
   const result = await service.load('uid-1');
   assert.equal(result.source, 'legacy');
+  assert.equal(result.schema, 'legacy');
   assert.equal(result.notes.length, 1);
   assert.deepEqual(result.folders, [{ id: 'folder-1', name: 'Work' }]);
   assert.deepEqual(deviceNotes, originalDeviceNotes);
@@ -42,20 +43,80 @@ test('legacy root arrays are previewed without changing device-local notes', asy
 
 test('current active revision requires exact page count and validates every page arrays', async () => {
   const { calls, service } = makeService({
-    user: userSnapshot({ activeLibraryRevision: 'rev-a', libraryPageCount: 2 }),
+    user: userSnapshot({ activeLibraryRevision: 'rev-a', libraryPageCount: 2, syncVersion: 2 }),
     pages: { size: 2, docs: [page({ notes: [ordinaryNote()], folders: [] }, '00000'), page({ notes: [], folders: [folder] }, '00001')] },
   });
   const result = await service.load('uid-2');
   assert.equal(result.source, 'revision');
+  assert.equal(result.schema, 'paged-v2');
   assert.equal(result.pageCount, 2);
   assert.equal(result.notes[0].fields.title, 'Visible title');
   assert.equal(result.folders[0].name, 'Work');
   assert.deepEqual(calls, [['getDoc', 'uid-2'], ['getDocs', 'uid-2', 'rev-a']]);
 });
 
+test('schema-v3 preview reads the ordinary revision and accepts only the verified false/null importer markers', async () => {
+  const importedOrdinary = ordinaryNote({ isPrivate: false, privateData: null, attachments: [{ storagePath: 'not-read' }] });
+  const { calls, service } = makeService({
+    user: userSnapshot({
+      activeLibraryRevision: 'rev-v3', libraryPageCount: 1, syncVersion: 3,
+      privateNotesSchemaRequired: true, privateNotesSeparated: true,
+    }),
+    pages: { size: 1, docs: [page({ notes: [importedOrdinary], folders: [] })] },
+  });
+  const result = await service.load('uid-v3');
+  assert.equal(result.schema, 'separated-v3');
+  assert.equal(result.notes.length, 1);
+  assert.equal(result.notes[0].fields.id, 'note-1');
+  assert.deepEqual(result.notes[0].unsupportedFields, ['attachments']);
+  assert.doesNotMatch(JSON.stringify(result), /privateData|isPrivate|storagePath|not-read/);
+  assert.deepEqual(calls, [['getDoc', 'uid-v3'], ['getDocs', 'uid-v3', 'rev-v3']]);
+});
+
+test('incomplete schema-v3 fence blocks before reading any revision pages', async () => {
+  const { calls, service } = makeService({
+    user: userSnapshot({
+      activeLibraryRevision: 'rev-paused', libraryPageCount: 1, syncVersion: 3,
+      privateNotesSchemaRequired: true,
+    }),
+    pages: { size: 1, docs: [page({ notes: [ordinaryNote()], folders: [] })] },
+  });
+  await assert.rejects(service.load('uid-paused'), /separation is incomplete/);
+  assert.deepEqual(calls, [['getDoc', 'uid-paused']]);
+});
+
+test('unsupported and inconsistent schema metadata blocks before page reads', async (t) => {
+  const cases = [
+    { name: 'unknown future version', user: { syncVersion: 4 }, match: /version is unsupported/ },
+    { name: 'v3 missing separation flag', user: { syncVersion: 3, privateNotesSchemaRequired: true }, match: /separation is incomplete/ },
+    { name: 'separation flag on v2', user: { syncVersion: 2, privateNotesSeparated: true }, match: /separation is incomplete/ },
+    { name: 'separated v3 without active pointer', user: { syncVersion: 3, privateNotesSchemaRequired: true, privateNotesSeparated: true }, match: /no active revision/ },
+  ];
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const { calls, service } = makeService({ user: userSnapshot(item.user) });
+      await assert.rejects(service.load('uid-schema'), item.match);
+      assert.deepEqual(calls, [['getDoc', 'uid-schema']]);
+    });
+  }
+});
+
+test('private or ambiguous records in schema-v3 ordinary pages fail closed before payload projection', async () => {
+  const privateNote = ordinaryNote({ isPrivate: true });
+  Object.defineProperty(privateNote, 'privateData', { enumerable: true, get() { throw new Error('private payload read'); } });
+  const { service } = makeService({
+    user: userSnapshot({
+      activeLibraryRevision: 'rev-v3', libraryPageCount: 1, syncVersion: 3,
+      privateNotesSchemaRequired: true, privateNotesSeparated: true,
+    }),
+    pages: { size: 1, docs: [page({ notes: [privateNote], folders: [] })] },
+  });
+  await assert.rejects(service.load('uid-v3-invalid'), /private or ambiguous note/);
+});
+
 test('missing user document is an empty library and does not read pages', async () => {
   const { calls, service } = makeService({ user: userSnapshot(undefined, false) });
-  assert.deepEqual(await service.load('uid-empty'), { source: 'legacy', pageCount: 0, notes: [], folders: [] });
+  assert.deepEqual(await service.load('uid-empty'), { source: 'legacy', schema: 'legacy', pageCount: 0, notes: [], folders: [] });
   assert.deepEqual(calls, [['getDoc', 'uid-empty']]);
 });
 
@@ -64,7 +125,7 @@ test('a recorded zero page count with zero pages is a valid empty active revisio
     user: userSnapshot({ activeLibraryRevision: 'empty-rev', libraryPageCount: 0 }),
     pages: { docs: [], size: 0 },
   });
-  assert.deepEqual(await service.load('uid-empty-rev'), { source: 'revision', pageCount: 0, notes: [], folders: [] });
+  assert.deepEqual(await service.load('uid-empty-rev'), { source: 'revision', schema: 'legacy', pageCount: 0, notes: [], folders: [] });
 });
 
 test('an active revision without a recorded count accepts only a nonempty page collection', async () => {
@@ -159,8 +220,9 @@ test('service surface is read-only; adapter is limited to getDoc/getDocs on the 
   const adapter = await readFile(new URL('../src/cloudLibraryPreviewFirebase.ts', import.meta.url), 'utf8');
   assert.match(adapter, /import \{ collection, doc, getDoc, getDocs, getFirestore \} from 'firebase\/firestore'/);
   assert.match(adapter, /getFirestore\(auth\.app\)/);
+  assert.match(adapter, /'libraries', revision, 'pages'/);
   assert.match(adapter, /auth\.currentUser\?\.uid !== uid/);
-  assert.doesNotMatch(adapter, /setDoc|updateDoc|deleteDoc|runTransaction|localStorage|AsyncStorage|attachments/i);
+  assert.doesNotMatch(adapter, /setDoc|updateDoc|deleteDoc|runTransaction|localStorage|AsyncStorage|attachments|privateNotes|privateNoteVersions/i);
   const modal = await readFile(new URL('../src/components/AccountAccessModal.tsx', import.meta.url), 'utf8');
   assert.match(modal, /const loadCloudPreview = async \(\) => \{[\s\S]*?state\.user\.emailVerified[\s\S]*?cloudLibraryPreviewService\.load\(uid\)/);
   assert.match(modal, /onPress=\{\(\) => \{ void loadCloudPreview\(\); \}\}/);

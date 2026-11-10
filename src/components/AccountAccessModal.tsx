@@ -468,7 +468,14 @@ export function AccountAccessModal({ visible, onClose }: AccountAccessModalProps
                         {activeCloudPreview.status === 'error' && <Text accessibilityRole="alert" style={styles.warning}>{activeCloudPreview.message}</Text>}
                         {activeCloudPreview.status === 'ready' && (
                           <View style={styles.cloudPreviewResults}>
-                            <Text style={styles.hint}>Loaded read-only · {activeCloudPreview.preview.notes.length} notes · {activeCloudPreview.preview.folders.length} folders · {activeCloudPreview.preview.pageCount} cloud pages</Text>
+                            <Text style={styles.hint}>
+                              {activeCloudPreview.preview.schema === 'separated-v3'
+                                ? 'Schema v3 · Private Notes separated'
+                                : activeCloudPreview.preview.schema === 'paged-v2'
+                                  ? 'Schema v2 · legacy privacy filter'
+                                  : 'Legacy snapshot · privacy filter'}
+                              {' · read-only · '}{activeCloudPreview.preview.notes.length} notes · {activeCloudPreview.preview.folders.length} folders · {activeCloudPreview.preview.pageCount} cloud pages
+                            </Text>
                             {activeCloudPreview.preview.notes.map((note, index) => {
                               const title = typeof note.fields.title === 'string' ? note.fields.title : 'Untitled note';
                               const text = typeof note.fields.text === 'string' ? note.fields.text : '';
