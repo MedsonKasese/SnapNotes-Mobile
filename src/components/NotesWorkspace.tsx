@@ -2,16 +2,20 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Co
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
+import * as Clipboard from 'expo-clipboard';
 import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
 import {
-  Alert, AppState, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Modal,
-  Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  Alert, AppState, BackHandler, FlatList, Keyboard, KeyboardAvoidingView, Linking, Modal,
+  Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
-  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type Note, type NoteCategory,
+  characterCount, hasUnsavedChanges, MAX_NOTE_CHARACTERS, MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, normalizeCategory, sortNotesPinnedFirst, type Note, type NoteCategory, type NoteVersion,
 } from '../notes';
+import { buildNoteShareText } from '../noteSharing';
+import { isNewNoteWidgetUrl } from '../widgetNavigation';
 import { createNotesController } from '../notesController';
 import { privateSharedCoordinator } from '../privateSharedCoordinator';
 import { createPrivateOrdinarySaveGuard } from '../privateOrdinarySaveGuard';
@@ -24,7 +28,7 @@ import { searchNotes } from '../noteSearch';
 import { mergeImportedFolders, parsePwaImport, serializeNotesForExport, type TransferFormat } from '../noteTransfer';
 import { getNoteActionsMenuLayout, type MenuRect } from '../noteActionsMenu';
 import { ChecklistLabel } from './ChecklistLabel';
-import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
+import { getNoteHtmlLines, normalizeNoteLink, noteHtmlToText, plainTextToHtml, sanitizeNoteHtml, updateChecklistHtml } from '../noteFormatting';
 import { FormattedText } from './FormattedText';
 import { FormattingToolbar } from './FormattingToolbar';
 import { getRandomAccountAvatarColor } from './drawerAvatar';
@@ -38,7 +42,7 @@ import { formatReminderRepeat, isValidReminderAt, normalizeReminderRepeat } from
 import { reminderTargetKey, resolveRegularReminderDestination, type PrivateReminderNavigationTarget, type ReminderNotificationTarget } from '../reminders/notificationResponse';
 
 type WorkspaceView = 'library' | 'editor' | 'archive' | 'trash' | 'folder' | 'drafts' | 'private';
-type NoteAction = 'move-private' | 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
+type NoteAction = 'share' | 'history' | 'move-private' | 'move-folder' | 'duplicate' | 'archive' | 'restore-archive' | 'trash' | 'restore-trash' | 'delete';
 type NoteActionOption = { label: string; icon: FontAwesomeName; destructive?: boolean; action: NoteAction };
 
 function trackReminderOperation<T>(active: { current: Set<Promise<unknown>> }, operation: () => Promise<T>): Promise<T> {
@@ -52,6 +56,11 @@ function formatReminder(value: string): string {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return 'Reminder set';
   return `Reminder ${new Date(timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
+}
+
+function formatVersionSavedAt(value: string): string {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'Date unavailable';
 }
 
 type FolderAction = 'rename' | 'customize' | 'delete';
@@ -179,6 +188,24 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
   const [appearanceColor, setAppearanceColor] = useState<FolderColor>('');
   const [folderMoveNoteId, setFolderMoveNoteId] = useState<string | null>(null);
   const [actionsNoteId, setActionsNoteId] = useState<string | null>(null);
+  const [shareNoteId, setShareNoteId] = useState<string | null>(null);
+  const [historyNoteId, setHistoryNoteId] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const shareBusyRef = useRef(false);
+  const shareCardRef = useRef<ComponentRef<typeof View> | null>(null);
+  const draftRecoveryReadyRef = useRef(false);
+  const pendingWidgetNewNoteRef = useRef(false);
+  const openNewNoteRef = useRef<() => void>(() => {});
+  const widgetLaunchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const launchPendingWidgetNewNoteIfReady = useCallback(() => {
+    if (!pendingWidgetNewNoteRef.current || !draftRecoveryReadyRef.current || controller.getSnapshot().status !== 'ready') return;
+    pendingWidgetNewNoteRef.current = false;
+    if (widgetLaunchTimerRef.current !== null) return;
+    widgetLaunchTimerRef.current = setTimeout(() => {
+      widgetLaunchTimerRef.current = null;
+      openNewNoteRef.current();
+    }, 0);
+  }, [controller]);
   const [privateMoveId, setPrivateMoveId] = useState<string | null>(null);
   const privateMoveGuard = useRef<{ noteId: string | null; moving: boolean }>({ noteId: null, moving: false });
   const ordinaryReminderSyncs = useRef(new Set<Promise<unknown>>());
@@ -299,6 +326,9 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
   const searching = searchQuery.trim().length > 0;
 
   const selected = state.notes.find(note => note.id === actionsNoteId);
+  const sharingNote = state.notes.find(note => note.id === shareNoteId && note.deletedAt === null);
+  const historyNote = state.notes.find(note => note.id === historyNoteId && note.deletedAt === null);
+  const historyVersions = [...(historyNote?.versions ?? [])].sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
   const folderActionsId = folderActionsMenu?.id ?? null;
   const folderActionsFolder = folders.find(folder => folder.id === folderActionsId);
   const inTrash = selected !== undefined && selected.deletedAt !== null;
@@ -309,6 +339,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
         { label: 'Delete forever', icon: 'trash', destructive: true, action: 'delete' },
       ]
     : [
+        { label: 'Share note', icon: 'share-alt', action: 'share' },
+        { label: 'Edit history', icon: 'history', action: 'history' },
         { label: 'Duplicate note', icon: 'clone', action: 'duplicate' },
         { label: 'Move to folder', icon: 'folder-o', action: 'move-folder' },
         ...(!inArchive ? [{ label: 'Move to Private', icon: 'lock' as FontAwesomeName, action: 'move-private' as NoteAction }] : []),
@@ -408,8 +440,18 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
 
   useEffect(() => {
     // Restore React state from the storage completion callback, not the effect body.
-    void controller.load().then(restoreEditorDraft);
-  }, [controller, restoreEditorDraft]);
+    let active = true;
+    void controller.load().then(async () => {
+      await restoreEditorDraft();
+      if (active) {
+        draftRecoveryReadyRef.current = true;
+        launchPendingWidgetNewNoteIfReady();
+      }
+    }).catch(() => {
+      if (active) draftRecoveryReadyRef.current = true;
+    });
+    return () => { active = false; };
+  }, [controller, launchPendingWidgetNewNoteIfReady, restoreEditorDraft]);
 
   useEffect(() => {
     if (!draftHydrated || status !== 'ready') return;
@@ -945,6 +987,31 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
     });
   }
 
+  useEffect(() => {
+    openNewNoteRef.current = openNewNote;
+    launchPendingWidgetNewNoteIfReady();
+  });
+
+  useEffect(() => () => {
+    if (widgetLaunchTimerRef.current !== null) clearTimeout(widgetLaunchTimerRef.current);
+    widgetLaunchTimerRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const handleWidgetUrl = (url: string | null | undefined) => {
+      if (!active || typeof url !== 'string' || !isNewNoteWidgetUrl(url)) return;
+      if (controller.getSnapshot().status === 'ready' && draftRecoveryReadyRef.current) openNewNoteRef.current();
+      else pendingWidgetNewNoteRef.current = true;
+    };
+    void Linking.getInitialURL().then(handleWidgetUrl).catch(() => {});
+    const subscription = Linking.addEventListener('url', event => handleWidgetUrl(event.url));
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [controller]);
+
   function editNote(id: string) {
     if (controller.getSnapshot().status !== 'ready') return;
     if (state.editingId === id) {
@@ -1082,6 +1149,8 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
     if (!selected) return;
     const now = new Date().toISOString();
     switch (action) {
+      case 'share': setShareNoteId(id); break;
+      case 'history': setHistoryNoteId(id); break;
       case 'move-private':
         privateMoveGuard.current = { noteId: id, moving: false };
         setPrivateMovePassword('');
@@ -1095,6 +1164,62 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
       case 'trash': confirmTrash(id, selected.title); break;
       case 'restore-trash': void controller.restoreFromTrash(id, now); break;
       case 'delete': confirmPermanentDelete(id, selected.title); break;
+    }
+  }
+
+  async function shareNoteAsText(note: Note) {
+    const message = buildNoteShareText(note);
+    if (!message) { Alert.alert('Nothing to share', 'This note has no text to share.'); return; }
+    setShareNoteId(null);
+    try {
+      await Share.share({ title: note.title || 'SnapNotes note', message });
+    } catch {
+      try {
+        await Clipboard.setStringAsync(message);
+        Alert.alert('Text copied', 'The share sheet was unavailable, so the note text was copied instead.');
+      } catch {
+        Alert.alert('Unable to share note', 'Try Copy text or share the note again.');
+      }
+    }
+  }
+
+  async function copyNoteText(note: Note) {
+    const message = buildNoteShareText(note);
+    if (!message) { Alert.alert('Nothing to copy', 'This note has no text to copy.'); return; }
+    try {
+      await Clipboard.setStringAsync(message);
+      setShareNoteId(null);
+      Alert.alert('Text copied', 'The note text is ready to paste.');
+    } catch {
+      Alert.alert('Unable to copy note', 'Your note remains saved on this device.');
+    }
+  }
+
+  async function shareNoteAsImage(note: Note) {
+    if (shareBusyRef.current) return;
+    shareBusyRef.current = true;
+    setShareBusy(true);
+    try {
+      const uri = await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+      setShareNoteId(null);
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: note.title || 'Share note image' });
+    } catch {
+      Alert.alert('Could not share image', 'The note is still safe. Try Share as text or Copy text instead.');
+    } finally {
+      shareBusyRef.current = false;
+      setShareBusy(false);
+    }
+  }
+
+  async function restoreNoteVersion(note: Note, version: NoteVersion) {
+    if (controller.getSnapshot().status !== 'ready') return;
+    const restored = await controller.restoreVersion(note.id, version, new Date().toISOString());
+    if (restored) {
+      setHistoryNoteId(null);
+      Alert.alert('Version restored', 'The earlier note version was restored on this device. The version you replaced is also kept in history.');
+    } else {
+      const error = controller.getSnapshot().storageError;
+      if (error) Alert.alert('Could not restore version', error);
     }
   }
 
@@ -1298,7 +1423,10 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
           ? <Text accessibilityLiveRegion="polite" style={styles.hint}>Loading notes from this device…</Text>
           : <>
               <Text accessibilityRole="alert" style={styles.error}>{storageError}</Text>
-              <Action label="Retry loading notes" onPress={() => { void controller.load().then(restoreEditorDraft); }} />
+              <Action label="Retry loading notes" onPress={() => { void controller.load().then(restoreEditorDraft).finally(() => {
+                draftRecoveryReadyRef.current = true;
+                launchPendingWidgetNewNoteIfReady();
+              }); }} />
             </>}
       </View>
     );
@@ -1594,6 +1722,74 @@ export function NotesWorkspace({ onOpenAccount, accountInitials, notificationTar
           />
         </View>
       )}
+
+      <Modal testID="note-share-modal" visible={shareNoteId !== null} transparent animationType="fade"
+        onRequestClose={() => { if (!shareBusyRef.current) setShareNoteId(null); }}>
+        <View style={styles.shareModalLayer}>
+          <Pressable style={styles.shareModalBackdrop} accessibilityRole="button" accessibilityLabel="Close share options"
+            disabled={shareBusy} onPress={() => setShareNoteId(null)} />
+          <ScrollView style={styles.shareModalCard} contentContainerStyle={styles.shareModalContent} keyboardShouldPersistTaps="handled">
+            <Text accessibilityRole="header" style={styles.shareModalTitle}>Share note</Text>
+            <Text style={styles.hint}>Choose a format. Your note stays on this device unless you share it.</Text>
+            {sharingNote ? <View ref={shareCardRef} collapsable={false} style={styles.shareImageCard}>
+              <View style={styles.shareCardBrandRow}>
+                <View style={styles.shareCardMark}><Text style={styles.shareCardMarkText}>+</Text></View>
+                <Text style={styles.shareCardBrand}>SnapNotes</Text>
+              </View>
+              <Text style={styles.shareCardTitle}>{sharingNote.title || 'Untitled note'}</Text>
+              {sharingNote.text ? <View style={styles.shareCardBodyLines}>
+                {getNoteHtmlLines(sharingNote.html || plainTextToHtml(sharingNote.text)).map((line, index) => <Text key={`share-line-${index}`} style={styles.shareCardBody}>
+                  <FormattedText line={line} fallback="" />
+                </Text>)}
+              </View> : null}
+              <Text style={styles.shareCardDate}>Updated {formatVersionSavedAt(sharingNote.updatedAt)}</Text>
+            </View> : <Text style={styles.error}>This note is no longer available.</Text>}
+            <View style={styles.shareActionList}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Share note as text" disabled={!sharingNote || shareBusy}
+                onPress={() => sharingNote && void shareNoteAsText(sharingNote)} style={({ pressed }) => [styles.shareActionButton, pressed && styles.pressed]}>
+                <FontAwesome name="share-alt" size={19} color="#3b7f16" accessible={false} />
+                <View style={styles.shareActionCopy}><Text style={styles.shareActionTitle}>Share as text</Text><Text style={styles.shareActionHint}>Send the title and note through another app</Text></View>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Share note as image" disabled={!sharingNote || shareBusy}
+                onPress={() => sharingNote && void shareNoteAsImage(sharingNote)} style={({ pressed }) => [styles.shareActionButton, pressed && styles.pressed]}>
+                <FontAwesome name="image" size={19} color="#3b7f16" accessible={false} />
+                <View style={styles.shareActionCopy}><Text style={styles.shareActionTitle}>{shareBusy ? 'Preparing image…' : 'Share as image'}</Text><Text style={styles.shareActionHint}>Send a clean SnapNotes note card</Text></View>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Copy note text" disabled={!sharingNote || shareBusy}
+                onPress={() => sharingNote && void copyNoteText(sharingNote)} style={({ pressed }) => [styles.shareActionButton, pressed && styles.pressed]}>
+                <FontAwesome name="clipboard" size={19} color="#3b7f16" accessible={false} />
+                <View style={styles.shareActionCopy}><Text style={styles.shareActionTitle}>Copy text</Text><Text style={styles.shareActionHint}>Copy the title and note to your clipboard</Text></View>
+              </Pressable>
+            </View>
+            <Action label="Close" secondary disabled={shareBusy} onPress={() => setShareNoteId(null)} />
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal testID="note-history-modal" visible={historyNoteId !== null} transparent animationType="fade" onRequestClose={() => setHistoryNoteId(null)}>
+        <View style={styles.historyModalLayer}>
+          <Pressable style={styles.shareModalBackdrop} accessibilityRole="button" accessibilityLabel="Close edit history" onPress={() => setHistoryNoteId(null)} />
+          <ScrollView style={styles.historyModalCard} contentContainerStyle={styles.historyModalContent} keyboardShouldPersistTaps="handled">
+            <Text accessibilityRole="header" style={styles.shareModalTitle}>Edit history</Text>
+            <Text style={styles.hint}>The latest 20 saved versions stay on this device. Restoring a version keeps the current one in history too.</Text>
+            {historyNote && historyVersions.length === 0 && <View style={styles.historyEmptyState}>
+              <FontAwesome name="history" size={22} color="#73906a" accessible={false} />
+              <Text style={styles.historyEmptyTitle}>No earlier versions yet</Text>
+              <Text style={styles.hint}>Edit and save this note to create its first history entry.</Text>
+            </View>}
+            {historyVersions.map((version, index) => <View key={`${version.savedAt}:${index}`} style={styles.historyVersionCard}>
+              <View style={styles.historyVersionHeading}>
+                <Text style={styles.historyVersionTitle} numberOfLines={2}>{version.title || 'Untitled note'}</Text>
+                <Text style={styles.historyVersionDate}>{formatVersionSavedAt(version.savedAt)}</Text>
+              </View>
+              <Text style={styles.historyVersionPreview} numberOfLines={4}>{version.text || 'No body text in this version.'}</Text>
+              <Action label="Restore this version" secondary disabled={!historyNote || saving}
+                onPress={() => historyNote && void restoreNoteVersion(historyNote, version)} />
+            </View>)}
+            <Action label="Close" secondary onPress={() => setHistoryNoteId(null)} />
+          </ScrollView>
+        </View>
+      </Modal>
 
       <Modal testID="move-private-modal" visible={privateMoveId !== null} transparent animationType="fade"
         onRequestClose={closePrivateMoveDialog}>
@@ -1926,6 +2122,35 @@ const styles = StyleSheet.create({
   editorTools: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   linkLayer: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: 'rgba(20,35,15,0.35)' },
   linkDialog: { padding: 20, borderRadius: 16, backgroundColor: '#ffffff', gap: 14 },
+  shareModalLayer: { flex: 1, justifyContent: 'center', paddingHorizontal: 18, paddingVertical: 24 },
+  shareModalBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(15,28,12,0.46)' },
+  shareModalCard: { flexGrow: 0, width: '100%', maxWidth: 520, maxHeight: '92%', alignSelf: 'center', borderRadius: 18, backgroundColor: '#ffffff' },
+  shareModalContent: { padding: 18, gap: 12 },
+  shareModalTitle: { color: '#20351d', fontSize: 22, fontWeight: '800' },
+  shareImageCard: { backgroundColor: '#fbfcfa', borderColor: '#dce6d4', borderWidth: 1, borderRadius: 16, padding: 18, gap: 12 },
+  shareCardBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  shareCardMark: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: '#48a111' },
+  shareCardMarkText: { color: '#fff', fontSize: 21, lineHeight: 24, fontWeight: '800' },
+  shareCardBrand: { color: '#3b7f16', fontSize: 13, fontWeight: '800', letterSpacing: 0.3 },
+  shareCardTitle: { color: '#20351d', fontSize: 20, lineHeight: 27, fontWeight: '800' },
+  shareCardBody: { color: '#485843', fontSize: 15, lineHeight: 23 },
+  shareCardBodyLines: { gap: 4 },
+  shareCardDate: { color: '#788472', fontSize: 11, marginTop: 2 },
+  shareActionList: { gap: 7 },
+  shareActionButton: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 13, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#e1e9dc', backgroundColor: '#fbfcfa' },
+  shareActionCopy: { flex: 1, minWidth: 0, gap: 2 },
+  shareActionTitle: { color: '#263d20', fontSize: 14, fontWeight: '800' },
+  shareActionHint: { color: '#687763', fontSize: 12, lineHeight: 17 },
+  historyModalLayer: { flex: 1, justifyContent: 'center', paddingHorizontal: 18, paddingVertical: 24 },
+  historyModalCard: { flexGrow: 0, width: '100%', maxWidth: 520, maxHeight: '92%', alignSelf: 'center', borderRadius: 18, backgroundColor: '#ffffff' },
+  historyModalContent: { padding: 18, gap: 12 },
+  historyEmptyState: { alignItems: 'center', padding: 20, gap: 8, borderRadius: 14, backgroundColor: '#f6f9f3' },
+  historyEmptyTitle: { color: '#304728', fontSize: 15, fontWeight: '800' },
+  historyVersionCard: { padding: 13, gap: 9, borderWidth: 1, borderColor: '#e1e9dc', borderRadius: 13, backgroundColor: '#fbfcfa' },
+  historyVersionHeading: { gap: 3 },
+  historyVersionTitle: { color: '#263d20', fontSize: 15, fontWeight: '800' },
+  historyVersionDate: { color: '#788472', fontSize: 11 },
+  historyVersionPreview: { color: '#556450', fontSize: 13, lineHeight: 19 },
   notePreview: { gap: 0 },
   checklistRow: { flexDirection: 'row', alignItems: 'flex-start', minHeight: 28, paddingVertical: 2, gap: 8 },
   checkboxGlyph: { fontSize: 20, lineHeight: 24, includeFontPadding: false, flexShrink: 0, color: '#347b0a' },

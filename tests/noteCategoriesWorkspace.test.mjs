@@ -92,12 +92,16 @@ function workspace(initialNotes = savedNotes, controllerOverride = null, workspa
         Alert: { alert: (...args) => { events.push(['alert']); alerts.push(args); } },
         AppState: { addEventListener: () => ({ remove() {} }) },
         Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
+        Linking: { getInitialURL: async () => null, addEventListener: () => ({ remove() {} }) },
+        Share: { share: async () => ({ action: 'dismissedAction' }) },
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
       if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
       if (name === 'expo-document-picker') return { getDocumentAsync: async () => ({ canceled: true, assets: null }) };
       if (name === 'expo-file-system') return { File: class File {}, Paths: { cache: 'cache' } };
+      if (name === 'expo-clipboard') return { setStringAsync: async () => {} };
       if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
+      if (name === 'react-native-view-shot') return { captureRef: async () => 'file:///share.png' };
       if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === 'react/jsx-runtime') return require(name);
       // Keep the icon element/props inspectable without loading native fonts.
@@ -116,10 +120,13 @@ function workspace(initialNotes = savedNotes, controllerOverride = null, workspa
       if (name === '../deviceNotesStorage') return {};
       if (name === '../noteSearch') return { searchNotes };
       if (name === '../noteTransfer') return noteTransfer;
+      if (name === '../noteSharing') return { buildNoteShareText: () => '' };
+      if (name === '../widgetNavigation') return { isNewNoteWidgetUrl: () => false };
       if (name === './ChecklistLabel') return { ChecklistLabel: 'ChecklistLabel' };
       if (name === '../noteFormatting') return {
         sanitizeNoteHtml: value => value,
         noteHtmlToText: value => value,
+        plainTextToHtml: value => value,
         getNoteHtmlLines: value => String(value).split('\n'),
         updateChecklistHtml: value => value,
         normalizeNoteLink: value => value,
@@ -386,8 +393,8 @@ test('Private Notes drawer badge reports the current count', () => {
 test('library, archive, and trash expose exactly their available note actions in the popup', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, expected] of [
-    ['library', savedNotes[0], ['Edit note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
-    ['archive', archivedNote, ['Edit note: Archived project', 'Duplicate note: Archived project', 'Move to folder: Archived project', 'Restore from archive: Archived project', 'Move to Trash: Archived project']],
+    ['library', savedNotes[0], ['Edit note: Project alpha', 'Share note: Project alpha', 'Edit history: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha']],
+    ['archive', archivedNote, ['Edit note: Archived project', 'Share note: Archived project', 'Edit history: Archived project', 'Duplicate note: Archived project', 'Move to folder: Archived project', 'Restore from archive: Archived project', 'Move to Trash: Archived project']],
     ['trash', { ...savedNotes[0], id: 'trashed-1', title: 'Deleted project', archived: false, deletedAt: '2026-10-21T00:00:00Z' }, ['Restore note: Deleted project', 'Delete forever: Deleted project']],
   ]) {
     if (view === 'archive') action(app.render(), 'Archived').props.onPress();
@@ -400,6 +407,34 @@ test('library, archive, and trash expose exactly their available note actions in
     assert.equal(pinButtons.length, view === 'library' ? 1 : 0);
     assert.equal(elements(actionsModal(sheet)).some(element => /^(Pin|Unpin) /.test(element.props.accessibilityLabel ?? '')), false);
   }
+});
+
+test('share dialog offers the PWA text, image, and copy choices', () => {
+  const app = workspace();
+  const { sheet } = openNoteActions(app, savedNotes[0]);
+  find(sheet, element => element.props.accessibilityLabel === 'Share note: Project alpha').props.onPress();
+  const modal = find(app.render(), element => element.props.testID === 'note-share-modal');
+  assert.equal(modal.props.visible, true);
+  assert.deepEqual(elements(modal)
+    .filter(element => element.type === 'Pressable' && ['Share note as text', 'Share note as image', 'Copy note text'].includes(element.props.accessibilityLabel))
+    .map(element => element.props.accessibilityLabel), ['Share note as text', 'Share note as image', 'Copy note text']);
+});
+
+test('edit history shows a saved version and an enabled restore action', () => {
+  const earlierVersion = {
+    title: 'Earlier project', text: 'Older plan', html: '<div>Older plan</div>', category: 'work', tags: [],
+    reminderAt: null, reminderNotified: false, reminderRepeat: null,
+    time: '2026-10-19T00:00:00Z', savedAt: '2026-10-19T00:00:00Z',
+  };
+  const note = { ...savedNotes[0], versions: [earlierVersion] };
+  const app = workspace([note]);
+  const { sheet } = openNoteActions(app, note);
+  find(sheet, element => element.props.accessibilityLabel === 'Edit history: Project alpha').props.onPress();
+  const modal = find(app.render(), element => element.props.testID === 'note-history-modal');
+  assert.equal(modal.props.visible, true);
+  assert.equal(elements(modal).some(element => element.type === 'Text' && text(element) === 'Earlier project'), true);
+  const restore = action(modal, 'Restore this version');
+  assert.equal(restore.props.disabled, false);
 });
 
 test('note actions popup can be dismissed by backdrop, native request-close, or accessibility escape', () => {
@@ -419,7 +454,7 @@ test('note actions are disabled while saving', () => {
   app.setStatus('saving');
   const { sheet } = openNoteActions(app, savedNotes[0]);
   const buttons = sheetActions(sheet, savedNotes[0].title);
-  assert.equal(buttons.length, 6);
+  assert.equal(buttons.length, 8);
   for (const button of buttons) {
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
@@ -732,7 +767,7 @@ test('pin and unpin stay on one independent card button, never in the action men
 
     const { sheet } = openNoteActions(app, item);
     assert.deepEqual(sheetActions(sheet, item.title).map(button => button.props.accessibilityLabel), [
-      'Edit note: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
+      'Edit note: Project alpha', 'Share note: Project alpha', 'Edit history: Project alpha', 'Duplicate note: Project alpha', 'Move to folder: Project alpha', 'Move to Private: Project alpha', 'Archive note: Project alpha', 'Move to Trash: Project alpha',
     ]);
   }
 });
@@ -767,7 +802,7 @@ function triggerFor(app, item, measureInWindow) {
   return trigger;
 }
 
-test('the contextual popup stays compact and accessible with its duplicate, folder, archive, and trash actions', () => {
+test('the contextual popup stays compact and accessible with share, history, duplicate, folder, archive, and trash actions', () => {
   const app = workspace();
   const { sheet } = openNoteActions(app, savedNotes[0]);
   const menu = popup(sheet);
@@ -778,10 +813,10 @@ test('the contextual popup stays compact and accessible with its duplicate, fold
   assert.equal(menu.props.pointerEvents, 'auto');
   assert.equal(menu.props.accessibilityViewIsModal, true);
   assert.equal(menu.props.accessibilityElementsHidden, false);
-  assert.deepEqual(elements(menu).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), ['file-text-o', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']);
+  assert.deepEqual(elements(menu).filter(element => element.type === 'FontAwesome').map(icon => icon.props.name), ['file-text-o', 'share-alt', 'history', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']);
   assert.equal(elements(menu).some(element => element.props.accessibilityRole === 'header'), false);
-  assert.doesNotMatch(text(menu), /Cancel|Share|history|private|Pin|Unpin/);
-  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Edit note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
+  assert.doesNotMatch(text(menu), /Cancel|Pin|Unpin/);
+  assert.deepEqual(sheetActions(sheet, savedNotes[0].title).map(button => text(button)), ['Edit note', 'Share note', 'Edit history', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
   const danger = find(menu, element => element.type === 'Text' && text(element) === 'Move to Trash');
   assert.equal(flatStyle(danger.props.style).color, '#b3261e');
   for (const button of sheetActions(sheet, savedNotes[0].title)) {
@@ -883,7 +918,7 @@ test('old measurements and an old onShow cannot move the menu to a previous note
   popup(app.render()).props.onLayout({ nativeEvent: { layout: { height: 150 } } });
   for (const finish of pendingFirst) finish(20, 700, 40, 40);
   tree = app.render();
-  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Edit note', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
+  assert.deepEqual(sheetActions(tree, savedNotes[1].title).map(button => text(button)), ['Edit note', 'Share note', 'Edit history', 'Duplicate note', 'Move to folder', 'Move to Private', 'Archive note', 'Move to Trash']);
   const expected = getNoteActionsMenuLayout({ x: 290, y: 300, width: 40, height: 40 }, { x: 0, y: 30, width: 380, height: 740 }, 150);
   const style = flatStyle(popup(tree).props.style);
   assert.equal(style.left, expected.left);
@@ -911,8 +946,8 @@ test('viewport changes remeasure the trigger and keep tall menu content inside t
 test('all existing library, archive, and trash menu actions retain their original decorative icons', () => {
   const app = workspace([...savedNotes, archivedNote, trashedNote]);
   for (const [view, item, icons] of [
-    ['library', savedNotes[0], ['file-text-o', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']],
-    ['archive', archivedNote, ['file-text-o', 'clone', 'folder-o', 'undo', 'trash-o']],
+    ['library', savedNotes[0], ['file-text-o', 'share-alt', 'history', 'clone', 'folder-o', 'lock', 'archive', 'trash-o']],
+    ['archive', archivedNote, ['file-text-o', 'share-alt', 'history', 'clone', 'folder-o', 'undo', 'trash-o']],
     ['trash', trashedNote, ['undo', 'trash']],
   ]) {
     if (view !== 'library') action(app.render(), view === 'archive' ? 'Archived' : 'Trash').props.onPress();
