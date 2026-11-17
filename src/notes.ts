@@ -15,6 +15,18 @@ export type ReminderFields = {
   reminderRepeat?: ReminderRepeat | null;
 };
 export type NoteDraft = { title: string; text: string; category?: NoteCategory; html?: string } & ReminderFields;
+export type NoteVersion = {
+  title: string;
+  text: string;
+  html: string;
+  category: NoteCategory;
+  tags: string[];
+  reminderAt: string | null;
+  reminderNotified: boolean;
+  reminderRepeat: ReminderRepeat | null;
+  time: string;
+  savedAt: string;
+};
 export type Note = NoteDraft & {
   id: string;
   category: NoteCategory;
@@ -24,6 +36,7 @@ export type Note = NoteDraft & {
   archived: boolean;
   deletedAt: string | null;
   folderId?: string | null;
+  versions?: NoteVersion[];
 };
 export type NotesState = {
   notes: Note[];
@@ -125,6 +138,44 @@ function reminderStateKey(note: ReminderFields | undefined): string {
   return JSON.stringify({ reminderAt, reminderNotified: Boolean(note?.reminderNotified), reminderRepeat });
 }
 
+export const MAX_NOTE_VERSIONS = 20;
+
+export function createNoteVersionSnapshot(note: Note, savedAt: string): NoteVersion {
+  return {
+    title: note.title,
+    text: note.text,
+    html: note.html === undefined ? '' : sanitizeNoteHtml(note.html),
+    category: normalizeCategory(note.category),
+    tags: [],
+    reminderAt: note.reminderAt ?? null,
+    reminderNotified: Boolean(note.reminderNotified),
+    reminderRepeat: note.reminderRepeat ?? null,
+    time: note.createdAt,
+    savedAt,
+  };
+}
+
+function sameVersionContent(a: NoteVersion, b: NoteVersion): boolean {
+  return a.title === b.title && a.text === b.text && a.html === b.html && a.category === b.category &&
+    JSON.stringify(a.tags) === JSON.stringify(b.tags) && a.reminderAt === b.reminderAt &&
+    a.reminderNotified === b.reminderNotified && JSON.stringify(a.reminderRepeat) === JSON.stringify(b.reminderRepeat) &&
+    a.time === b.time;
+}
+
+export function appendNoteVersion(versions: readonly NoteVersion[] | undefined, note: Note, savedAt: string): NoteVersion[] {
+  const list = versions ?? [];
+  const snapshot = createNoteVersionSnapshot(note, savedAt);
+  if (list.length > 0 && sameVersionContent(list[list.length - 1], snapshot)) return list.slice(-MAX_NOTE_VERSIONS);
+  return [...list, snapshot].slice(-MAX_NOTE_VERSIONS);
+}
+
+function hasVersionableChanges(note: Note, draft: NoteDraft, category: NoteCategory): boolean {
+  const html = draft.html === undefined ? undefined : sanitizeNoteHtml(draft.html);
+  const currentHtml = note.html === undefined ? undefined : sanitizeNoteHtml(note.html);
+  return note.title !== draft.title || note.text !== draft.text || currentHtml !== html ||
+    normalizeCategory(note.category) !== category || reminderStateKey(note) !== reminderStateKey(draft);
+}
+
 export function hasUnsavedChanges(state: NotesState): boolean {
   const original = state.notes.find(note => note.id === state.editingId);
   const draftHtml = state.draft.html === undefined ? undefined : sanitizeNoteHtml(state.draft.html);
@@ -193,7 +244,11 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
         notes = state.notes.map(note => {
           if (note.id !== state.editingId) return note;
           const { html: _previousHtml, ...withoutPreviousHtml } = note;
-          return { ...withoutPreviousHtml, ...draft, category: normalizeCategory(state.draft.category), updatedAt: action.now };
+          const category = normalizeCategory(state.draft.category);
+          const versions = hasVersionableChanges(note, draft, category)
+            ? appendNoteVersion(note.versions, note, action.now)
+            : note.versions;
+          return { ...withoutPreviousHtml, ...draft, category, ...(versions === undefined ? {} : { versions }), updatedAt: action.now };
         });
       } else {
         if (state.notes.some(note => note.id === action.id)) {

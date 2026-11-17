@@ -100,3 +100,13 @@ test('malformed encrypted timestamp metadata is rejected without changing either
   assert.equal(h.state().notes.length, 0);
   assert.equal(h.state().vault.length, 1);
 });
+
+test('restored encrypted history re-enters ordinary local history only after restore', async () => {
+  const h = harness();
+  const version = { title: 'Earlier private title', text: 'Earlier private body', html: '', category: 'general', tags: [],
+    reminderAt: null, reminderNotified: false, reminderRepeat: null, time: payload.createdAt, savedAt: payload.updatedAt };
+  h.deps.decrypt = async () => ({ ...payload, history: [version] });
+  assert.equal(await restorePrivateNoteTransaction('n1', h.deps), 'restored');
+  assert.deepEqual(h.state().notes[0].versions, [version]);
+  assert.equal(h.state().vault.length, 0);
+});

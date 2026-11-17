@@ -1,4 +1,4 @@
-import { MAX_NOTE_HTML_LENGTH, normalizeCategory, NOTE_CATEGORIES, validateDraft as validateNoteDraft, type Note, type NoteCategory } from './notes.ts';
+import { MAX_NOTE_HTML_LENGTH, MAX_NOTE_VERSIONS, normalizeCategory, NOTE_CATEGORIES, validateDraft as validateNoteDraft, type Note, type NoteCategory, type NoteVersion } from './notes.ts';
 import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
 import { isValidReminderAt, normalizeReminderRepeat } from './reminders/recurrence.ts';
 
@@ -108,12 +108,63 @@ function validateDraft(draft: NoteDraft, index: number): void {
   }
 }
 
+function validateVersions(value: unknown, noteIndex: number): NoteVersion[] {
+  if (!Array.isArray(value)) throw new Error(`Invalid versions on note at index ${noteIndex}: expected an array.`);
+  return value.slice(-MAX_NOTE_VERSIONS).map((raw, versionIndex) => {
+    const label = `version ${versionIndex} on note at index ${noteIndex}`;
+    if (!isRecord(raw) || typeof raw.title !== 'string' || typeof raw.text !== 'string' ||
+      (raw.html !== undefined && typeof raw.html !== 'string')) {
+      throw new Error(`Invalid ${label}: expected title, text, and optional HTML strings.`);
+    }
+    const html = typeof raw.html === 'string' ? sanitizeNoteHtml(raw.html) : '';
+    if (html && noteHtmlToText(html).trim() !== raw.text.replace(/\r/g, '').trim()) {
+      throw new Error(`Invalid ${label}: HTML visible text does not match text.`);
+    }
+    validateDraft({ title: raw.title, text: raw.text, ...(html ? { html } : {}) }, noteIndex);
+    const category = raw.category;
+    if (typeof category !== 'string' || !NOTE_CATEGORIES.includes(category as NoteCategory)) {
+      throw new Error(`Invalid ${label}: category is unsupported.`);
+    }
+    const reminderAt = raw.reminderAt === undefined ? null : raw.reminderAt;
+    if (reminderAt !== null && !isValidReminderAt(reminderAt)) {
+      throw new Error(`Invalid ${label}: reminder time is malformed.`);
+    }
+    if (raw.reminderNotified !== undefined && typeof raw.reminderNotified !== 'boolean') {
+      throw new Error(`Invalid ${label}: reminder state is malformed.`);
+    }
+    let reminderRepeat = raw.reminderRepeat == null ? null : normalizeReminderRepeat(raw.reminderRepeat, reminderAt);
+    if (raw.reminderRepeat != null && reminderRepeat === null) {
+      throw new Error(`Invalid ${label}: repeat schedule is malformed.`);
+    }
+    if (raw.tags !== undefined && (!Array.isArray(raw.tags) || raw.tags.length > 100 || raw.tags.some(tag => typeof tag !== 'string'))) {
+      throw new Error(`Invalid ${label}: tags are malformed.`);
+    }
+    const tags = Array.isArray(raw.tags) ? [...raw.tags] as string[] : [];
+    const time = raw.time === undefined ? '' : raw.time;
+    if (typeof time !== 'string' || time.length > 80) throw new Error(`Invalid ${label}: time is malformed.`);
+    if (typeof raw.savedAt !== 'string') throw new Error(`Invalid ${label}: savedAt is missing.`);
+    validateTimestamp(raw.savedAt, 'savedAt', noteIndex);
+    return {
+      title: raw.title,
+      text: raw.text,
+      html,
+      category: category as NoteCategory,
+      tags,
+      reminderAt: reminderAt as string | null,
+      reminderNotified: Boolean(raw.reminderNotified),
+      reminderRepeat: reminderRepeat as NoteVersion['reminderRepeat'],
+      time,
+      savedAt: raw.savedAt,
+    };
+  });
+}
+
 function validateNote(value: unknown, index: number, ids: Set<string>): Note {
   if (!isRecord(value)) {
     throw new Error(`Invalid note at index ${index}: expected an object.`);
   }
   const { id, category: rawCategory, title, text, html: rawHtml, createdAt, updatedAt, pinned: rawPinned, archived: rawArchived, deletedAt: rawDeletedAt, folderId: rawFolderId,
-    reminderAt: rawReminderAt, reminderNotified: rawReminderNotified, reminderRepeat: rawReminderRepeat } = value;
+    reminderAt: rawReminderAt, reminderNotified: rawReminderNotified, reminderRepeat: rawReminderRepeat, versions: rawVersions } = value;
   const category = normalizeCategory(rawCategory);
   const pinned = rawPinned === undefined ? false : rawPinned;
   const archived = rawArchived === undefined ? false : rawArchived;
@@ -168,6 +219,7 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
       throw new Error(`Invalid reminderRepeat on note at index ${index}: expected a valid local recurrence schedule.`);
     }
   }
+  const versions = rawVersions === undefined ? undefined : validateVersions(rawVersions, index);
 
   ids.add(id);
   return { id, category, title, text, ...(html === undefined ? {} : { html }), createdAt, updatedAt, pinned, archived, deletedAt,
@@ -175,6 +227,7 @@ function validateNote(value: unknown, index: number, ids: Set<string>): Note {
     ...(rawReminderAt === undefined ? {} : { reminderAt: rawReminderAt as string | null }),
     ...(rawReminderNotified === undefined ? {} : { reminderNotified: rawReminderNotified as boolean }),
     ...(rawReminderRepeat === undefined ? {} : { reminderRepeat: reminderRepeat as Note['reminderRepeat'] }),
+    ...(versions === undefined ? {} : { versions }),
   };
 }
 

@@ -485,3 +485,15 @@ test('invalid reminder timestamps and repeat schemas never commit to local note 
     assert.equal(db.data.size, 0);
   }
 });
+
+test('ordinary note versions persist and reload as bounded local data', async () => {
+  const db = backend();
+  const existing = note('with-history');
+  const history = {
+    title: 'Earlier title', text: 'Earlier body', html: '', category: 'general', tags: [],
+    reminderAt: null, reminderNotified: false, reminderRepeat: null, time: date, savedAt: date,
+  };
+  const stored = { ...existing, versions: [history] };
+  await createNotesStorage(db).save([stored]);
+  assert.deepEqual(await createNotesStorage(db).load(), [stored]);
+});

@@ -1,5 +1,5 @@
-import { initialNotesState, notesReducer, validateDraft } from './notes.ts';
-import type { Note, NotesAction, NotesState } from './notes.ts';
+import { appendNoteVersion, initialNotesState, normalizeCategory, notesReducer, validateDraft } from './notes.ts';
+import type { Note, NoteVersion, NotesAction, NotesState } from './notes.ts';
 
 export const TRASH_RETENTION_DAYS = 15;
 const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -336,6 +336,43 @@ export function createNotesController(storage: NotesStorage) {
     }
   }
 
+  async function restoreVersion(id: string, version: NoteVersion, now: string): Promise<boolean> {
+    if (snapshot.status !== 'ready') return false;
+    const previous = snapshot.state;
+    const target = previous.notes.find(note => note.id === id && (note.deletedAt === null || note.deletedAt === undefined));
+    if (!target) return false;
+    const html = version.html || undefined;
+    const restoredDraft = {
+      title: version.title,
+      text: version.text,
+      category: normalizeCategory(version.category),
+      ...(html === undefined ? {} : { html }),
+      reminderAt: version.reminderAt,
+      reminderNotified: version.reminderNotified,
+      reminderRepeat: version.reminderRepeat,
+    };
+    const invalid = validateDraft(restoredDraft);
+    if (invalid) {
+      publish({ ...snapshot, storageError: `This version could not be restored: ${invalid}` });
+      return false;
+    }
+    const notes = previous.notes.map(note => note.id !== id ? note : {
+      ...note,
+      ...restoredDraft,
+      versions: appendNoteVersion(note.versions, note, now),
+      updatedAt: now,
+    });
+    publish({ ...snapshot, status: 'saving', storageError: null });
+    try {
+      await storage.save(notes);
+      publish({ state: { ...previous, notes, error: null, notice: 'Earlier version restored.' }, status: 'ready', storageError: null });
+      return true;
+    } catch {
+      publish({ state: previous, status: 'ready', storageError: 'Could not restore this version on this device. Your saved note has not been changed.' });
+      return false;
+    }
+  }
+
   async function updateReminderState(updates: readonly { id: string; reminderAt: string | null; reminderNotified: boolean }[]): Promise<boolean> {
     if (snapshot.status !== 'ready' || updates.length === 0) return false;
     const previous = snapshot.state;
@@ -430,6 +467,6 @@ export function createNotesController(storage: NotesStorage) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-    load, refreshAfterPrivateTransfer, dispatch, save, importNotes, updateReminderState, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
+    load, refreshAfterPrivateTransfer, dispatch, save, importNotes, restoreVersion, updateReminderState, updateNoteText, togglePin, setArchived, moveToTrash, restoreFromTrash, permanentlyDelete, duplicateNote, moveNoteToFolder, clearFolder, emptyTrash,
   };
 }

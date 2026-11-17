@@ -120,7 +120,9 @@ test('failed edit retains editing target and original saved metadata until retry
   assert.equal(controller.getSnapshot().state.draft.text, 'Changed');
   fail = false;
   await controller.save(LATER);
-  assert.deepEqual(controller.getSnapshot().state.notes, [{ ...note, text: 'Changed', updatedAt: LATER }]);
+  assert.deepEqual(controller.getSnapshot().state.notes, [{ ...note, text: 'Changed', updatedAt: LATER,
+    versions: [{ title: 'Original', text: 'Body', html: '', category: 'general', tags: [], reminderAt: null,
+      reminderNotified: false, reminderRepeat: null, time: NOW, savedAt: LATER }] }]);
 });
 
 test('invalid save, typing, cancel and selection never write; subscriptions can unsubscribe', async () => {
@@ -253,4 +255,27 @@ test('failed bulk import leaves the existing notes and draft unchanged', async (
   assert.equal(await controller.importNotes([imported]), false);
   assert.deepEqual(controller.getSnapshot().state, before);
   assert.match(controller.getSnapshot().storageError, /No notes were added/);
+});
+
+test('restoreVersion preserves current content in history and saves the restored version locally', async () => {
+  let saved;
+  const controller = createNotesController({
+    async load() { return [note]; },
+    async save(notes) { saved = structuredClone(notes); },
+  });
+  await controller.load();
+  const earlier = {
+    title: 'Earlier title', text: 'Earlier body', html: '', category: 'general', tags: [],
+    reminderAt: null, reminderNotified: false, reminderRepeat: null, time: NOW, savedAt: NOW,
+  };
+
+  assert.equal(await controller.restoreVersion(note.id, earlier, LATER), true);
+  const restored = controller.getSnapshot().state.notes[0];
+  assert.equal(restored.title, 'Earlier title');
+  assert.equal(restored.text, 'Earlier body');
+  assert.equal(restored.updatedAt, LATER);
+  assert.equal(restored.versions.length, 1);
+  assert.equal(restored.versions[0].title, 'Original');
+  assert.equal(restored.versions[0].text, 'Body');
+  assert.deepEqual(saved, [restored]);
 });

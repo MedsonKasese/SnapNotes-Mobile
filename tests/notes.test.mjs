@@ -147,6 +147,8 @@ test('edits are invisible until save; save preserves identity metadata and leave
     title: 'Updated title',
     text: 'Updated body',
     updatedAt: UPDATED_AT,
+    versions: [{ title: 'First', text: 'Original body', html: '', category: 'general', tags: [], reminderAt: null,
+      reminderNotified: false, reminderRepeat: null, time: CREATED_AT, savedAt: UPDATED_AT }],
   });
   assert.equal(updated.notes[0].id, first.id);
   assert.equal(updated.notes[0].createdAt, CREATED_AT);

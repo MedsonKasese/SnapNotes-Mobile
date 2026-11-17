@@ -170,9 +170,11 @@ test('real encryption and vault storage preserve content and unrelated records u
   });
   const key = webcrypto.getRandomValues(new Uint8Array(32));
   const salt = webcrypto.getRandomValues(new Uint8Array(16));
+  const version = { title: 'Earlier private title', text: 'Earlier private body', html: '', category: 'personal', tags: [],
+    reminderAt: null, reminderNotified: false, reminderRepeat: null, time: source.createdAt, savedAt: source.updatedAt };
   const note = {
     ...source, title: 'Unique private title', text: 'Unique private body',
-    html: '<p>Unique private body</p>', category: 'personal', folderId: 'folder-1',
+    html: '<p>Unique private body</p>', category: 'personal', folderId: 'folder-1', versions: [version],
   };
   const unrelated = { ...source, id: 'n2', title: 'Keep ordinary' };
   const existing = {
@@ -208,7 +210,7 @@ test('real encryption and vault storage preserve content and unrelated records u
     title: note.title, text: note.text, html: note.html, category: note.category,
     createdAt: note.createdAt, updatedAt: note.updatedAt,
     pinned: note.pinned, tags: [], time: '', folderId: note.folderId, reminderAt: null,
-    reminderNotified: false, reminderRepeat: null, attachments: [], history: [],
+    reminderNotified: false, reminderRepeat: null, attachments: [], history: [version],
   });
   const persisted = JSON.stringify([...data]);
   assert.ok(!persisted.includes(note.title));

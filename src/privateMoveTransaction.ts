@@ -45,7 +45,7 @@ export async function moveNoteToPrivateTransaction(
     // Abort rather than discard metadata added by future note-model changes.
     const supported = new Set([
       'id', 'title', 'text', 'html', 'category', 'createdAt', 'updatedAt',
-      'pinned', 'archived', 'deletedAt', 'folderId', 'reminderAt', 'reminderNotified', 'reminderRepeat',
+      'pinned', 'archived', 'deletedAt', 'folderId', 'reminderAt', 'reminderNotified', 'reminderRepeat', 'versions',
     ]);
     if (Object.keys(source).some(field => !supported.has(field))) {
       throw new Error('This note contains data that cannot yet be moved safely to Private.');
