@@ -41,10 +41,13 @@ function withSnapNotesWidgetResources(config) {
       const javaDirectory = path.join(androidRoot, 'app/src/main/java', ...packageName.split('.'));
       const layoutDirectory = path.join(androidRoot, 'app/src/main/res/layout');
       const drawableDirectory = path.join(androidRoot, 'app/src/main/res/drawable');
+      const drawableNodpiDirectory = path.join(androidRoot, 'app/src/main/res/drawable-nodpi');
       const xmlDirectory = path.join(androidRoot, 'app/src/main/res/xml');
       const valuesDirectory = path.join(androidRoot, 'app/src/main/res/values');
-      await Promise.all([javaDirectory, layoutDirectory, drawableDirectory, xmlDirectory, valuesDirectory]
+      await Promise.all([javaDirectory, layoutDirectory, drawableDirectory, drawableNodpiDirectory, xmlDirectory, valuesDirectory]
         .map(directory => fs.mkdir(directory, { recursive: true })));
+
+      await fs.copyFile(path.join(next.modRequest.projectRoot, 'assets/widget-logo.png'), path.join(drawableNodpiDirectory, 'snapnotes_new_note_widget_logo.png'));
 
       await fs.writeFile(path.join(javaDirectory, `${RECEIVER_NAME}.kt`), `package ${packageName}
 
@@ -89,25 +92,24 @@ class ${RECEIVER_NAME} : AppWidgetProvider() {
     android:layout_height="match_parent"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
     android:background="@drawable/snapnotes_new_note_widget_background"
     android:contentDescription="@string/snapnotes_new_note_widget_description">
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="+"
-        android:textColor="#3B7F16"
-        android:textSize="30sp"
-        android:textStyle="bold"
-        android:includeFontPadding="false"
-        android:layout_marginEnd="12dp" />
+    <ImageView
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_marginEnd="8dp"
+        android:contentDescription="@null"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter"
+        android:src="@drawable/snapnotes_new_note_widget_logo" />
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="New Note"
         android:textColor="#20351D"
-        android:textSize="16sp"
+        android:textSize="14sp"
         android:textStyle="bold"
         android:includeFontPadding="false" />
 </LinearLayout>
@@ -123,8 +125,8 @@ class ${RECEIVER_NAME} : AppWidgetProvider() {
 
       await fs.writeFile(path.join(xmlDirectory, 'snapnotes_new_note_widget_info.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="144dp"
-    android:minHeight="48dp"
+    android:minWidth="120dp"
+    android:minHeight="40dp"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/snapnotes_new_note_widget"
     android:resizeMode="none"
