@@ -1,3 +1,5 @@
+const withSnapNotesNewNoteWidget = require('./plugins/withSnapNotesNewNoteWidget');
+
 function withGoogleSignInUrlScheme(config) {
   const iosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim();
   if (!iosUrlScheme) return config;
@@ -21,5 +23,5 @@ function withGoogleSignInUrlScheme(config) {
 
 module.exports = ({ config } = {}) => {
   const baseConfig = config ?? require('./app.json').expo;
-  return withGoogleSignInUrlScheme(baseConfig);
+  return withSnapNotesNewNoteWidget(withGoogleSignInUrlScheme(baseConfig));
 };

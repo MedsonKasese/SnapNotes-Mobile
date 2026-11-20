@@ -139,3 +139,15 @@ test('malformed repeating reminder metadata is rejected during PWA import', () =
     reminderRepeat: { frequency: 'daily', interval: 0, timeZone: 'UTC', anchorAt: '2026-10-30T09:00:00.000Z' } };
   assert.throws(() => parsePwaImport(JSON.stringify([bad]), EXPORTED), /repeat schedule/);
 });
+
+test('edit history round-trips through the local PWA-compatible JSON transfer', () => {
+  const version = {
+    title: 'Earlier title', text: 'Earlier body', html: '', category: 'ideas', tags: [],
+    reminderAt: null, reminderNotified: false, reminderRepeat: null, time: CREATED, savedAt: UPDATED,
+  };
+  const withHistory = { ...note, versions: [version] };
+  const payload = createPwaExportPayload([withHistory], [], EXPORTED);
+  assert.deepEqual(payload.notes[0].versions, [version]);
+  const imported = parsePwaImport(JSON.stringify(payload), EXPORTED);
+  assert.deepEqual(imported.notes[0].versions, [version]);
+});

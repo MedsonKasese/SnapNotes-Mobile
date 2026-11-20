@@ -11,7 +11,7 @@ import * as reminderRecurrence from '../src/reminders/recurrence.ts';
 const projectRoot = new URL('../', import.meta.url);
 
 async function makeHarness(options = {}) {
-  const { beforeDerive, deriveHook, encryptHook } = options;
+  const { beforeDerive, deriveHook, encryptHook, failPrivateNoteReaderLoad } = options;
   const decoder = Object.hasOwn(options, 'decoder') ? options.decoder : TextDecoder;
   const context = vm.createContext({ TextEncoder, TextDecoder: decoder, Uint8Array, ArrayBuffer, console });
   const cryptoSource = await readFile(new URL('src/privateCrypto.ts', projectRoot), 'utf8');
@@ -73,7 +73,10 @@ async function makeHarness(options = {}) {
     if (specifier === './privateCrypto.ts') return cryptoAdapter;
     if (specifier === './privateVaultStorage.ts') return storageExports;
     if (specifier === './privateSharedVaultStorage.ts') return sharedVaultExports;
-    if (specifier === './privateNoteReader.ts') return noteReaderExports;
+    if (specifier === './privateNoteReader.ts') {
+      if (failPrivateNoteReaderLoad) throw new Error('simulated Metro reader load failure');
+      return noteReaderExports;
+    }
     throw new Error(`Unexpected access dependency: ${specifier}`);
   });
   Object.assign(privateAccessExports, accessExports);
@@ -385,7 +388,11 @@ test('unlocked session returns its live key and decrypts private previews withou
   const backend = memoryBackend();
   const harness = await makeHarness();
   const access = harness.createAccess(backend);
-  await access.setup(password, password);
+  const setupSession = await access.setup(password, password);
+  assert.deepEqual(JSON.parse(JSON.stringify(setupSession.notes)), []);
+  assert.ok(setupSession.key);
+  assert.equal(setupSession.key.extractable, false, 'setup keeps its authenticated key non-exportable');
+  assert.equal(setupSession.salt.length, 16);
   const initial = await access.readUnlockedSession(password);
   assert.deepEqual(JSON.parse(JSON.stringify(initial.notes)), []);
   assert.ok(initial.key);
@@ -471,4 +478,24 @@ test('biometric key enrollment is password-verified and the recovered key must a
   assert.equal(backend.writes.length, writesBefore, 'failed biometric verification is read-only');
   protectedKey.fill(0);
   wrongKey.fill(0);
+});
+
+test('private-reader load failures keep password and biometric unlock fail-closed and read-only', async () => {
+  const backend = memoryBackend();
+  const setupHarness = await makeHarness();
+  const setupSession = await setupHarness.createAccess(backend).setup(password, password);
+  const beforeUnlock = new Map(backend.values);
+  const failingAccess = (await makeHarness({ failPrivateNoteReaderLoad: true })).createAccess(backend);
+
+  await assert.rejects(failingAccess.readUnlockedSession(password), error => {
+    assert.match(error.message, /\[PV-READER\]/);
+    assert.equal(error.cause, undefined);
+    return true;
+  });
+  await assert.rejects(failingAccess.readUnlockedSessionWithKey(setupSession.key), error => {
+    assert.match(error.message, /\[PV-READER\]/);
+    assert.equal(error.cause, undefined);
+    return true;
+  });
+  assert.deepEqual(backend.values, beforeUnlock, 'reader-load failures must not write to the encrypted vault');
 });

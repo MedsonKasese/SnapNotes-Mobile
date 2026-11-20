@@ -320,7 +320,8 @@ export function PrivateNotesScreen({ onBack, onRestored, reminderTarget = null, 
       let unlockedNotes: PrivateNotePreview[] = [];
       let unlockedSession: AuthenticatedPrivateSession | null = null;
       if (phase === 'setup') {
-        await access.setup(password, confirmation);
+        unlockedSession = await access.setup(password, confirmation);
+        unlockedNotes = unlockedSession.notes;
       } else {
         unlockedSession = await access.readUnlockedSession(password);
         unlockedNotes = unlockedSession.notes;
@@ -730,7 +731,7 @@ export function PrivateNotesScreen({ onBack, onRestored, reminderTarget = null, 
               accessibilityHint={passwordVisible ? 'Hides the password on screen' : 'Shows the password on screen'}
               disabled={busy} hitSlop={8} style={styles.visibilityButton}
               onPress={() => setPasswordVisible(visible => !visible)}>
-              <MaterialCommunityIcons name={passwordVisible ? 'eye-off' : 'eye'} size={22} color="#3b7f16" />
+              <FontAwesome name={passwordVisible ? 'eye-slash' : 'eye'} size={22} color="#3b7f16" accessible={false} />
             </Pressable>
           </View>
           {phase === 'setup' && (
@@ -743,7 +744,7 @@ export function PrivateNotesScreen({ onBack, onRestored, reminderTarget = null, 
                 accessibilityHint={confirmationVisible ? 'Hides the confirmation password on screen' : 'Shows the confirmation password on screen'}
                 disabled={busy} hitSlop={8} style={styles.visibilityButton}
                 onPress={() => setConfirmationVisible(visible => !visible)}>
-                <MaterialCommunityIcons name={confirmationVisible ? 'eye-off' : 'eye'} size={22} color="#3b7f16" />
+                <FontAwesome name={confirmationVisible ? 'eye-slash' : 'eye'} size={22} color="#3b7f16" accessible={false} />
               </Pressable>
             </View>
           )}

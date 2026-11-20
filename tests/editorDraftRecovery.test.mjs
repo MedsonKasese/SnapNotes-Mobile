@@ -18,25 +18,31 @@ test('saved notes load successfully before an editor draft is restored', () => {
 });
 
 test('startup restores React state only after notes loading completes', async () => {
-  const effect = source.match(/useEffect\(\(\) => \{\s*\/\/ Restore React state from the storage completion callback, not the effect body\.\s*([\s\S]*?)\s*\}, \[controller, restoreEditorDraft\]\);/);
+  const effect = source.match(/useEffect\(\(\) => \{\s*\/\/ Restore React state from the storage completion callback, not the effect body\.\s*([\s\S]*?)\s*\}, \[controller, launchPendingWidgetNewNoteIfReady, restoreEditorDraft\]\);/);
   assert.ok(effect, 'startup effect must subscribe to notes-load completion');
   let finishLoad;
   const loading = new Promise(resolve => { finishLoad = resolve; });
   let loads = 0;
   let restores = 0;
+  let widgetChecks = 0;
+  const draftRecoveryReadyRef = { current: false };
   const controller = { load() { loads += 1; return loading; } };
-  const runEffect = new Function('controller', 'restoreEditorDraft', effect[1]);
+  const runEffect = new Function('controller', 'restoreEditorDraft', 'draftRecoveryReadyRef', 'launchPendingWidgetNewNoteIfReady', effect[1]);
 
-  runEffect(controller, () => { restores += 1; });
+  runEffect(controller, () => { restores += 1; }, draftRecoveryReadyRef, () => { widgetChecks += 1; });
   assert.equal(loads, 1);
   assert.equal(restores, 0, 'restoration must not run synchronously in the effect');
   finishLoad();
   await loading;
+  await Promise.resolve();
+  await Promise.resolve();
   assert.equal(restores, 1);
+  assert.equal(draftRecoveryReadyRef.current, true);
+  assert.equal(widgetChecks, 1);
 });
 
 test('retry loading notes also waits for completion before restoring the draft', () => {
-  assert.match(source, /label="Retry loading notes" onPress=\{\(\) => \{ void controller\.load\(\)\.then\(restoreEditorDraft\); \}\}/);
+  assert.match(source, /label="Retry loading notes" onPress=\{\(\) => \{ void controller\.load\(\)\.then\(restoreEditorDraft\)\.finally\(\(\) => \{[\s\S]*?draftRecoveryReadyRef\.current = true;[\s\S]*?launchPendingWidgetNewNoteIfReady\(\);/);
 });
 
 test('draft writes are debounced and queued to prevent stale writes overtaking newer state', () => {

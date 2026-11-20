@@ -24,7 +24,7 @@ export function buildMobilePrivatePayload(note: Note) {
     reminderRepeat: note.reminderRepeat ?? null,
     ...(note.reminderAt ? { reminderScheduleKey: createOpaqueReminderKey() } : {}),
     attachments: [],
-    history: [],
+    history: note.versions ?? [],
   };
 }
 

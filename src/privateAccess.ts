@@ -58,6 +58,18 @@ async function verifyPassword(password: string, privateData: PrivateCipherRecord
   return key;
 }
 
+function loadPrivateNoteReader(): typeof import('./privateNoteReader.ts') {
+  try {
+    // Keep the module lazy, but use a literal Metro-resolvable path rather than an async chunk.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Metro needs a literal lazy module path here.
+    const reader = require('./privateNoteReader.ts') as typeof import('./privateNoteReader.ts');
+    if (typeof reader.readPrivateNotes !== 'function') throw new Error('Reader export is unavailable.');
+    return reader;
+  } catch {
+    throw new Error('This build could not load the encrypted private-note reader. No changes were made. [PV-READER]');
+  }
+}
+
 export function createPrivateAccess(backend: Backend) {
   const vault = createPrivateSharedVaultStorage(backend);
   async function readUnlockedSession(password: string): Promise<AuthenticatedPrivateSession> {
@@ -66,7 +78,7 @@ export function createPrivateAccess(backend: Backend) {
     if (!verifier) throw new Error('Private vault has no password verifier.');
     const key = await verifyPassword(password, verifier.privateData);
     const salt = privateSaltFromRecord(verifier.privateData);
-    const { readPrivateNotes } = await import('./privateNoteReader.ts');
+    const { readPrivateNotes } = loadPrivateNoteReader();
     return { notes: await readPrivateNotes(entries, key), key, salt };
   }
   async function readUnlockedSessionWithKey(key: Awaited<ReturnType<typeof derivePrivateKey>>): Promise<AuthenticatedPrivateSession> {
@@ -80,7 +92,7 @@ export function createPrivateAccess(backend: Backend) {
     if (!verifier) throw new Error('Private vault has no password verifier.');
     await verifyVaultKey(verifier.privateData, key);
     const salt = privateSaltFromRecord(verifier.privateData);
-    const { readPrivateNotes } = await import('./privateNoteReader.ts');
+    const { readPrivateNotes } = loadPrivateNoteReader();
     return { notes: await readPrivateNotes(entries, key), key, salt };
   }
   return {
@@ -92,15 +104,17 @@ export function createPrivateAccess(backend: Backend) {
       }
       return 'locked';
     },
-    async setup(password: string, confirmation: string): Promise<void> {
+    async setup(password: string, confirmation: string): Promise<AuthenticatedPrivateSession> {
       const error = validatePrivatePassword(password, confirmation);
       if (error) throw new Error(error);
       // Never overwrite an existing vault or silently reset a forgotten password.
       if ((await vault.load()).length !== 0) throw new Error('Private vault already exists.');
       let privateData: PrivateCipherRecord;
+      let salt: Uint8Array;
+      let key: Awaited<ReturnType<typeof derivePrivateKey>>;
       try {
-        const salt = await generatePrivateSalt();
-        const key = await derivePrivateKey(password, salt);
+        salt = await generatePrivateSalt();
+        key = await derivePrivateKey(password, salt);
         // Exercise the serialized record and a newly derived key, rather than a
         // same-key round trip. Broken crypto/runtime setups must not be saved.
         privateData = JSON.parse(JSON.stringify(await encryptPrivatePayload({ verifier: VERIFIER_TEXT }, key, salt)));
@@ -114,6 +128,8 @@ export function createPrivateAccess(backend: Backend) {
       if (!await vault.initializeIfEmpty([entry])) {
         throw new Error('Private vault already exists.');
       }
+      // Keep setup's existing immediate-open behavior, but only with a live authenticated key.
+      return { key, salt, notes: [] };
     },
     async unlock(password: string): Promise<void> {
       let entries: PrivateVaultEntry[];

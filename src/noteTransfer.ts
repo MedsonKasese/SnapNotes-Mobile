@@ -1,4 +1,4 @@
-import { MAX_NOTE_HTML_LENGTH, NOTE_CATEGORIES, validateDraft, type Note, type NoteCategory } from './notes.ts';
+import { MAX_NOTE_HTML_LENGTH, MAX_NOTE_VERSIONS, NOTE_CATEGORIES, validateDraft, type Note, type NoteCategory, type NoteVersion } from './notes.ts';
 import { noteHtmlToText, sanitizeNoteHtml } from './noteFormatting.ts';
 import { MAX_FOLDERS, MAX_FOLDER_NAME, makeFolderId, normalizeFolderColor, normalizeFolderIcon, type Folder } from './folders.ts';
 import { normalizeReminderRepeat, type ReminderRepeat } from './reminders/recurrence.ts';
@@ -52,6 +52,49 @@ function parseFolders(value: unknown, now: string): Folder[] {
   return folders;
 }
 
+export function parseNoteVersions(value: unknown, now: string): NoteVersion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const versions: NoteVersion[] = [];
+  for (const raw of value.slice(-MAX_NOTE_VERSIONS)) {
+    if (!isRecord(raw) || typeof raw.title !== 'string' || typeof raw.text !== 'string') continue;
+    const title = raw.title.trim();
+    const text = raw.text.replace(/\r/g, '').trim();
+    let html = '';
+    if (typeof raw.html === 'string' && raw.html.length <= MAX_NOTE_HTML_LENGTH) {
+      const safeHtml = sanitizeNoteHtml(raw.html);
+      if (safeHtml && noteHtmlToText(safeHtml).trim() === text) html = safeHtml;
+    }
+    if (validateDraft({ title, text, ...(html ? { html } : {}) })) continue;
+    const rawCategory = raw.category;
+    const category: NoteCategory = typeof rawCategory === 'string' && (NOTE_CATEGORIES as readonly string[]).includes(rawCategory)
+      ? rawCategory as NoteCategory
+      : 'general';
+    const reminderAt = validTimestamp(raw.reminderAt) ? raw.reminderAt : null;
+    let reminderRepeat: ReminderRepeat | null = null;
+    if (raw.reminderRepeat != null && reminderAt) {
+      reminderRepeat = normalizeReminderRepeat(raw.reminderRepeat, reminderAt);
+      if (!reminderRepeat) continue;
+    }
+    const tags = Array.isArray(raw.tags)
+      ? raw.tags.filter((tag): tag is string => typeof tag === 'string').slice(0, 100)
+      : [];
+    const time = typeof raw.time === 'string' && raw.time.length <= 80 ? raw.time : '';
+    versions.push({
+      title,
+      text,
+      html,
+      category,
+      tags,
+      reminderAt,
+      reminderNotified: Boolean(raw.reminderNotified),
+      reminderRepeat,
+      time,
+      savedAt: normalizedTimestamp(raw.savedAt, now),
+    });
+  }
+  return versions;
+}
+
 /** Build the same version-1 JSON envelope as the PWA, but only from ordinary notes.
  * Private-vault records and local attachment bytes/paths are deliberately absent.
  */
@@ -69,6 +112,7 @@ export function createPwaExportPayload(notes: readonly Note[], folders: readonly
     ...(note.reminderAt === undefined ? {} : { reminderAt: note.reminderAt }),
     ...(note.reminderNotified === undefined ? {} : { reminderNotified: note.reminderNotified }),
     ...(note.reminderRepeat === undefined ? {} : { reminderRepeat: note.reminderRepeat }),
+    ...(note.versions === undefined ? {} : { versions: note.versions }),
     createdAt: note.createdAt,
     updatedAt: note.updatedAt,
   }));
@@ -158,6 +202,7 @@ export function parsePwaImport(json: string, now: string): ParsedPwaImport {
     const category: NoteCategory = typeof rawCategory === 'string' && (NOTE_CATEGORIES as readonly string[]).includes(rawCategory)
       ? rawCategory as NoteCategory
       : 'general';
+    const versions = parseNoteVersions(raw.versions, now);
     notes.push({
       ...draft,
       category,
@@ -170,6 +215,7 @@ export function parsePwaImport(json: string, now: string): ParsedPwaImport {
       ...(reminderAt === undefined ? {} : { reminderAt }),
       ...(typeof raw.reminderNotified === 'boolean' ? { reminderNotified: raw.reminderNotified } : {}),
       ...(raw.reminderRepeat === undefined ? {} : { reminderRepeat }),
+      ...(versions === undefined ? {} : { versions }),
     });
   }
 

@@ -4,6 +4,7 @@ import type { PrivateVaultEntry } from './privateVaultStorage.ts';
 import { decryptPrivatePayload } from './privateCrypto.ts';
 import { PRIVATE_VERIFIER_ID } from './privateAccess.ts';
 import { isValidReminderAt, normalizeReminderRepeat } from './reminders/recurrence.ts';
+import { parseNoteVersions } from './noteTransfer.ts';
 
 export type PrivateRestoreDependencies = {
   loadNotes(): Promise<Note[]>;
@@ -46,7 +47,8 @@ function matchesRestoredNote(actual: Note | undefined, expected: Note): boolean 
     (actual.reminderAt ?? null) === (expected.reminderAt ?? null) &&
     Boolean(actual.reminderNotified) === Boolean(expected.reminderNotified) &&
     JSON.stringify(actual.reminderRepeat ?? null) === JSON.stringify(expected.reminderRepeat ?? null) &&
-    (actual.folderId ?? null) === (expected.folderId ?? null);
+    (actual.folderId ?? null) === (expected.folderId ?? null) &&
+    JSON.stringify(actual.versions ?? []) === JSON.stringify(expected.versions ?? []);
 }
 
 // Ordinary-first: verify the restored copy before removing ciphertext.
@@ -81,6 +83,7 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
       if (reminderRepeat === null) throw Error('Unsupported private reminder data.');
     }
     const now = deps.now?.() ?? new Date().toISOString();
+    const versions = parseNoteVersions(data.history, now);
     const note: Note = { id, title: data.title, text: data.text, html: data.html,
       category: data.category as Note['category'],
       createdAt: typeof data.createdAt === 'string' ? data.createdAt : now,
@@ -90,6 +93,7 @@ export async function restorePrivateNoteTransaction(id: string, deps: PrivateRes
       ...(data.reminderAt === undefined ? {} : { reminderAt: data.reminderAt as string | null }),
       ...(data.reminderNotified === undefined ? {} : { reminderNotified: data.reminderNotified as boolean }),
       ...(data.reminderRepeat === undefined ? {} : { reminderRepeat }),
+      ...(versions === undefined ? {} : { versions }),
     };
     try {
       await deps.saveNotes([...ordinary, note]);

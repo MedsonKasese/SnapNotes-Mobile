@@ -36,7 +36,7 @@ function find(tree, predicate) {
 const button = (app, label) => find(app.render(), item => item.type === 'Pressable' && text(item) === label);
 const visibilityButton = (app, label) => find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === label);
 const lockButton = app => find(app.render(), item => item.type === 'Pressable' && item.props.accessibilityLabel === 'Lock Private Notes');
-const icon = (app, name) => find(app.render(), item => item.type === 'MaterialCommunityIcons' && item.props.name === name);
+const fontAwesomeIcon = (app, name) => find(app.render(), item => item.type === 'FontAwesome' && item.props.name === name);
 const input = (app, label = 'Private Notes password') => find(app.render(), item => item.props.accessibilityLabel === label);
 
 // Exercise the actual JSX, hooks and async handlers. Native rendering and the
@@ -107,7 +107,11 @@ async function screen({
   };
   const access = {
     status,
-    setup(...args) { calls.push(['setup', ...args]); return setup(...args); },
+    async setup(...args) {
+      calls.push(['setup', ...args]);
+      await setup(...args);
+      return { notes: [], key: unlockedKey, salt: new Uint8Array([1]) };
+    },
     readUnlockedSession(...args) {
       calls.push(['unlock', ...args]);
       return Promise.resolve(unlock(...args)).then(notes => {
@@ -397,12 +401,13 @@ test('password visibility controls start hidden, toggle independently, and prese
   assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
   assert.equal(visibilityButton(app, 'Show Private Notes password').props.accessibilityRole, 'button');
   assert.equal(visibilityButton(app, 'Show confirmation password').props.accessibilityRole, 'button');
+  assert.equal(fontAwesomeIcon(app, 'eye').props.size, 22);
 
   visibilityButton(app, 'Show Private Notes password').props.onPress();
   assert.equal(input(app).props.secureTextEntry, false);
   assert.equal(input(app).props.value, PASSWORD);
   assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, true);
-  assert.equal(icon(app, 'eye-off').props.size, 22);
+  assert.equal(fontAwesomeIcon(app, 'eye-slash').props.size, 22);
 
   visibilityButton(app, 'Show confirmation password').props.onPress();
   assert.equal(input(app, 'Confirm Private Notes password').props.secureTextEntry, false);

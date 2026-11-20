@@ -194,12 +194,16 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
           return { remove() { backHandlerListeners.delete(callback); } };
         } },
         Keyboard: { dismiss() {} }, Platform: { OS: 'android' },
+        Linking: { getInitialURL: async () => null, addEventListener: () => ({ remove() {} }) },
+        Share: { share: async () => ({ action: 'dismissedAction' }) },
         StyleSheet: { create: styles => styles, absoluteFill: { position: 'absolute' } },
       };
       if (name === 'react-native-safe-area-context') return { SafeAreaProvider: 'SafeAreaProvider', SafeAreaView: 'SafeAreaView' };
       if (name === 'expo-document-picker') return { getDocumentAsync: async () => ({ canceled: true, assets: null }) };
       if (name === 'expo-file-system') return { File: class File {}, Paths: { cache: 'cache' } };
+      if (name === 'expo-clipboard') return { setStringAsync: async () => {} };
       if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
+      if (name === 'react-native-view-shot') return { captureRef: async () => 'file:///share.png' };
       if (name === '../noteActionsMenu') return { getNoteActionsMenuLayout };
       if (name === 'react/jsx-runtime') return require(name);
       // Native font loading is outside this deterministic recovery harness.
@@ -217,6 +221,8 @@ function workspace({ initialNotes = [], reads = [], checklistSaves = [], content
       if (name === '../deviceNotesStorage') return { deviceNotesStorage: {} };
       if (name === '../noteSearch') return { searchNotes };
       if (name === '../noteTransfer') return noteTransfer;
+      if (name === '../noteSharing') return { buildNoteShareText: () => '' };
+      if (name === '../widgetNavigation') return { isNewNoteWidgetUrl: () => false };
       if (name === '../noteFormatting') return { noteHtmlToText, plainTextToHtml, sanitizeNoteHtml,
         getNoteHtmlLines: html => [], normalizeNoteLink: value => value, updateChecklistHtml: (html, _line, checked) => html.replace(checked ? '☐' : '☑', checked ? '☑' : '☐') };
       if (name === './drawerAvatar') return drawerAvatar;
