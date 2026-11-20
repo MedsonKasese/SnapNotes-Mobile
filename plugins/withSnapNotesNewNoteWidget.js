@@ -41,13 +41,17 @@ function withSnapNotesWidgetResources(config) {
       const javaDirectory = path.join(androidRoot, 'app/src/main/java', ...packageName.split('.'));
       const layoutDirectory = path.join(androidRoot, 'app/src/main/res/layout');
       const drawableDirectory = path.join(androidRoot, 'app/src/main/res/drawable');
-      const drawableNodpiDirectory = path.join(androidRoot, 'app/src/main/res/drawable-nodpi');
       const xmlDirectory = path.join(androidRoot, 'app/src/main/res/xml');
       const valuesDirectory = path.join(androidRoot, 'app/src/main/res/values');
-      await Promise.all([javaDirectory, layoutDirectory, drawableDirectory, drawableNodpiDirectory, xmlDirectory, valuesDirectory]
-        .map(directory => fs.mkdir(directory, { recursive: true })));
-
-      await fs.copyFile(path.join(next.modRequest.projectRoot, 'assets/widget-logo.png'), path.join(drawableNodpiDirectory, 'snapnotes_new_note_widget_logo.png'));
+      const nightValuesDirectory = path.join(androidRoot, 'app/src/main/res/values-night');
+      await Promise.all([
+        javaDirectory,
+        layoutDirectory,
+        drawableDirectory,
+        xmlDirectory,
+        valuesDirectory,
+        nightValuesDirectory,
+      ].map(directory => fs.mkdir(directory, { recursive: true })));
 
       await fs.writeFile(path.join(javaDirectory, `${RECEIVER_NAME}.kt`), `package ${packageName}
 
@@ -85,6 +89,25 @@ class ${RECEIVER_NAME} : AppWidgetProvider() {
 }
 `);
 
+      await fs.writeFile(path.join(drawableDirectory, 'snapnotes_new_note_widget_icon.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/snapnotes_widget_icon"
+        android:pathData="M14,2H6C4.9,2 4,2.9 4,4v16c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V8L14,2zM14,4.5L17.5,8H14V4.5zM13,10v3h3v2h-3v3h-2v-3H8v-2h3v-3h2z" />
+</vector>
+`);
+
+      await fs.writeFile(path.join(drawableDirectory, 'snapnotes_new_note_widget_icon_surface.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/snapnotes_widget_icon_surface" />
+    <corners android:radius="11dp" />
+</shape>
+`);
+
       await fs.writeFile(path.join(layoutDirectory, 'snapnotes_new_note_widget.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/snapnotes_new_note_widget"
@@ -92,51 +115,83 @@ class ${RECEIVER_NAME} : AppWidgetProvider() {
     android:layout_height="match_parent"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="10dp"
-    android:paddingEnd="10dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="16dp"
     android:background="@drawable/snapnotes_new_note_widget_background"
-    android:contentDescription="@string/snapnotes_new_note_widget_description">
-    <ImageView
-        android:layout_width="28dp"
-        android:layout_height="28dp"
-        android:layout_marginEnd="8dp"
-        android:contentDescription="@null"
-        android:importantForAccessibility="no"
-        android:scaleType="fitCenter"
-        android:src="@drawable/snapnotes_new_note_widget_logo" />
+    android:contentDescription="@string/snapnotes_new_note_widget_description"
+    android:clickable="true"
+    android:focusable="true">
+    <FrameLayout
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_marginEnd="11dp"
+        android:background="@drawable/snapnotes_new_note_widget_icon_surface">
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:importantForAccessibility="no"
+            android:src="@drawable/snapnotes_new_note_widget_icon" />
+    </FrameLayout>
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="New Note"
-        android:textColor="#20351D"
-        android:textSize="14sp"
+        android:text="@string/snapnotes_new_note_widget_title"
+        android:textColor="@color/snapnotes_widget_text"
+        android:textSize="15sp"
         android:textStyle="bold"
-        android:includeFontPadding="false" />
+        android:includeFontPadding="false"
+        android:maxLines="1" />
 </LinearLayout>
 `);
 
       await fs.writeFile(path.join(drawableDirectory, 'snapnotes_new_note_widget_background.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#FFFFFF" />
-    <corners android:radius="16dp" />
-    <stroke android:width="1dp" android:color="#E2E8DE" />
+    <solid android:color="@color/snapnotes_widget_background" />
+    <corners android:radius="18dp" />
+    <stroke android:width="1dp" android:color="@color/snapnotes_widget_border" />
 </shape>
 `);
 
       await fs.writeFile(path.join(xmlDirectory, 'snapnotes_new_note_widget_info.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="120dp"
-    android:minHeight="40dp"
+    android:minWidth="150dp"
+    android:minHeight="48dp"
+    android:minResizeWidth="140dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/snapnotes_new_note_widget"
-    android:resizeMode="none"
+    android:resizeMode="horizontal"
     android:widgetCategory="home_screen"
     android:description="@string/snapnotes_new_note_widget_description" />
 `);
 
       await fs.writeFile(path.join(valuesDirectory, 'snapnotes_new_note_widget_strings.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="snapnotes_new_note_widget_title">New note</string>
     <string name="snapnotes_new_note_widget_description">Quickly open a blank local note in SnapNotes Mobile.</string>
+</resources>
+`);
+
+      await fs.writeFile(path.join(valuesDirectory, 'snapnotes_new_note_widget_colors.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="snapnotes_widget_background">#EAF4E9</color>
+    <color name="snapnotes_widget_border">#D4E5D2</color>
+    <color name="snapnotes_widget_icon_surface">#D5EAD4</color>
+    <color name="snapnotes_widget_icon">#247A3B</color>
+    <color name="snapnotes_widget_text">#173B22</color>
+</resources>
+`);
+
+      await fs.writeFile(path.join(nightValuesDirectory, 'snapnotes_new_note_widget_colors.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="snapnotes_widget_background">#1F3024</color>
+    <color name="snapnotes_widget_border">#3A5941</color>
+    <color name="snapnotes_widget_icon_surface">#314D37</color>
+    <color name="snapnotes_widget_icon">#A7D9A9</color>
+    <color name="snapnotes_widget_text">#F0F7F0</color>
 </resources>
 `);
       return next;
